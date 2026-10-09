@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# Training scratch. Released weights get copied into ripeness/models/ on purpose.
+runs/
+outputs/
+ripeness_runs/
+wandb/
+
+# Built from raw/ + labels/ by ripeness/scripts/build_split.py, so it's never committed
+ripeness/data/yolo/
+
+# Public datasets: download locally, never commit (two are CC BY-NC-SA)
+ripeness/data/public/*
+!ripeness/data/public/README.md
+
+# Large binaries that belong on the HF Hub, not git
+*.mp4
+*.mkv
+*.safetensors
+*.ckpt
+*.parquet
+
+# Local per-run artefacts
+harvest/gate_frames/
+.DS_Store

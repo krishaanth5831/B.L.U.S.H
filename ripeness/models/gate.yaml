@@ -1,0 +1,5 @@
+# The released ripeness gate. gate/pick_target.py reads this file.
+# Fill in only from a measured result (a row in results.csv), never by eye.
+weights: null     # e.g. ripeness/models/ripeness_v1.pt
+t_ripe: null      # lowest threshold meeting the precision target on the FROZEN test set (eval_threshold.py)
+edge_px: 4        # boxes within this many px of the frame edge are skipped (fruit partly out of view). Vault starting value.

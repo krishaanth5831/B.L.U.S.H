@@ -1,0 +1,19 @@
+# Which own capture sessions go where. Read by scripts/build_split.py.
+#
+# ⚠️ Split by SESSION, never by frame: frames from one session are near-duplicates,
+#    and a random split leaks test copies into training and inflates every score.
+# ⚠️ FREEZE `test` once it's set. Never train or tune on it. If you must change it,
+#    note why and the date here, because every earlier result stops being comparable.
+# Every own session not listed under val/test goes to train.
+
+test: []        # one or two whole sessions, own frames only, e.g. [s20261012_1430]
+val: []         # e.g. [s20261013_1100]
+
+# Public sets used for train/val (never test: they say nothing about our camera).
+# Each is a folder under data/public/ in YOLO layout (images/, labels/), already remapped
+# to {0: unripe, 1: turning, 2: ripe}.
+# ⚠️ laboro + tomatod are CC BY-NC-SA (non-commercial). Drop them here to build a model
+#    that can ship in a product.
+public:
+  laboro_yolo: {val_fraction: 0.1, commercial_ok: false}
+  mendeley_yolo: {val_fraction: 0.1, commercial_ok: true}

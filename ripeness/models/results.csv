@@ -1,0 +1,1 @@
+date,model,weights_file,train_sessions,test_sessions,public_sets,commercial_ok,precision_target,t_ripe,precision,recall,map50,notes

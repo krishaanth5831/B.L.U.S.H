@@ -1,0 +1,13 @@
+# Conda env for the ripeness gate. Kept separate from `lerobot` because the two pin
+# different torch/opencv versions.
+#   conda env create -f envs/ripeness.yml && conda activate ripeness
+name: ripeness
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - ultralytics      # YOLO11 train/val/predict; pulls torch + opencv
+      - pyyaml           # splits.yaml in build_split.py
+      - label-studio     # labelling; export in YOLO format
