@@ -27,3 +27,8 @@ ripeness/data/public/*
 # Local per-run artefacts
 harvest/gate_frames/
 .DS_Store
+
+# Base/pretrained weights Ultralytics downloads into the cwd. Only released weights in
+# ripeness/models/ are committed.
+*.pt
+!ripeness/models/*.pt

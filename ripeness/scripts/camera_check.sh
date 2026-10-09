@@ -6,16 +6,21 @@
 set -euo pipefail
 source "$(dirname "$0")/../../config/hardware.env"
 
-# Values from the vault's ripeness note, step 2. ⚠️ Control names and values differ per camera.
-# Use what --list-ctrls prints, then write the final numbers here AND in ripeness/data/own/README.md.
-WB_TEMP=4600        # K, unverified starting point
-EXPOSURE=150        # exposure_time_absolute units (100 µs on most UVC cams), unverified
-AUTO_EXPOSURE_MANUAL=1   # 1 = manual on most UVC cams
+# Control names checked on the InnoMaker U20CAM-1080P, 2026-10-09 (v4l2-ctl --list-ctrls-menus).
+# Write the final numbers here AND in ripeness/data/own/README.md once the gripper LED is fitted,
+# because that light, not the room, sets the exposure.
+WB_TEMP=4600        # K. Camera default; range 2800-6500. Starting point, not tuned.
+EXPOSURE=150        # exposure_time_absolute, range 1-5000. In room light 150 gave mean brightness 98/255
+                    # vs 112 on auto (2026-10-09), so it's a sane start. 300 -> 139, 600 -> 178.
+AUTO_EXPOSURE_MANUAL=1   # this camera's menu: 1 = Manual, 3 = Aperture Priority (its default)
 
 if [[ "${1:-}" == "--lock" ]]; then
   v4l2-ctl -d /dev/video"$CLAW_CAM" -c white_balance_automatic=0 -c white_balance_temperature=$WB_TEMP
   v4l2-ctl -d /dev/video"$CLAW_CAM" -c auto_exposure=$AUTO_EXPOSURE_MANUAL -c exposure_time_absolute=$EXPOSURE
-  v4l2-ctl -d /dev/video"$CLAW_CAM" --get-ctrl=white_balance_automatic,auto_exposure
+  # ⚠️ Ships with exposure_dynamic_framerate=1, which lets fps drop in dim light. Pin it to 30 fps.
+  v4l2-ctl -d /dev/video"$CLAW_CAM" -c exposure_dynamic_framerate=0
+  v4l2-ctl -d /dev/video"$CLAW_CAM" --get-ctrl=white_balance_automatic,auto_exposure,exposure_dynamic_framerate
+  # ⚠️ UVC cameras usually reset these on replug (not yet checked on this one). Re-run --lock every session.
   exit 0
 fi
 

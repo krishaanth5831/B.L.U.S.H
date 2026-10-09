@@ -54,7 +54,14 @@ for name, opts in (splits.get("public") or {}).items():
         print(f"skip public set {name}: {folder.relative_to(ROOT)} not downloaded")
         continue
     for p in images(folder):
-        side = "val" if is_val(p, opts.get("val_fraction", 0.1)) else "train"
+        # A set that ships its own split (images/train, images/val) keeps it: its frames often come in
+        # near-duplicate runs that a per-file hash split would leak across. Otherwise split by hash.
+        if "/images/val/" in p.as_posix():
+            side = "val"
+        elif "/images/train/" in p.as_posix():
+            side = "train"
+        else:
+            side = "val" if is_val(p, opts.get("val_fraction", 0.1)) else "train"
         lists[side].append(p)
         lists[f"{side}_public"].append(p)
 

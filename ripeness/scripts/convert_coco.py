@@ -12,4 +12,5 @@ import sys
 from ultralytics.data.converter import convert_coco
 
 convert_coco(labels_dir=sys.argv[1], save_dir=sys.argv[2],
-             use_segments=False)   # boxes only; the gate doesn't need masks
+             use_segments=False,   # boxes only; the gate doesn't need masks
+             cls91to80=False)      # ⚠️ default True remaps ids as if COCO-91 and scrambles any other dataset
