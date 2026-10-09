@@ -4,8 +4,11 @@
 #   ripeness/scripts/train.sh pretrain           public data only
 #   ripeness/scripts/train.sh finetune v1        own + public, starting from the pretrain weights
 set -euo pipefail
-YOLO_DIR=ripeness/data/yolo
-RUNS=runs/ripeness          # gitignored. Release a model by copying best.pt into ripeness/models/
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+YOLO_DIR=$REPO/ripeness/data/yolo
+RUNS=$REPO/runs/ripeness    # gitignored. Release a model by copying best.pt into ripeness/models/
+# ⚠️ RUNS must be absolute: Ultralytics puts a RELATIVE project under its global runs_dir setting
+#    (here a stale ~/Desktop/personal_projects/vinea/runs), not under the cwd.
 
 BATCH=${BATCH:-16}          # ⚠️ the 6 GB laptop GPU may OOM at 16. BATCH=8 ripeness/scripts/train.sh ...
 IMGSZ=640                   # matches the 640x480 camera, so going higher buys nothing
