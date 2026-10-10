@@ -1,0 +1,19 @@
+part,qty,size_mm,what,sheets
+EF-A,2,270.4 x 388.3,"end frame piece, glue",sheet_03 sheet_04
+EF-B,2,365.4 x 435.2,"end frame piece, glue",sheet_01 sheet_02
+EF-C,2,255.0 x 388.3,"end frame piece, glue",sheet_06 sheet_07
+EF-D,2,302.4 x 284.9,"end frame piece, glue",sheet_08
+EF-E,2,357.4 x 284.9,"end frame piece, glue",sheet_05
+EF-F,2,295.0 x 284.9,"end frame piece, glue",sheet_09
+CW1,3,350.4 x 56.0,"crop rail web (spliced, glue)",sheet_01 sheet_02
+CW2,3,458.0 x 56.0,"crop rail web (spliced, glue)",sheet_03 sheet_04 sheet_06
+AW1,3,345.4 x 36.0,"anchor rail web (spliced, glue)",sheet_06 sheet_07
+AW2,3,458.0 x 36.0,"anchor rail web (spliced, glue)",sheet_03 sheet_04 sheet_10
+CF1,3,445.9 x 50.0,"crop rail keyhole flange (spliced, glue)",sheet_06 sheet_07
+CF2,3,316.0 x 50.0,"crop rail keyhole flange (spliced, glue)",sheet_02 sheet_03
+AF1,3,445.9 x 50.0,"anchor rail keyhole flange (spliced, glue)",sheet_08 sheet_09 sheet_10
+AF2,3,316.0 x 50.0,"anchor rail keyhole flange (spliced, glue)",sheet_04 sheet_06
+RG1,1,407.9 x 40.0,"ridge web (spliced, glue)",sheet_10
+RG2,1,398.0 x 40.0,"ridge web (spliced, glue)",sheet_10
+WG,14,70.0 x 15.0,"wedge, drive narrow end first",sheet_01 sheet_02 sheet_03
+TEST,1,192.0 x 45.0,cut first: fit test,00_TEST_cut_first
