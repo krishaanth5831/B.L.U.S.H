@@ -1,0 +1,10 @@
+part,qty,size_mm,what,sheets
+EF-A,2,860.0 x 435.2,"end frame piece, glue",sheet_01 sheet_02
+EF-B,2,940.0 x 284.9,"end frame piece, glue",sheet_03
+CW,3,796.0 x 56.0,crop rail web,sheet_01 sheet_02
+AW,3,796.0 x 36.0,anchor rail web,sheet_04
+CF,3,752.0 x 50.0,crop rail keyhole flange,sheet_02 sheet_04
+AF,3,752.0 x 50.0,anchor rail keyhole flange,sheet_04
+RG,1,796.0 x 40.0,ridge web,sheet_04
+WG,14,70.0 x 15.0,"wedge, drive narrow end first",sheet_01
+TEST,1,192.0 x 45.0,cut first: fit test,00_TEST_cut_first
