@@ -56,7 +56,10 @@ for name, opts in (splits.get("public") or {}).items():
     for p in images(folder):
         # A set that ships its own split (images/train, images/val) keeps it: its frames often come in
         # near-duplicate runs that a per-file hash split would leak across. Otherwise split by hash.
-        if "/images/val/" in p.as_posix():
+        # images/test/ is never trained or tuned on.
+        if "/images/test/" in p.as_posix():
+            continue   # held out (e.g. negatives_oi/images/test): only eval_negatives.py reads it
+        elif "/images/val/" in p.as_posix():
             side = "val"
         elif "/images/train/" in p.as_posix():
             side = "train"

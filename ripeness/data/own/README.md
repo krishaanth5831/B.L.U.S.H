@@ -12,6 +12,10 @@ own/
 - `<session>` = `sYYYYMMDD_HHMM`, one per capture sitting. Sessions are the unit of
   the train/val/test split (`../splits.yaml`).
 - Change **one** thing per session (vine, day, angle) and note it in the table below.
+- Capture at least one **negatives session**: red, yellow and green look-alikes (balls,
+  peppers, apples, citrus) in front of the claw, some with a real tomato beside them.
+  Labelling rules: `../../LABELLING.md` → "Non-tomato sessions". Empty label files =
+  background.
 - Frames pulled from recorded picking episodes count too. Give them their own
   session folder named after the episode dataset.
 

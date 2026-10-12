@@ -11,9 +11,12 @@ val: []         # e.g. [s20261013_1100]
 
 # Public sets used for train/val (never test: they say nothing about our camera).
 # Each is a folder under data/public/ in YOLO layout (images/, labels/), already remapped
-# to {0: unripe, 1: turning, 2: ripe}. A set with images/train + images/val keeps its own split.
+# to {0: unripe, 1: turning, 2: ripe}. A set with images/train + images/val keeps its own split,
+# and images/test is skipped.
 # ⚠️ laboro is CC BY-NC-SA (non-commercial): a model trained with it is demo-only.
 # Not usable for ripeness (checked 2026-10-09, see public/README.md): mendeley (no unripe labels),
 # tomatod (download links return 403).
 public:
   laboro_yolo: {commercial_ok: false}   # built by scripts/prepare_laboro.py; keeps Laboro's train/test split
+  negatives_oi: {commercial_ok: true}   # built by scripts/prepare_negatives.py: Open Images non-tomatoes, empty labels
+                                        # (background). Its images/test/ is held out for eval_negatives.py.

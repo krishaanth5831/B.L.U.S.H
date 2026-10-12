@@ -27,7 +27,7 @@ ripeness/
 │   ├── own/labels/<session>/   YOLO .txt per frame, same names                      (committed)
 │   ├── stages.csv              6-stage label per box (sidecar)                       (committed)
 │   ├── splits.yaml             which sessions are val / FROZEN test                 (committed)
-│   ├── public/                 Laboro, Mendeley, tomatOD: download notes only       (gitignored)
+│   ├── public/                 Laboro, Open Images negatives, …: download notes only (gitignored)
 │   └── yolo/                   image lists + dataset yamls, built by build_split.py  (gitignored)
 ├── scripts/                capture → convert → remap → split → train → eval
 ├── gate/pick_target.py     the runtime gate: frame in, pick target (or None) out
@@ -45,10 +45,11 @@ All in the `ripeness` env (`conda env create -f envs/ripeness.yml`). Run from th
 | 3 | Get vines with green, turning **and** red fruit (supermarket vines are all red, so precision can't be measured on them) | ask a grower |
 | 4 | Capture 300–500 claw frames, several short sessions, one thing changed per session | `scripts/capture_claw.py` |
 | 5 | Label in Label Studio / CVAT, export YOLO, fill `stages.csv` | `LABELLING.md` |
-| 6 | Download + convert + remap public sets | `scripts/convert_coco.py`, `scripts/remap_classes.py` |
+| 6 | Download + convert + remap public sets. Add the non-tomato backgrounds | `scripts/prepare_laboro.py`, `scripts/prepare_negatives.py` |
 | 7 | Freeze the test sessions in `data/splits.yaml`, build the lists | `scripts/build_split.py` |
 | 8 | Pretrain on public, fine-tune on own + public | `scripts/train.sh` |
 | 9 | Precision/recall vs threshold on the test set, set `t_ripe` | `scripts/eval_threshold.py` |
+| 9b | False positives on non-tomatoes (held-out Open Images) + Laboro val, old vs new weights | `scripts/eval_negatives.py` |
 | 10 | Release: copy `best.pt` into `models/`, write `gate.yaml` + a `results.csv` row | `models/README.md` |
 | 11 | Run the gate live | `gate/pick_target.py` |
 

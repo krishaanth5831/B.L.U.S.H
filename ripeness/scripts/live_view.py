@@ -4,7 +4,7 @@ check of model + camera, NOT the gate (the gate only picks `ripe` above t_ripe, 
 Run from the repo root in the `ripeness` env:
     python ripeness/scripts/live_view.py [camera] [weights] [conf]
       camera   index (2) or a /dev/v4l/by-path/... path. Default 2
-      weights  default ripeness/models/pretrain_laboro_v1.pt
+      weights  default ripeness/models/pretrain_v2.pt (pretrain_laboro_v1.pt boxes red/yellow/green non-tomatoes)
       conf     lowest confidence drawn. Default 0.25
 Keys: s saves the annotated frame to runs/ripeness/live_view/ (gitignored), q quits.
 """
@@ -17,7 +17,7 @@ from ultralytics import YOLO
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CAM = sys.argv[1] if len(sys.argv) > 1 else "2"
-WEIGHTS = sys.argv[2] if len(sys.argv) > 2 else str(ROOT / "ripeness/models/pretrain_laboro_v1.pt")
+WEIGHTS = sys.argv[2] if len(sys.argv) > 2 else str(ROOT / "ripeness/models/pretrain_v2.pt")
 CONF = float(sys.argv[3]) if len(sys.argv) > 3 else 0.25
 W, H = 640, 480                       # same as capture_claw.py and the gate
 COLOURS = {0: (0, 200, 0), 1: (0, 165, 255), 2: (0, 0, 255)}   # BGR: unripe green, turning orange, ripe red

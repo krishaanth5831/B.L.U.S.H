@@ -46,3 +46,15 @@ Before merging a public set, look at 20 of its images and check how it labelled
 green-shouldered fruit. If it calls them ripe, relabel those boxes (rule 1).
 Laboro's classes are by % red (<30 / 30–89 / ≥90). That's close enough to merge,
 and its "fully ripened" sits at the strict end of our `ripe`, which is the safe side.
+
+## Non-tomato sessions (negatives)
+
+The model has to learn that red, yellow or green alone doesn't make a tomato. Capture
+whole sessions of look-alikes in front of the claw camera: red / yellow / green balls,
+peppers, apples, citrus, toys. Use the same locked camera settings.
+
+- A frame with **no tomato** gets an **empty** `.txt`. Don't box the look-alike: there
+  is no `not_tomato` class. An empty file means "nothing to find here".
+- A frame with a tomato **next to** a look-alike: box the tomato only.
+- No `stages.csv` rows for empty frames.
+- Put one negatives session in `val` in `splits.yaml`, like any other session.
