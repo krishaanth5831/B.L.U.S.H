@@ -1,4 +1,4 @@
-"""prepare_laboro.py: Laboro Tomato (COCO JSON) -> YOLO layout with our 3 classes.
+"""prepare_laboro.py: Laboro Tomato (COCO JSON) -> YOLO layout with our tomato classes (0-2; Laboro has no `not_tomato`).
 
     python ripeness/scripts/prepare_laboro.py                 # cherry (l_) + regular (b_) tomatoes
     python ripeness/scripts/prepare_laboro.py --cherry-only   # l_ only, as the vault note first planned

@@ -18,7 +18,7 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DATA = ROOT / "ripeness/data"
 OUT = DATA / "yolo"
-NAMES = {0: "unripe", 1: "turning", 2: "ripe"}   # must match LABELLING.md
+NAMES = {0: "unripe", 1: "turning", 2: "ripe", 3: "not_tomato"}   # must match LABELLING.md
 IMG_EXT = {".jpg", ".jpeg", ".png"}
 
 
@@ -45,7 +45,7 @@ for s in sessions:
     imgs = images(own_root / s)
     unlabelled = [p for p in imgs if not (DATA / "own/labels" / s / (p.stem + ".txt")).exists()]
     if unlabelled:
-        print(f"⚠️ {s}: {len(unlabelled)} frames have no label file. They train as background (no fruit).")
+        print(f"⚠️ {s}: {len(unlabelled)} frames have no label file. They train as background (nothing to find).")
     lists["test" if s in test_s else "val" if s in val_s else "train"] += imgs
 
 for name, opts in (splits.get("public") or {}).items():
@@ -56,7 +56,10 @@ for name, opts in (splits.get("public") or {}).items():
     for p in images(folder):
         # A set that ships its own split (images/train, images/val) keeps it: its frames often come in
         # near-duplicate runs that a per-file hash split would leak across. Otherwise split by hash.
-        if "/images/val/" in p.as_posix():
+        # images/test/ is never trained or tuned on.
+        if "/images/test/" in p.as_posix():
+            continue   # held out (e.g. negatives_oi/images/test): only eval_negatives.py reads it
+        elif "/images/val/" in p.as_posix():
             side = "val"
         elif "/images/train/" in p.as_posix():
             side = "train"
