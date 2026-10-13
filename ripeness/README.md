@@ -1,7 +1,8 @@
 # Ripeness gate
 
 For **every cherry tomato in the claw camera's view**, find it and call it `unripe`,
-`turning` or `ripe`. The arm only picks fruits called `ripe` with enough confidence.
+`turning` or `ripe`. Things that look like a tomato but aren't (red balls, peppers,
+citrus, …) get `not_tomato`. The arm only picks fruits called `ripe` with enough confidence.
 
 The birdseye camera only steers the arm. At 640×480 through a 130° lens a cherry
 tomato is a few pixels wide there, which is too small to judge ripeness. The claw
@@ -21,7 +22,7 @@ comes from the measured precision–recall curve on the frozen test set, never b
 
 ```
 ripeness/
-├── LABELLING.md            6 colour stages → 3 classes, labelling rules
+├── LABELLING.md            6 colour stages → 3 tomato classes + `not_tomato`, labelling rules
 ├── data/
 │   ├── own/images/<session>/   claw-camera frames, one folder per capture session  (committed)
 │   ├── own/labels/<session>/   YOLO .txt per frame, same names                      (committed)
@@ -49,7 +50,7 @@ All in the `ripeness` env (`conda env create -f envs/ripeness.yml`). Run from th
 | 7 | Freeze the test sessions in `data/splits.yaml`, build the lists | `scripts/build_split.py` |
 | 8 | Pretrain on public, fine-tune on own + public | `scripts/train.sh` |
 | 9 | Precision/recall vs threshold on the test set, set `t_ripe` | `scripts/eval_threshold.py` |
-| 9b | False positives on non-tomatoes (held-out Open Images) + Laboro val, old vs new weights | `scripts/eval_negatives.py` |
+| 9b | Tomato boxes on non-tomatoes, `not_tomato` boxes on tomatoes, Laboro val, old vs new weights | `scripts/eval_negatives.py` |
 | 10 | Release: copy `best.pt` into `models/`, write `gate.yaml` + a `results.csv` row | `models/README.md` |
 | 11 | Run the gate live | `gate/pick_target.py` |
 

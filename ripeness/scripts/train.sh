@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # train.sh: two-stage YOLO11n training for the ripeness gate. Run from the repo root
 # in the `ripeness` env, after build_split.py.
-#   ripeness/scripts/train.sh pretrain v2        public data only (Laboro + negatives_oi backgrounds)
+#   ripeness/scripts/train.sh pretrain v4        public data only (Laboro + negatives_oi look-alikes)
 #   ripeness/scripts/train.sh finetune v1        own + public, starting from the pretrain weights
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -19,9 +19,9 @@ case "${1:-}" in
     yolo detect train model=yolo11n.pt data=$YOLO_DIR/public.yaml imgsz=$IMGSZ \
          epochs=100 batch=$BATCH patience=25 hsv_h=$HSV_H project=$RUNS name=pretrain_${2:?version, e.g. v2} ;;
   finetune)
-    # Starts from the committed pretrain (ripeness/models/pretrain_v2.pt: Laboro + non-tomato backgrounds).
+    # Starts from the committed pretrain (ripeness/models/pretrain_v4.pt: Laboro + `not_tomato` look-alikes, 4 classes).
     # After a new pretrain run, copy its best.pt into ripeness/models/ under a new version and change this line.
-    yolo detect train model=$REPO/ripeness/models/pretrain_v2.pt data=$YOLO_DIR/ripeness.yaml imgsz=$IMGSZ \
+    yolo detect train model=$REPO/ripeness/models/pretrain_v4.pt data=$YOLO_DIR/ripeness.yaml imgsz=$IMGSZ \
          epochs=150 batch=$BATCH patience=30 hsv_h=$HSV_H project=$RUNS name=finetune_${2:?version, e.g. v1} ;;
   *) echo "usage: $0 pretrain <version> | finetune <version>"; exit 1 ;;
 esac

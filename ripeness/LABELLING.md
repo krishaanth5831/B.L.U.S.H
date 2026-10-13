@@ -5,7 +5,8 @@ Keep this open while labelling. Label one session in one sitting.
 ## Stages → model classes
 
 Label every fruit with one of the six standard tomato colour stages in
-`data/stages.csv`. The YOLO `.txt` gets the 3-class id.
+`data/stages.csv`. The YOLO `.txt` gets the class id. Anything that looks like a
+tomato but isn't gets class 3 (see "Non-tomato sessions").
 
 | Colour stage | Looks like | Class id | Model class |
 |---|---|---|---|
@@ -15,6 +16,7 @@ Label every fruit with one of the six standard tomato colour stages in
 | pink | 30–60 % coloured | 1 | `turning` |
 | light_red | 60–90 % red | 2 | `ripe` |
 | red | 90 %+ red | 2 | `ripe` |
+| not_tomato | A look-alike: ball, pepper, citrus, apple, berry, … | 3 | `not_tomato` |
 
 The sidecar exists so the pick line can move later (e.g. stop picking `light_red`)
 without relabelling anything.
@@ -53,8 +55,12 @@ The model has to learn that red, yellow or green alone doesn't make a tomato. Ca
 whole sessions of look-alikes in front of the claw camera: red / yellow / green balls,
 peppers, apples, citrus, toys. Use the same locked camera settings.
 
-- A frame with **no tomato** gets an **empty** `.txt`. Don't box the look-alike: there
-  is no `not_tomato` class. An empty file means "nothing to find here".
-- A frame with a tomato **next to** a look-alike: box the tomato only.
-- No `stages.csv` rows for empty frames.
+- **Box every look-alike as `not_tomato` (class 3)**, with stage `not_tomato` in
+  `stages.csv`. That keeps `stages.csv` one row per box, in `.txt` line order.
+- A frame with a tomato **next to** a look-alike: box both, each with its own class.
+- Box only things that could pass for a tomato (round, tomato-sized, red / yellow /
+  orange / green). Leaves, stems, the gripper and the table stay unboxed (background).
+- A frame with nothing in it gets an **empty** `.txt` and no `stages.csv` rows.
+- `not_tomato` is not a safety net: no box at all still means "not a tomato". The gate
+  only ever picks `ripe`.
 - Put one negatives session in `val` in `splits.yaml`, like any other session.

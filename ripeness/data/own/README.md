@@ -14,8 +14,8 @@ own/
 - Change **one** thing per session (vine, day, angle) and note it in the table below.
 - Capture at least one **negatives session**: red, yellow and green look-alikes (balls,
   peppers, apples, citrus) in front of the claw, some with a real tomato beside them.
-  Labelling rules: `../../LABELLING.md` → "Non-tomato sessions". Empty label files =
-  background.
+  Labelling rules: `../../LABELLING.md` → "Non-tomato sessions". Look-alikes get a
+  `not_tomato` (3) box. A frame with nothing in it gets an empty label file.
 - Frames pulled from recorded picking episodes count too. Give them their own
   session folder named after the episode dataset.
 
