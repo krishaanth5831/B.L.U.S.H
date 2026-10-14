@@ -2,6 +2,8 @@
 on the FROZEN test set only.
 
     python ripeness/scripts/eval_threshold.py runs/ripeness/finetune_v1/weights/best.pt
+    python ripeness/scripts/eval_threshold.py <weights> ripeness/data/yolo/laboro_val.txt   # any image list
+                                    # (laboro_val.txt is written by eval_negatives.py; compares pretrains)
 
 Decide the precision target BEFORE reading this output (e.g. "at most 1 in 20 picks not
 ripe"), then take the LOWEST threshold that meets it. Put that in models/gate.yaml.
@@ -16,7 +18,7 @@ import numpy as np
 from ultralytics import YOLO
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-TEST_LIST = ROOT / "ripeness/data/yolo/test.txt"
+TEST_LIST = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "ripeness/data/yolo/test.txt"
 RIPE = 2          # class id, LABELLING.md
 IOU_MATCH = 0.5   # standard detection match threshold
 

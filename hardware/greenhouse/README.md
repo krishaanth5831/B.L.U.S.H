@@ -1,5 +1,8 @@
 # SO-101 test greenhouse — fully printed
 
+> ⚠️ **Superseded for the frame (2026-10-10):** the greenhouse is now laser-cut from 6 mm plywood, see
+> [`lasercut/ASSEMBLY.md`](lasercut/ASSEMBLY.md). The birdseye camera mast below is still 3D-printed.
+
 A tabletop greenhouse for the SO-101 hardware track: three rows of hanging cherry
 tomato vines, aisles the arm stands in, and nothing overhead or at the ends that the
 arm can hit at full stretch. Every piece is printed; a 256 × 256 mm bed fits all of them.

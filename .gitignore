@@ -32,3 +32,6 @@ harvest/gate_frames/
 # ripeness/models/ are committed.
 *.pt
 !ripeness/models/*.pt
+
+# Greenhouse generator preview mesh (rebuilt by greenhouse_lasercut.py check)
+hardware/greenhouse/lasercut/preview/assembly.stl

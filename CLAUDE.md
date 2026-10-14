@@ -5,9 +5,11 @@ Read `README.md` for the pipeline and the data layout.
 
 ## Git workflow (hard rules)
 
-- Work on `dev`. Never push to `main`. It's protected (PR required, enforce_admins on).
-- Open a PR only when asked: `gh pr create --base main --head dev`. Always pass
-  `--base` explicitly.
+- Commit and push straight to `dev`. **No feature branches**, not even for a PR (the
+  user's rule, 2026-10-14). Never push to `main`. It's protected (PR required,
+  enforce_admins on).
+- Every PR is `dev` → `main`, and only when asked: `gh pr create --base main --head dev`.
+  Always pass `--base` explicitly.
 - **Never merge a PR**, to any branch. The user merges.
 
 ## Hardware rules that cost real debugging time
