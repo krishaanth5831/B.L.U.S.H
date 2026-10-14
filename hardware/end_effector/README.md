@@ -2,6 +2,9 @@
 
 STLs, CAD source and test results for the SO-101 jaw that picks single cherry tomatoes.
 
+**Current design:** [`finray/`](finray/). TPU fin-ray fingers bolted into PLA stubs of the stock
+jaws, so the servo, horn and wrist stay stock. Watch it with `python finray/view_gripper.py --stock`.
+
 ⚠️ Lock this before recording. The tool geometry is baked into every demonstration,
 so changing it afterwards throws the episodes away.
 
