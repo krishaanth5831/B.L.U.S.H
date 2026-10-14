@@ -107,6 +107,8 @@ FINGERS = {
 # ----------------------------------------------------------------------------------------
 def load_stock(name, T):
     m = trimesh.load_mesh(STOCK / name)
+    if m.extents.max() < 1.0:
+        m.apply_scale(1000.0)   # ⚠️ the URDF meshes (sts3215_03a_v1.stl) are in metres, the print STLs in mm
     m.apply_transform(T)
     return m
 
