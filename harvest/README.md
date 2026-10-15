@@ -1,6 +1,6 @@
 # Harvest pipeline
 
-Teleop demonstrations → ACT baseline → SmolVLA → gated end-to-end runs. The policy
+Teleop demonstrations → ACT baseline (data check) → π0.5 fine-tune → gated end-to-end runs. The policy
 learns **how** to pick a single cherry tomato. The ripeness gate (`../ripeness/`)
 decides **whether** to.
 
@@ -20,7 +20,7 @@ harvest/
 │   ├── record.sh         one recording session (--resume for later ones)
 │   ├── check_dataset.py  episode count, camera keys, normalised-not-degrees
 │   ├── train_act.sh      smoke | full
-│   ├── train_smolvla.sh  smoke | full
+│   ├── train_smolvla.sh  superseded by π0.5 (π0.5 training script not written yet)
 │   └── rollout.sh        eval (episodic, saved) | run (one shot)
 ├── control/              target-centring controller (hybrid approach, see below)
 ├── harvest_loop.py       gated v1 loop: gate → rollout → log
@@ -30,14 +30,19 @@ harvest/
 
 ## Decision to make before recording: how does the policy know *which* fruit?
 
-On a vine with ten fruits, ACT/SmolVLA don't know which one the gate chose.
+On a vine with ten fruits, the policy doesn't know which one the gate chose.
 
 | Option | How | Catch |
 |---|---|---|
 | Overlay | Draw the target box onto the frames fed to the policy | The gate must also run **while recording**, so the overlay is in the training frames |
 | **Hybrid** (vault recommendation) | Gate gives the target pixel → `control/` centres the claw camera on it → the policy only does the final grasp and pick | More code, but a much smaller, easier job for the policy |
 
-**Chosen:** _(not decided yet. Write it here with the date.)_
+**Chosen (2026-10-10): overlay, two cameras.** The birdseye gate selects the target
+(recall-tuned) and its box, detected on the start frame, is drawn onto the birdseye frames
+for the whole episode. The claw gate confirms just before the close (precision-tuned) or
+aborts and logs `claw_veto`. v1 scenes hold exactly one ripe fruit, so the box can be drawn
+after recording. ⚠️ That box-drawing script isn't written yet, and `harvest_loop.py`
+and `control/` still follow the older hybrid design.
 
 ## Locked recording decisions
 
@@ -74,7 +79,9 @@ slow. Fumbled the align? Press ← and re-record. Don't correct on camera.
 4. `scripts/check_dataset.py $DATASET_CLEAN`. Push to the Hub, add it to `datasets.md`.
 5. `scripts/train_act.sh smoke`, then `full`. Run `scripts/rollout.sh eval` on the 40k and
    80k checkpoints, and log them in `plan/eval_trials.csv`.
-6. SmolVLA: `scripts/train_smolvla.sh` (set `RENAME_MAP` first), same eval grid.
+6. π0.5: fine-tune `lerobot/pi05_base` on a rented GPU (or the hosted π API) and serve it
+   with lerobot `async_inference`, which supports pi05 + so101_follower at commit
+   `5aa74557`. Same eval grid.
 7. `harvest_loop.py` over `plan/system_trials.csv`. Metrics: harvest success, gate
    recall, end-to-end ripe yield, **false-pick rate (target: 0)**, median time per pick.
 
