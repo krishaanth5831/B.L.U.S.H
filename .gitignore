@@ -38,3 +38,6 @@ hardware/greenhouse/lasercut/preview/assembly.stl
 
 # SO-101 MJCF + meshes, fetched by sim/fetch_so101.sh
 sim/assets/so101/
+
+# pip install -e sim/plugin build artefacts
+sim/plugin/*.egg-info/

@@ -1,0 +1,252 @@
+"""The sim follower. It behaves like the real so101_follower towards lerobot.
+
+- Same features: shoulder_pan.pos ... gripper.pos in use_degrees=false units, plus the cameras
+  `birdseye` and `claw` at 640x480 (config/hardware.env names and size).
+- send_action takes the leader's normalised values and converts them through follower_white.json,
+  as the real follower does (sim/arm_map.py).
+- Physics runs in its own thread at wall-clock speed, like a real arm moving between calls.
+
+MuJoCo window keys: N = new vine layout (next seed). Press it during lerobot-record's reset period.
+Ctrl + right-drag pulls a tomato by hand. Plucks and crate drops are printed in the terminal.
+"""
+import json
+import logging
+import pathlib
+import sys
+import threading
+import time
+
+import numpy as np
+
+from lerobot.robots.robot import Robot
+
+from .config_so101_mujoco import SO101MujocoConfig
+
+SIM_DIR = pathlib.Path(__file__).resolve().parents[2]   # B.L.U.S.H/sim
+if str(SIM_DIR) not in sys.path:
+    sys.path.insert(0, str(SIM_DIR))
+
+import arm_map  # noqa: E402
+import scene  # noqa: E402
+import tomato as tm  # noqa: E402
+
+logger = logging.getLogger(__name__)
+CAMERAS = ("birdseye", "claw")   # ⚠️ same names + order as harvest/scripts/common.sh, or the policy swaps them
+CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw"}
+KEY_N = 78                       # GLFW key code
+MAX_CATCH_UP_S = 0.1             # after a stall (a slow policy call), skip ahead instead of fast-forwarding
+
+
+class SO101Mujoco(Robot):
+    config_class = SO101MujocoConfig
+    # ⚠️ The real follower's robot_type. lerobot-edit-dataset merge refuses datasets with different
+    # robot_types, and sim + real must merge for co-training. Sim vs real is kept in the dataset name.
+    name = "so_follower"
+
+    def __init__(self, config: SO101MujocoConfig):
+        super().__init__(config)
+        if config.use_degrees:
+            raise ValueError("so101_mujoco only speaks use_degrees=false units (see sim/arm_map.py)")
+        self.config = config
+        self.cameras = dict.fromkeys(CAMERAS)   # names only; lerobot-rollout counts them
+        self._lock = threading.RLock()
+        self._thread = None
+        self._stop = threading.Event()
+        self._want_new = threading.Event()
+        self._connected = False
+        self._renderer = None
+        self._renderer_key = None
+        self._gen = 0
+        self._session = time.strftime("%Y%m%d_%H%M%S")
+
+    # --- features (callable while disconnected) ---
+    @property
+    def observation_features(self) -> dict:
+        ft = {f"{j}.pos": float for j in arm_map.JOINTS}
+        ft.update({c: (scene.CAM_H, scene.CAM_W, 3) for c in CAMERAS})
+        return ft
+
+    @property
+    def action_features(self) -> dict:
+        return {f"{j}.pos": float for j in arm_map.JOINTS}
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def is_calibrated(self) -> bool:
+        return True                          # nothing to calibrate: the units come from follower_white.json
+
+    def calibrate(self) -> None:
+        pass
+
+    def configure(self) -> None:
+        pass
+
+    # --- scene ---
+    def _build(self, seed):
+        self.m, self.d, self.info = scene.build(seed)
+        self.qidx, self.uidx = scene.arm_ids(self.m)
+        self.det = tm.Detacher(self.m, self.d, self.info["fruit"])
+        self.d.ctrl[self.uidx] = self.d.qpos[self.qidx]
+        self.seed = seed
+        self._gen += 1
+        self._snap = self.config.snap_to_first_action
+        self._box = None
+        self._dropped = False
+        self._log = []
+        t = self.info["fruit"][self.info["target"]]
+        self._tgt_body = self.m.body(t["tomato"]).id
+        self._tgt_geom = self.m.geom(t["geom"]).id
+        print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(self.info['fruit'])} tomatoes, "
+              f"ripe target breaks at {t['threshold']:.2f} N  (press N in the MuJoCo window for a new layout)",
+              flush=True)
+
+    def _save_log(self):
+        if not self.config.state_log_dir or not self._log:
+            return
+        out = pathlib.Path(self.config.state_log_dir).expanduser() / self._session
+        out.mkdir(parents=True, exist_ok=True)
+        rows = self._log
+        np.savez_compressed(out / f"scene{self._gen:03d}_seed{self.seed}.npz",
+                            t_sim=np.array([r[0] for r in rows]), t_wall=np.array([r[1] for r in rows]),
+                            qpos=np.array([r[2] for r in rows]), eq_active=np.array([r[3] for r in rows]),
+                            state=np.array([r[4] for r in rows]))
+        meta = out / "session.json"
+        info = json.loads(meta.read_text()) if meta.exists() else {"scenes": []}
+        info.update(self.fm.meta())
+        info["scenes"].append({"gen": self._gen, "seed": self.seed, "frames": len(rows),
+                               "target": self.info["fruit"][self.info["target"]]["tomato"],
+                               "dropped_in_crate": self._dropped})
+        meta.write_text(json.dumps(info, indent=2))
+        self._log = []
+
+    # --- physics thread ---
+    def _launch_viewer(self):
+        if not self.config.viewer:
+            return None
+        import mujoco.viewer
+        v = mujoco.viewer.launch_passive(self.m, self.d, key_callback=self._key)
+        v.cam.lookat[:] = (0.38, 0.22, 0.25)
+        v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.95, 215, -22
+        return v
+
+    def _key(self, keycode):
+        if keycode == KEY_N:
+            self._want_new.set()
+
+    def _run(self):
+        import mujoco
+        v = self._launch_viewer()
+        t_wall, t_sim = time.time(), self.d.time
+        next_sync = 0.0
+        while not self._stop.is_set():
+            if self._want_new.is_set():
+                self._want_new.clear()
+                if v is not None:
+                    v.close()
+                with self._lock:
+                    self._save_log()
+                    self._build(self.seed + 1)
+                v = self._launch_viewer()
+                t_wall, t_sim = time.time(), self.d.time
+            now = time.time()
+            with self._lock:
+                if now - t_wall > (self.d.time - t_sim) + MAX_CATCH_UP_S:
+                    t_sim = self.d.time - (now - t_wall) + MAX_CATCH_UP_S
+                while self.d.time - t_sim < now - t_wall:
+                    mujoco.mj_step(self.m, self.d)
+                    for k in self.det.step():
+                        f = self.info["fruit"][k]
+                        print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N"
+                              f"{'  <- the target' if k == self.info['target'] else ''}", flush=True)
+                if not self._dropped and scene.in_crate(self.d.xpos[self._tgt_body]):
+                    self._dropped = True
+                    print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
+            if v is not None and now > next_sync:
+                next_sync = now + 1 / 60
+                if v.is_running():
+                    v.sync()
+            time.sleep(0.001)
+        if v is not None:
+            v.close()
+
+    # --- lerobot API ---
+    def connect(self, calibrate: bool = True) -> None:
+        self.fm = arm_map.FollowerMap()
+        self._build(self.config.seed)
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="so101_mujoco_physics", daemon=True)
+        self._thread.start()
+        self._connected = True
+        logger.info(f"{self} connected (follower calibration sha256 {self.fm.sha256[:12]}).")
+
+    def _present_norm(self):
+        return self.fm.rad_to_norm(self.d.qpos[self.qidx])
+
+    def send_action(self, action):
+        goal = np.array([action[f"{j}.pos"] for j in arm_map.JOINTS], float)
+        with self._lock:
+            if self.config.max_relative_target is not None and not self._snap:
+                cur = self._present_norm()
+                goal = cur + np.clip(goal - cur, -self.config.max_relative_target, self.config.max_relative_target)
+            q = self.fm.norm_to_rad(goal)
+            if self._snap:
+                import mujoco
+                self.d.qpos[self.qidx] = q
+                self.d.qvel[:] = 0
+                mujoco.mj_forward(self.m, self.d)
+                self._snap = False
+            self.d.ctrl[self.uidx] = q
+        return {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, goal)}
+
+    def _render(self):
+        import mujoco
+        key = (self._gen, threading.get_ident())
+        if self._renderer_key != key:          # ⚠️ a renderer is bound to one model and one GL thread
+            if self._renderer is not None:
+                self._renderer.close()
+            self._renderer = mujoco.Renderer(self.m, scene.CAM_H, scene.CAM_W)
+            self._renderer_key = key
+        r, imgs = self._renderer, {}
+        for c in CAMERAS:
+            r.update_scene(self.d, camera=CAM_IN_MODEL[c])
+            imgs[c] = r.render().copy()
+        if self.config.overlay == "true_box":
+            if self._box is None:              # fixed for the scene, like the real start-frame box
+                r.enable_segmentation_rendering()
+                r.update_scene(self.d, camera="birdseye")
+                seg = r.render()
+                r.disable_segmentation_rendering()
+                ys, xs = np.nonzero((seg[..., 0] == self._tgt_geom) & (seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM))
+                if len(xs):
+                    self._box = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+            if self._box is not None:
+                import cv2
+                # ⚠️ Must match the real overlay's style once that script exists (not written yet).
+                cv2.rectangle(imgs["birdseye"], self._box[:2], self._box[2:], (0, 255, 0), 2)
+        elif self.config.overlay != "none":
+            raise ValueError(f"overlay={self.config.overlay!r}: only 'none' and 'true_box' exist so far")
+        return imgs
+
+    def get_observation(self):
+        with self._lock:
+            state = self._present_norm()
+            obs = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, state)}
+            obs.update(self._render())
+            if self.config.state_log_dir:
+                self._log.append((self.d.time, time.time(), self.d.qpos.copy(), self.d.eq_active.copy(), state))
+        return obs
+
+    def disconnect(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        with self._lock:
+            self._save_log()
+            if self._renderer is not None:
+                self._renderer.close()
+                self._renderer = None
+        self._connected = False
+        logger.info(f"{self} disconnected.")

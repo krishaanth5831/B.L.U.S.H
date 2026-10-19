@@ -18,10 +18,30 @@ Without `--leader`, move the arm with the actuator sliders in the viewer's right
 Ctrl + right-drag pulls a tomato by hand; plucks are printed in the terminal. Wayland prints
 `libdecor` / `GLFWError: window position` warnings, which are harmless.
 
+## lerobot commands against the sim (`--robot.type=so101_mujoco`)
+
+The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in
+`scripts/` mirror `harvest/scripts/` flag for flag (same TASK, timings, codec, camera names):
+
+| Sim | Real equivalent | What |
+|---|---|---|
+| `scripts/teleop_sim.sh` | `~/teleop.sh` | leader → sim arm, MuJoCo window + rerun with both cameras |
+| `scripts/record_sim.sh [--resume]` | `harvest/scripts/record.sh` | teleop demos into `$SIM_DATASET` |
+| `scripts/replay_sim.sh <ep> [ds]` | `lerobot-replay` | play an episode back on the sim arm (real datasets too) |
+| `scripts/train_sim.sh act-smoke\|act-full\|merge\|pi05-smoke\|pi05-full` | `harvest/scripts/train_*.sh` | train on sim, or merge sim + real for co-training |
+| `scripts/rollout_sim.sh eval\|run\|pi05 <policy>` | `harvest/scripts/rollout.sh` | run a policy on the sim arm |
+
+`DRYRUN=1 scripts/<script>.sh ...` prints the lerobot command instead of running it. MuJoCo window:
+**N** = new vine layout (press it in lerobot-record's reset period), Ctrl + right-drag = pull a tomato.
+The sim reports `robot_type=so_follower` like the real arm, because `lerobot-edit-dataset merge`
+refuses mixed robot types. Sim and real are told apart by the dataset name.
+Full sim state per frame goes to `~/.cache/blush_sim/states/<session>/` for re-renders.
+
 ## Setup (once)
 
 ```bash
 ./fetch_so101.sh                  # SO-101 MJCF + meshes into assets/so101 (gitignored, ~16 MB)
+pip install -e plugin             # registers --robot.type=so101_mujoco in the lerobot env
 python build_finray_meshes.py     # only after changing the fin-ray design; needs numpy shapely trimesh manifold3d
 ```
 
@@ -32,6 +52,7 @@ python build_finray_meshes.py     # only after changing the fin-ray design; need
 ```bash
 python check_tomato_release.py    # step 1: the tether hangs, releases above threshold, falls free
 python check_scene.py             # step 2: unit mapping, 200 layouts, cameras, grasp + pluck through contact
+python check_plugin.py            # the plugin through lerobot: features, 30 fps, AV1 episode, rerun
 ```
 
 Both print PASS/FAIL per check and write nothing.
@@ -85,6 +106,6 @@ Both print PASS/FAIL per check and write nothing.
 
 1. ✅ Tomato release (`check_tomato_release.py`, all pass)
 2. ✅ Scene (`check_scene.py`, all pass; the unverified list above still applies)
-3. ⬜ Teleop recorder: log full state, export LeRobot `so101_follower` with the calibration hash in the metadata
+3. 🟨 Teleop recorder: `scripts/record_sim.sh` (plugin checked headless, never run with the leader). Full state + calibration hash go to the state log, not the dataset metadata
 4. ⬜ YOLO overlay in sim (YOLO runs in the `ripeness` env, so it needs a separate process)
 5. ⬜ Collect · 6. ⬜ Re-render tiers · 7. ⬜ Real episodes + training

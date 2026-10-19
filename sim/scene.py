@@ -91,6 +91,15 @@ CLAW_FOVY = 60.0                 # ⚠️ same lens, same caveat
 CLAW_POS_IN_BODY = (0.0, 0.0, 0.03)   # just outside the housing mesh (its z reaches 27 mm)
 CLAW_XYAXES = (1, 0, 0, 0, -1, 0)
 
+# --- crate (harvest.env TASK: "...place it in the crate") ---
+# ⚠️ unverified: where the real crate stands. Here: on the table down the aisle, on the row-0 side of
+# the arm, inside reach (centre 0.13 m from the shoulder) and clear of the row-0 anchor rail.
+# Size of a cherry-tomato punnet tray, guess.
+CRATE_CENTRE = (0.50, 0.09)
+CRATE_SIZE = (0.12, 0.10, 0.05)    # outer x, y, height
+CRATE_WALL = 0.003
+CRATE_RGBA = "0.20 0.35 0.65 1"
+
 # --- vines ---
 STEM_X = (0.26, 0.48)            # stems along the row, inside the birdseye pick zone x 0.30-0.42 (+ margin)
 STEM_GAP = 0.08
@@ -135,6 +144,22 @@ def greenhouse_xml():
     g.append('<geom name="mast_pole" type="cylinder" pos="-0.120 0.151 0.21" size="0.012 0.21" rgba="0.6 0.6 0.6 1" contype="0" conaffinity="0"/>')
     g.append(_box("mast_base", (-0.175, 0.096, 0), (-0.065, 0.206, 0.008), "0.6 0.6 0.6 1", collide=False))
     return "\n".join(g)
+
+
+def crate_xml():
+    (cx, cy), (sx, sy, h), w = CRATE_CENTRE, CRATE_SIZE, CRATE_WALL
+    g = [_box("crate_floor", (cx - sx/2, cy - sy/2, 0), (cx + sx/2, cy + sy/2, w), CRATE_RGBA)]
+    g.append(_box("crate_wx0", (cx - sx/2, cy - sy/2, 0), (cx - sx/2 + w, cy + sy/2, h), CRATE_RGBA))
+    g.append(_box("crate_wx1", (cx + sx/2 - w, cy - sy/2, 0), (cx + sx/2, cy + sy/2, h), CRATE_RGBA))
+    g.append(_box("crate_wy0", (cx - sx/2, cy - sy/2, 0), (cx + sx/2, cy - sy/2 + w, h), CRATE_RGBA))
+    g.append(_box("crate_wy1", (cx - sx/2, cy + sy/2 - w, 0), (cx + sx/2, cy + sy/2, h), CRATE_RGBA))
+    return "\n".join(g)
+
+
+def in_crate(pos):
+    """True when a point (a fruit centre) is inside the crate walls, below the rim."""
+    (cx, cy), (sx, sy, h) = CRATE_CENTRE, CRATE_SIZE
+    return abs(pos[0] - cx) < sx / 2 and abs(pos[1] - cy) < sy / 2 and pos[2] < h
 
 
 def _birdseye_xyaxes():
@@ -201,6 +226,7 @@ def world_xml(static, tomatoes, eqs):
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {greenhouse_xml()}
+    {crate_xml()}
     {static}
     {tomatoes}
   </worldbody>
