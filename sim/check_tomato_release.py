@@ -23,7 +23,8 @@ G = 9.81
 
 def scene(n=1, seed=0, thresholds=None):
     rng = np.random.default_rng(seed)
-    body, eq, fruit = tm.truss_xml("tr", (-0.06, 0, 0.40), (0.06, 0, 0.40), n, rng)
+    rachis, tomatoes, eq, fruit = tm.truss_xml("tr", (-0.06, 0, 0.40), (0.06, 0, 0.40), n, rng)
+    body = rachis + tomatoes
     if thresholds is not None:
         for f, t in zip(fruit, thresholds):
             f["threshold"] = t

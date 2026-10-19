@@ -10,8 +10,9 @@ Ported from OrchardBench (arXiv 2607.06337, apples on a one-sided spring tether,
 pull exceeds f_detach for a few frames). They run Newton / MuJoCo-Warp; this is CPU MuJoCo, where
 turning a weld off frees the body (checked by sim/check_tomato_release.py).
 
-    truss_xml(...)  ->  (body_xml, equality_xml)  to paste into a scene
-    Detacher(m, d)  ->  call .step() after every mj_step
+    truss_xml(...)   -> one truss (rachis + n tomatoes), spaced so no two fruits overlap
+    single_xml(...)  -> one tomato hanging at an exact point (grasp tests)
+    Detacher(m, d)   -> call .step() after every mj_step
 """
 import mujoco
 import numpy as np
@@ -38,73 +39,118 @@ PEDICEL_LEN_M = (0.010, 0.015)
 PEDICEL_STIFFNESS = 0.004     # N.m/rad
 PEDICEL_DAMPING = 2e-4        # N.m.s/rad
 PEDICEL_ARMATURE = 1e-6       # ⚠️ without it the near-massless pedicel body makes the ball joint jitter
+PEDICEL_LEAN_DEG = 30.0       # pedicels lean out from the rachis, alternating sides (guess from photos)
+
+# The truss stem (rachis) hangs off the vine on a sprung ball joint, so a truss sways when the
+# gripper drags a fruit. Rigid, it pushed all of a closing jaw's ~8 mm drag into the tether and
+# plucked the weakest fruit (check_scene.py). 0.3 N.m/rad = ~10 deg of sag for a 10-fruit truss on an
+# 8 cm rachis: guess, unverified (push a real truss with a scale and measure the sway).
+RACHIS_STIFFNESS = 0.3        # N.m/rad
+RACHIS_DAMPING = 0.01         # N.m.s/rad, guess: settles in ~1 s
+RACHIS_ARMATURE = 1e-4        # ⚠️ the 2 mm rachis capsule is nearly massless; without this the joint jitters
+RACHIS_LEVER_M = 0.08         # single_xml's stand-in truss length
 
 # Weld softness = the tether spring. (timeconst, dampratio) in MuJoCo solref. 20 ms is MuJoCo's
 # default: stiff enough that a hanging fruit moves < 1 mm. (unverified against a real pedicel)
 TETHER_SOLREF = (0.02, 1.0)
 
-# Ripeness colours, rough sRGB of the four classes the gate knows (guess from photos, unverified).
+# Gap kept between neighbouring fruits when they're laid out (guess; real trusses touch sometimes).
+FRUIT_GAP_M = 0.002
+
+# Ripeness colours, rough sRGB of the classes the gate knows (guess from photos, unverified).
 RIPENESS_RGBA = {
     "green":   (0.35, 0.55, 0.20, 1),
     "turning": (0.85, 0.55, 0.20, 1),
     "ripe":    (0.75, 0.08, 0.05, 1),
 }
+STEM_RGBA = "0.30 0.45 0.15 1"
 
 
-def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None):
-    """MJCF for one truss: a static rachis capsule with n tomatoes hanging off it.
+def _rgba(rip):
+    return " ".join(f"{c:.2f}" for c in RIPENESS_RGBA[rip])
 
-    rachis_from/to: world points (m) of the truss stem. Tomatoes are spread evenly along it,
-    alternating sides. ripeness: list of keys of RIPENESS_RGBA (len n), random if None.
-    Returns (body_xml, equality_xml) and a list of per-tomato dicts (names, threshold, radius).
+
+def _fruit(name, local, world, tip, r, rip, threshold):
+    """Pedicel body (local pos in its parent), tomato body (world), weld, info dict."""
+    tn, pn = f"{name}", f"{name}_ped"
+    ped = (f'<body name="{pn}" pos="{local[0]:.5f} {local[1]:.5f} {local[2]:.5f}">'
+           f'<joint name="{pn}_ball" type="ball" stiffness="{PEDICEL_STIFFNESS}" '
+           f'damping="{PEDICEL_DAMPING}" armature="{PEDICEL_ARMATURE}"/>'
+           f'<geom type="capsule" fromto="0 0 0 {tip[0]:.5f} {tip[1]:.5f} {tip[2]:.5f}" size="0.0012" '
+           f'mass="0.0005" rgba="{STEM_RGBA}" contype="0" conaffinity="0"/></body>')
+    c = world + tip + np.array([0, 0, -r])
+    # Tomatoes are world children (free bodies), not children of the pedicel, so that switching
+    # the weld off really frees them.
+    body = (f'<body name="{tn}" pos="{c[0]:.5f} {c[1]:.5f} {c[2]:.5f}"><freejoint/>'
+            f'<geom name="{tn}_g" type="sphere" size="{r:.5f}" density="{DENSITY}" rgba="{_rgba(rip)}" '
+            f'friction="0.8 0.01 0.001" condim="4"/></body>')
+    eq = (f'<weld name="{tn}_tether" body1="{tn}" body2="{pn}" '
+          f'solref="{TETHER_SOLREF[0]} {TETHER_SOLREF[1]}"/>')
+    return ped, body, eq, dict(tomato=tn, pedicel=pn, eq=f"{tn}_tether", geom=f"{tn}_g", radius=r,
+                               ripeness=rip, threshold=threshold, pos=c)
+
+
+def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None, avoid=()):
+    """MJCF for one truss: a static rachis capsule with up to n tomatoes hanging off it.
+
+    rachis_from/to: world points (m) of the truss stem. ripeness: list of RIPENESS_RGBA keys (len
+    n), random if None. avoid: (centre, radius) of fruits already placed elsewhere. A fruit that
+    would overlap a neighbour gets a smaller radius, then is dropped, so a truss can come out
+    with fewer than n tomatoes.
+    Returns (rachis_body_xml, tomato_bodies_xml, equality_xml, fruit_info_list).
     """
     a, b = np.asarray(rachis_from, float), np.asarray(rachis_to, float)
     mid, axis = (a + b) / 2, b - a
     L = np.linalg.norm(axis)
-    bodies = [f'<body name="{name}_rachis" pos="{mid[0]:.4f} {mid[1]:.4f} {mid[2]:.4f}">'
-              f'<geom type="capsule" fromto="{a[0]-mid[0]:.4f} {a[1]-mid[1]:.4f} {a[2]-mid[2]:.4f} '
-              f'{b[0]-mid[0]:.4f} {b[1]-mid[1]:.4f} {b[2]-mid[2]:.4f}" size="0.002" '
-              f'rgba="0.30 0.45 0.15 1" contype="0" conaffinity="0"/>']
-    eqs, fruit = [], []
+    out = np.cross(axis / L, [0, 0, 1])
+    out = out / np.linalg.norm(out) if np.linalg.norm(out) > 1e-6 else np.array([1.0, 0, 0])
+    lean = np.radians(PEDICEL_LEAN_DEG)
+    placed = list(avoid)
+    peds, bodies, eqs, fruit = [], [], [], []
     for i in range(n):
-        t = (i + 0.5) / n
-        p = a + t * axis - mid                               # attach point in rachis frame
-        r = rng.uniform(*RADIUS_M)
-        lp = rng.uniform(*PEDICEL_LEN_M)
+        p_world = a + (i + 0.5) / n * axis
         side = 1 if i % 2 == 0 else -1
-        # Pedicel leans out sideways, perpendicular to the rachis in the horizontal plane.
-        out = np.cross(axis / L, [0, 0, 1])
-        out = out / np.linalg.norm(out) if np.linalg.norm(out) > 1e-6 else np.array([1.0, 0, 0])
-        tip = (side * 0.5 * out + np.array([0, 0, -0.866])) * lp   # 30 deg off vertical
-        centre = tip + np.array([0, 0, -r])
-        rip = ripeness[i] if ripeness else rng.choice(list(RIPENESS_RGBA))
-        rgba = " ".join(f"{c:.2f}" for c in RIPENESS_RGBA[rip])
-        tn, pn = f"{name}_t{i}", f"{name}_p{i}"
-        # Pedicel: ball joint at the rachis, thin non-colliding capsule to the calyx.
-        bodies.append(
-            f'<body name="{pn}" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}">'
-            f'<joint name="{pn}_ball" type="ball" stiffness="{PEDICEL_STIFFNESS}" '
-            f'damping="{PEDICEL_DAMPING}" armature="{PEDICEL_ARMATURE}"/>'
-            f'<geom type="capsule" fromto="0 0 0 {tip[0]:.4f} {tip[1]:.4f} {tip[2]:.4f}" size="0.0012" '
-            f'mass="0.0005" rgba="0.30 0.45 0.15 1" contype="0" conaffinity="0"/>'
-            f'<site name="{pn}_tip" pos="{tip[0]:.4f} {tip[1]:.4f} {tip[2]:.4f}" size="0.001"/>'
-            f'</body>')
-        c = mid + p + centre                                  # world position of the fruit
-        fruit.append(dict(tomato=tn, pedicel=pn, eq=f"{tn}_tether", radius=r, ripeness=rip,
-                          threshold=rng.uniform(*DETACH_FORCE_N), pos=c))
-        eqs.append(f'<weld name="{tn}_tether" body1="{tn}" body2="{pn}" '
-                   f'solref="{TETHER_SOLREF[0]} {TETHER_SOLREF[1]}"/>')
-    bodies.append("</body>")
-    # Tomatoes are world children (free bodies), not children of the pedicel, so that switching
-    # the weld off really frees them.
-    for f in fruit:
-        c = f["pos"]
-        bodies.append(
-            f'<body name="{f["tomato"]}" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}"><freejoint/>'
-            f'<geom name="{f["tomato"]}_g" type="sphere" size="{f["radius"]:.4f}" density="{DENSITY}" '
-            f'rgba="{" ".join(f"{x:.2f}" for x in RIPENESS_RGBA[f["ripeness"]])}" '
-            f'friction="0.8 0.01 0.001" condim="4"/></body>')
-    return "\n".join(bodies), "\n".join(eqs), fruit
+        lp = rng.uniform(*PEDICEL_LEN_M)
+        tip = (side * np.sin(lean) * out + np.array([0, 0, -np.cos(lean)])) * lp
+        rip = ripeness[i] if ripeness else str(rng.choice(list(RIPENESS_RGBA)))
+        r = rng.uniform(*RADIUS_M)
+        for _ in range(4):
+            c = p_world + tip + np.array([0, 0, -r])
+            if all(np.linalg.norm(c - c2) >= r + r2 + FRUIT_GAP_M for c2, r2 in placed):
+                break
+            r *= 0.85
+        else:
+            continue
+        if r < RADIUS_M[0] * 0.8:
+            continue
+        ped, body, eq, info = _fruit(f"{name}_t{i}", p_world - mid, p_world, tip, r, rip,
+                                     rng.uniform(*DETACH_FORCE_N))
+        placed.append((info["pos"], r))
+        peds.append(ped); bodies.append(body); eqs.append(eq); fruit.append(info)
+    rachis = (f'<body name="{name}_rachis" pos="{mid[0]:.5f} {mid[1]:.5f} {mid[2]:.5f}">'
+              f'<joint name="{name}_rachis_ball" type="ball" pos="{-axis[0]/2:.5f} {-axis[1]/2:.5f} {-axis[2]/2:.5f}" '
+              f'stiffness="{RACHIS_STIFFNESS}" damping="{RACHIS_DAMPING}" armature="{RACHIS_ARMATURE}"/>'
+              f'<geom type="capsule" fromto="{-axis[0]/2:.5f} {-axis[1]/2:.5f} {-axis[2]/2:.5f} '
+              f'{axis[0]/2:.5f} {axis[1]/2:.5f} {axis[2]/2:.5f}" size="0.002" '
+              f'rgba="{STEM_RGBA}" contype="0" conaffinity="0"/>' + "".join(peds) + "</body>")
+    return rachis, "\n".join(bodies), "\n".join(eqs), fruit
+
+
+def single_xml(name, centre, r, threshold, ripeness="ripe", pedicel_len=0.012):
+    """One tomato whose centre sits exactly at `centre`, hanging straight down from the end of a
+    stand-in truss: an anchor on a sprung ball joint RACHIS_LEVER_M away along +x (same compliance
+    as a real truss in truss_xml)."""
+    centre = np.asarray(centre, float)
+    top = centre + np.array([0, 0, r + pedicel_len])
+    ped, body, eq, info = _fruit(name, np.zeros(3), top, np.array([0, 0, -pedicel_len]), r, ripeness,
+                                 threshold)
+    anchor = (f'<body name="{name}_anchor" pos="{top[0]:.5f} {top[1]:.5f} {top[2]:.5f}">'
+              f'<joint name="{name}_anchor_ball" type="ball" pos="{RACHIS_LEVER_M} 0 0" '
+              f'stiffness="{RACHIS_STIFFNESS}" damping="{RACHIS_DAMPING}" armature="{RACHIS_ARMATURE}"/>'
+              f'<geom type="capsule" fromto="0 0 0 {RACHIS_LEVER_M} 0 0" size="0.002" mass="0.002" '
+              f'rgba="{STEM_RGBA}" contype="0" conaffinity="0"/>'
+              f'{ped}</body>')
+    return anchor, body, eq, info
 
 
 class Detacher:
@@ -112,13 +158,14 @@ class Detacher:
 
     def __init__(self, m, d, fruit, hold_s=DETACH_HOLD_S):
         self.m, self.d = m, d
-        self.eq_ids = np.array([mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, f["eq"]) for f in fruit])
+        self.eq_ids = np.array([mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, f["eq"]) for f in fruit], int)
         self.thresholds = np.array([f["threshold"] for f in fruit])
         self.hold_steps = max(1, int(round(hold_s / m.opt.timestep)))
         self.over = np.zeros(len(fruit), int)
         self.detached_at = np.full(len(fruit), np.nan)   # sim time of release
         self.force_at = np.full(len(fruit), np.nan)      # tether force at release (N)
         self.force = np.zeros(len(fruit))                # last measured tether force (N)
+        self.peak = np.zeros(len(fruit))                 # highest force seen while attached (N)
 
     def tether_forces(self):
         """Translational weld force (N) per tomato, 0 for released ones."""
@@ -137,6 +184,7 @@ class Detacher:
         """Call after every mj_step. Returns indices of tomatoes released this step."""
         self.force = self.tether_forces()
         live = self.d.eq_active[self.eq_ids].astype(bool)
+        self.peak = np.where(live, np.maximum(self.peak, self.force), self.peak)
         self.over = np.where(live & (self.force > self.thresholds), self.over + 1, 0)
         out = np.flatnonzero(self.over >= self.hold_steps)
         for k in out:
