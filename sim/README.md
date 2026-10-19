@@ -59,9 +59,21 @@ Both print PASS/FAIL per check and write nothing.
   the most fragile fruit are on the edge of dropping when touched.
 - ⚠️ **One renderer per model.** A `mujoco.Renderer` is bound to the model it was made with.
 
+## Known gaps (block collecting episodes, step 5)
+
+- ⚠️ **The jaw closes to its −10° stop on every grasp.** The fruit sinks ~6 mm into the finger outline
+  instead of stalling the servo, so the 50 % and 25 % torque grasp tests give identical results: the hold
+  comes from that sink, not from the motor torque. Recorded gripper state while holding reads ~0 whatever
+  the fruit size, while the real servo should stall higher. Measure first: grip a cherry tomato with the
+  real follower and read its gripper value, then tune the finger contact until the sim stalls there.
+- ⚠️ **The birdseye target is 12–20 px across in sim.** The BLUSH notes estimate ~6 px for the real
+  130° lens at 640x480, so fovy 60 is probably 2–3x too zoomed in. Measure the intrinsics before
+  step 4, or the sim YOLO recall will look better than it is.
+
 ## Unverified (needs the real rig)
 
-- **Joint signs and zero offsets** (`arm_map.SIGN`): check with `view_scene.py --leader`.
+- **Joint signs and zero offsets** (`arm_map.SIGN`): check with `view_scene.py --leader`. That path has
+  never run against the arm: the leader object builds and loads `leader_black.json`, but `connect()` is untested.
 - **Camera intrinsics + lens distortion** (fovy 60 is a design guess) and the **claw camera mount**
   (the SO-ARM100 wrist camera mount is a placeholder).
 - **Arm yaw and target row** (`scene.ARM_YAW_DEG`, `TARGET_ROW`).

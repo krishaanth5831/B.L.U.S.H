@@ -82,6 +82,12 @@ def main():
 
     leader = connect_leader() if a.leader else None
     if leader:
+        # Start the sim arm where the leader already is. Otherwise it swings from the start pose
+        # to the leader's pose at full gain and knocks fruit off before the first check.
+        act = leader.get_action()
+        d.qpos[qidx] = fm.norm_to_rad([act[f"{j}.pos"] for j in arm_map.JOINTS])
+        d.ctrl[uidx] = d.qpos[qidx]
+        mujoco.mj_forward(m, d)
         print("leader connected: move it, the sim arm follows. Close the window to stop.")
 
     renderer = cv2 = None
