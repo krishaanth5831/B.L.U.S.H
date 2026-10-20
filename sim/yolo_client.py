@@ -30,13 +30,26 @@ CONF_FLOOR = 0.05
 MAX_FRAMES, MAX_H, MAX_W = 4, 480, 640     # what the shared frames file holds (config/hardware.env size)
 
 
+def _sweep_stale(folder):
+    """Delete frames files left by YOLO clients whose process is gone. ⚠️ A crash (an abort skips
+    close() and __del__) left a 3.7 MB file in /dev/shm, which is RAM."""
+    for p in pathlib.Path(folder).glob("blush_yolo_*_*.u8"):
+        try:
+            pid = int(p.name.split("_")[2])
+        except (IndexError, ValueError):
+            continue
+        if not pathlib.Path(f"/proc/{pid}").exists():
+            p.unlink(missing_ok=True)
+
+
 class YoloClient:
     def __init__(self, weights=WEIGHTS, python=RIPENESS_PYTHON, conf=CONF_FLOOR):
         if not pathlib.Path(python).exists():
             raise FileNotFoundError(f"ripeness env python not found at {python} (set BLUSH_RIPENESS_PYTHON)")
         self.weights = pathlib.Path(weights)
-        shm = "/dev/shm" if os.path.isdir("/dev/shm") else None
-        fd, self.frames_path = tempfile.mkstemp(prefix="blush_yolo_", suffix=".u8", dir=shm)
+        shm = "/dev/shm" if os.path.isdir("/dev/shm") else tempfile.gettempdir()
+        _sweep_stale(shm)
+        fd, self.frames_path = tempfile.mkstemp(prefix=f"blush_yolo_{os.getpid()}_", suffix=".u8", dir=shm)
         os.close(fd)
         self.shared = np.memmap(self.frames_path, dtype=np.uint8, mode="w+", shape=(MAX_FRAMES * MAX_H * MAX_W * 3,))
         self.p = subprocess.Popen([python, str(HERE / "yolo_worker.py"), str(self.weights), str(conf), self.frames_path],

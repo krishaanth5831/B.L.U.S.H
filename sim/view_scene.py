@@ -16,10 +16,15 @@ turns the same way and lands where the real follower would. The leader is read o
 no calibration written). Writes nothing. Run in the lerobot env.
 """
 import argparse
+import os
 import pathlib
 import time
 
-import mujoco
+# ⚠️ Camera renders through EGL, not GLFW: a GLFW renderer starting while the viewer's thread starts
+# GLFW can abort the process (see the plugin). Before mujoco is imported.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
+import mujoco  # noqa: E402
 import mujoco.viewer
 import numpy as np
 
@@ -100,54 +105,56 @@ def main():
             yolo = YoloClient()
     cam_dt, next_cam, next_print = 1.0 / 15, 0.0, 0.0   # preview at 15 fps; recording will use 30
 
-    with mujoco.viewer.launch_passive(m, d) as v:
-        v.cam.lookat[:] = (0.38, 0.28, 0.25)
-        v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.9, 215, -22
-        t0_wall, t0_sim = time.time(), d.time
-        while v.is_running():
-            if leader:
-                act = leader.get_action()
-                norm = np.array([act[f"{j}.pos"] for j in arm_map.JOINTS])
-                with v.lock():
-                    d.ctrl[uidx] = fm.norm_to_rad(norm)
-            # Step the sim until it catches up with the wall clock.
-            with v.lock():
-                while d.time - t0_sim < time.time() - t0_wall:
-                    mujoco.mj_step(m, d)
-                    for k in det.step():
-                        f = info["fruit"][k]
-                        print(f">>> plucked {f['tomato']} ({f['ripeness']}) at {det.force_at[k]:.2f} N"
-                              f"{'  <- the target' if k == tgt else ''}")
-            v.sync()
-            now = time.time()
-            if leader and now > next_print:
-                next_print = now + 0.5
-                with v.lock():
-                    sim = fm.rad_to_norm(d.qpos[qidx])
-                print("leader " + " ".join(f"{x:+6.1f}" for x in norm) + "  | sim " +
-                      " ".join(f"{x:+6.1f}" for x in sim), flush=True)
-            if cams and now > next_cam:
-                next_cam = now + cam_dt
-                with v.lock():
-                    claw, bird = cams.rgb(d, "claw"), cams.rgb(d, "birdseye")
-                    ids = cams.ids(d, "birdseye") if not picked and a.overlay != "none" else None
-                dets_b, dets_c = yolo.many([bird, claw]) if yolo else ([], [])
-                if ids is not None:          # the start frame: pick the target, hold it from here on
+    try:
+        with mujoco.viewer.launch_passive(m, d) as v:
+            v.cam.lookat[:] = (0.38, 0.28, 0.25)
+            v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.9, 215, -22
+            t0_wall, t0_sim = time.time(), d.time
+            while v.is_running():
+                if leader:
+                    act = leader.get_action()
+                    norm = np.array([act[f"{j}.pos"] for j in arm_map.JOINTS])
                     with v.lock():
-                        st = target.start_frame(cams, d, m, info, dets_b, ids=ids)
-                    tgt, box, picked, by_yolo = st["target"], st["box"], True, st["source"] == "yolo"
-                    print(f"target: {st['target_name']} ({st['source']} {st['reason']})")
-                if a.overlay != "none":
-                    names = yolo.ready() if yolo else {}
-                    bird = ov.draw_overlay(bird, dets_b, names, target=box, label_target=by_yolo)
-                    claw = ov.draw_overlay(claw, dets_c, names)
-                cv2.imshow("claw | birdseye (red = YOLO, green = target)", np.hstack([claw, bird])[..., ::-1])
-                cv2.waitKey(1)
-            time.sleep(0.002)
+                        d.ctrl[uidx] = fm.norm_to_rad(norm)
+                # Step the sim until it catches up with the wall clock.
+                with v.lock():
+                    while d.time - t0_sim < time.time() - t0_wall:
+                        mujoco.mj_step(m, d)
+                        for k in det.step():
+                            f = info["fruit"][k]
+                            print(f">>> plucked {f['tomato']} ({f['ripeness']}) at {det.force_at[k]:.2f} N"
+                                  f"{'  <- the target' if k == tgt else ''}")
+                v.sync()
+                now = time.time()
+                if leader and now > next_print:
+                    next_print = now + 0.5
+                    with v.lock():
+                        sim = fm.rad_to_norm(d.qpos[qidx])
+                    print("leader " + " ".join(f"{x:+6.1f}" for x in norm) + "  | sim " +
+                          " ".join(f"{x:+6.1f}" for x in sim), flush=True)
+                if cams and now > next_cam:
+                    next_cam = now + cam_dt
+                    with v.lock():
+                        claw, bird = cams.rgb(d, "claw"), cams.rgb(d, "birdseye")
+                        ids = cams.ids(d, "birdseye") if not picked and a.overlay != "none" else None
+                    dets_b, dets_c = yolo.many([bird, claw]) if yolo else ([], [])
+                    if ids is not None:          # the start frame: pick the target, hold it from here on
+                        with v.lock():
+                            st = target.start_frame(cams, d, m, info, dets_b, ids=ids)
+                        tgt, box, picked, by_yolo = st["target"], st["box"], True, st["source"] == "yolo"
+                        print(f"target: {st['target_name']} ({st['source']} {st['reason']})")
+                    if a.overlay != "none":
+                        names = yolo.ready() if yolo else {}
+                        bird = ov.draw_overlay(bird, dets_b, names, target=box, label_target=by_yolo)
+                        claw = ov.draw_overlay(claw, dets_c, names)
+                    cv2.imshow("claw | birdseye (red = YOLO, green = target)", np.hstack([claw, bird])[..., ::-1])
+                    cv2.waitKey(1)
+                time.sleep(0.002)
+    finally:
+        if yolo:
+            yolo.close()   # also on Ctrl+C: the worker + its /dev/shm frames file go away
     if leader:
         leader.disconnect()
-    if yolo:
-        yolo.close()
 
 
 if __name__ == "__main__":

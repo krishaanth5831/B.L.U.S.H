@@ -15,16 +15,22 @@ Ctrl + right-drag pulls a tomato by hand. Plucks and crate drops are printed in 
 """
 import json
 import logging
+import os
 import pathlib
 import sys
 import threading
 import time
 
-import numpy as np
+# ⚠️ Camera renders go through EGL (headless), never GLFW: the MuJoCo window's thread and a GLFW
+# camera renderer starting at the same moment tripped a GLFW assertion and aborted the process
+# (1 run in 2, 2026-10-20). Must be set before mujoco is first imported.
+os.environ.setdefault("MUJOCO_GL", "egl")
 
-from lerobot.robots.robot import Robot
+import numpy as np  # noqa: E402
 
-from .config_so101_mujoco import SO101MujocoConfig
+from lerobot.robots.robot import Robot  # noqa: E402
+
+from .config_so101_mujoco import SO101MujocoConfig  # noqa: E402
 
 SIM_DIR = pathlib.Path(__file__).resolve().parents[2]   # B.L.U.S.H/sim
 if str(SIM_DIR) not in sys.path:
@@ -210,6 +216,9 @@ class SO101Mujoco(Robot):
             self._yolo = YoloClient()          # loads in the background; the first frame waits for it
             self._yolo_meta = dict(self._yolo.meta(), t_ripe_birdseye=tg.T_RIPE_BIRDSEYE)
         self._build(self.config.seed)
+        if self.config.viewer:
+            import glfw
+            glfw.init()                        # once, on this thread, before the viewer thread starts GLFW
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="so101_mujoco_physics", daemon=True)
         self._thread.start()
