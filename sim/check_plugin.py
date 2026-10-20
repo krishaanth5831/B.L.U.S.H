@@ -71,8 +71,10 @@ def main():
                           f"at a lag of {lag} frames ({lag * 1000 / fps:.0f} ms)")
     report(np.percentile(t_act, 95) < 1 / fps, f"send_action + get_observation p95 {np.percentile(t_act, 95)*1000:.1f} ms "
                                                f"(budget {1000/fps:.1f} ms at {fps} fps)")
-    green = (o["birdseye"][..., 1] == 255) & (o["birdseye"][..., 0] == 0) & (o["birdseye"][..., 2] == 0)
-    report(green.sum() > 50, f"true_box overlay drawn on birdseye ({int(green.sum())} box pixels)")
+    from harvest import yolo_overlay as ov
+    box_px = int(np.all(o["birdseye"] == ov.TARGET_COLOUR, axis=-1).sum())
+    report(box_px > 200 and robot._box_info["source"] == "true_box",
+           f"true_box overlay: green target box drawn on birdseye ({box_px} px, harvest/yolo_overlay.py style)")
 
     # Record exactly like lerobot-record: default processors -> features -> frames -> AV1 episode.
     tap, rap, rop = make_default_processors()
@@ -113,6 +115,52 @@ def main():
         report(True, "rerun accepts the observation (both camera images) and the action")
     except Exception as e:  # noqa: BLE001
         report(False, f"rerun logging: {e}")
+
+    # overlay=yolo (what sim/scripts use): YOLO on both cameras every frame, drawn into the frames.
+    ycfg = RobotConfig.get_choice_class("so101_mujoco")(viewer=False, overlay="yolo", state_log_dir=f"{tmp}/ystates",
+                                                        snap_to_first_action=False)
+    yrobot = make_robot_from_config(ycfg)
+    t0 = time.perf_counter()
+    yrobot.connect()
+    yobs = yrobot.get_observation()
+    t_first = time.perf_counter() - t0
+    info = yrobot._box_info
+    report(info is not None and info["source"] in ("yolo", "true_box", "true_box_hidden")
+           and info["target"] in yrobot.info["ripe"],
+           f"overlay=yolo: target {info and info['target_name']} is one of the {len(yrobot.info['ripe'])} ripe fruits, "
+           f"source {info and info['source']} ({info and info['reason'] or 'YOLO matched'}), first frame "
+           f"{t_first:.1f} s incl. loading the weights")
+    secs_y = 15.0
+    t_obs, red, green = [], {"birdseye": 0, "claw": 0}, 0
+    for k in range(int(fps * secs_y)):
+        t1 = time.perf_counter()
+        s = np.sin(2 * np.pi * k / (fps * 5))
+        yrobot.send_action({f"{j}.pos": v for j, v in zip(
+            ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"),
+            (30 * s, -20 + 10 * s, 20 * s, 15 * s, 40 * s, 50 + 40 * s))})
+        t2 = time.perf_counter()
+        yobs = yrobot.get_observation()
+        t_obs.append(time.perf_counter() - t2)
+        for c in red:
+            red[c] += bool(np.all(yobs[c] == ov.DET_COLOUR, axis=-1).sum() > 20)   # RGB red, not BGR
+        green += bool(np.all(yobs["birdseye"] == ov.TARGET_COLOUR, axis=-1).sum() > 200)
+        time.sleep(max(0, 1 / fps - (time.perf_counter() - t1)))
+    yrobot.disconnect()
+    n = len(t_obs)
+    p95 = np.percentile(t_obs, 95) * 1000
+    report(p95 < 20, f"overlay=yolo get_observation p95 {p95:.1f} ms over {secs_y:.0f} s (render + YOLO on both "
+                     f"cameras + drawing, every frame; budget 20 of the {1000 / fps:.1f} ms frame)")
+    report(green == n, f"green target box on every birdseye frame ({green}/{n})")
+    report(red["birdseye"] > 0 and red["claw"] > 0,
+           f"red detection boxes drawn in RGB: birdseye {red['birdseye']}/{n} frames, claw {red['claw']}/{n}")
+    import json
+    ylog = os.path.join(f"{tmp}/ystates", os.listdir(f"{tmp}/ystates")[0])
+    meta = json.loads(open(os.path.join(ylog, "session.json")).read())
+    sc = meta["scenes"][-1]
+    z = np.load(os.path.join(ylog, [f for f in os.listdir(ylog) if f.endswith(".npz")][0]))
+    report(sc["yolo"]["weights_sha256"] and sc["box"]["target_name"] and len(z["dets_json"]) == len(z["qpos"]) > n,
+           f"state log keeps the target, the weights hash ({sc['yolo']['weights']} {sc['yolo']['weights_sha256'][:12]}) "
+           f"and every frame's YOLO output ({len(z['dets_json'])} frames)")
 
     import shutil
     shutil.rmtree(tmp)

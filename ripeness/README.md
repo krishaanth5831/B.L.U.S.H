@@ -32,6 +32,7 @@ ripeness/
 │   └── yolo/                   image lists + dataset yamls, built by build_split.py  (gitignored)
 ├── scripts/                capture → convert → remap → split → train → eval
 ├── gate/pick_target.py     the runtime gate: frame in, pick target (or None) out
+├── gate/birdseye.py        the birdseye selection rule (no ultralytics; the sim uses it too)
 └── models/                 released weights, gate.yaml (threshold), results.csv
 ```
 

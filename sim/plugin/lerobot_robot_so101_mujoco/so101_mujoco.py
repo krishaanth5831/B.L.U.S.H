@@ -5,22 +5,32 @@
 - send_action takes the leader's normalised values and converts them through follower_white.json,
   as the real follower does (sim/arm_map.py).
 - Physics runs in its own thread at wall-clock speed, like a real arm moving between calls.
+- Cameras go through the InnoMaker lens model (sim/lens.py). overlay="yolo" runs the ripeness YOLO
+  on both cameras every frame and draws its view into the frames (harvest/yolo_overlay.py): red
+  boxes + class + confidence on every detection, and on the birdseye a green box on the target, which
+  is picked among the scene's 2-3 ripe fruits on its first frame and then held (sim/target.py).
 
 MuJoCo window keys: N = new vine layout (next seed). Press it during lerobot-record's reset period.
 Ctrl + right-drag pulls a tomato by hand. Plucks and crate drops are printed in the terminal.
 """
 import json
 import logging
+import os
 import pathlib
 import sys
 import threading
 import time
 
-import numpy as np
+# ⚠️ Camera renders go through EGL (headless), never GLFW: the MuJoCo window's thread and a GLFW
+# camera renderer starting at the same moment tripped a GLFW assertion and aborted the process
+# (1 run in 2, 2026-10-20). Must be set before mujoco is first imported.
+os.environ.setdefault("MUJOCO_GL", "egl")
 
-from lerobot.robots.robot import Robot
+import numpy as np  # noqa: E402
 
-from .config_so101_mujoco import SO101MujocoConfig
+from lerobot.robots.robot import Robot  # noqa: E402
+
+from .config_so101_mujoco import SO101MujocoConfig  # noqa: E402
 
 SIM_DIR = pathlib.Path(__file__).resolve().parents[2]   # B.L.U.S.H/sim
 if str(SIM_DIR) not in sys.path:
@@ -28,11 +38,13 @@ if str(SIM_DIR) not in sys.path:
 
 import arm_map  # noqa: E402
 import scene  # noqa: E402
+import target as tg  # noqa: E402
 import tomato as tm  # noqa: E402
+from cameras import CAMERAS, SimCameras  # noqa: E402
+from harvest import yolo_overlay as ov  # noqa: E402  (target.py put the repo root on sys.path)
 
 logger = logging.getLogger(__name__)
-CAMERAS = ("birdseye", "claw")   # ⚠️ same names + order as harvest/scripts/common.sh, or the policy swaps them
-CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw"}
+OVERLAYS = ("none", "true_box", "yolo")
 KEY_N = 78                       # GLFW key code
 MAX_CATCH_UP_S = 0.1             # after a stall (a slow policy call), skip ahead instead of fast-forwarding
 
@@ -47,6 +59,8 @@ class SO101Mujoco(Robot):
         super().__init__(config)
         if config.use_degrees:
             raise ValueError("so101_mujoco only speaks use_degrees=false units (see sim/arm_map.py)")
+        if config.overlay not in OVERLAYS:
+            raise ValueError(f"overlay={config.overlay!r}: one of {OVERLAYS}")
         self.config = config
         self.cameras = dict.fromkeys(CAMERAS)   # names only; lerobot-rollout counts them
         self._lock = threading.RLock()
@@ -54,8 +68,9 @@ class SO101Mujoco(Robot):
         self._stop = threading.Event()
         self._want_new = threading.Event()
         self._connected = False
-        self._renderer = None
-        self._renderer_key = None
+        self._cams = None
+        self._cams_key = None
+        self._yolo = None
         self._gen = 0
         self._session = time.strftime("%Y%m%d_%H%M%S")
 
@@ -94,14 +109,15 @@ class SO101Mujoco(Robot):
         self._gen += 1
         self._snap = self.config.snap_to_first_action
         self._box = None
+        self._box_info = None
+        self._tgt_k = None                   # the target fruit, picked on the scene's first frame
+        self._tgt_body = None
         self._dropped = False
         self._log = []
-        t = self.info["fruit"][self.info["target"]]
-        self._tgt_body = self.m.body(t["tomato"]).id
-        self._tgt_geom = self.m.geom(t["geom"]).id
+        breaks = ", ".join(f"{self.info['fruit'][k]['threshold']:.2f}" for k in self.info["ripe"])
         print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(self.info['fruit'])} tomatoes, "
-              f"ripe target breaks at {t['threshold']:.2f} N  (press N in the MuJoCo window for a new layout)",
-              flush=True)
+              f"{len(self.info['ripe'])} ripe (break at {breaks} N). "
+              f"Press N in the MuJoCo window for a new layout", flush=True)
 
     def _save_log(self):
         if not self.config.state_log_dir or not self._log:
@@ -112,13 +128,19 @@ class SO101Mujoco(Robot):
         np.savez_compressed(out / f"scene{self._gen:03d}_seed{self.seed}.npz",
                             t_sim=np.array([r[0] for r in rows]), t_wall=np.array([r[1] for r in rows]),
                             qpos=np.array([r[2] for r in rows]), eq_active=np.array([r[3] for r in rows]),
-                            state=np.array([r[4] for r in rows]))
+                            state=np.array([r[4] for r in rows]),
+                            # Every frame's raw YOLO output per camera (JSON), so the drawn view can be
+                            # audited or redrawn exactly; empty when overlay != "yolo".
+                            dets_json=np.array([r[5] for r in rows]))
         meta = out / "session.json"
         info = json.loads(meta.read_text()) if meta.exists() else {"scenes": []}
         info.update(self.fm.meta())
+        # The target + box per scene, so a re-render (step 6) redraws exactly the same one.
         info["scenes"].append({"gen": self._gen, "seed": self.seed, "frames": len(rows),
-                               "target": self.info["fruit"][self.info["target"]]["tomato"],
-                               "dropped_in_crate": self._dropped})
+                               "target": self._box_info and self._box_info["target_name"],
+                               "dropped_in_crate": self._dropped, "overlay": self.config.overlay,
+                               "display_conf": ov.DISPLAY_CONF, "box": self._box_info,
+                               "yolo": self._yolo_meta})
         meta.write_text(json.dumps(info, indent=2))
         self._log = []
 
@@ -127,10 +149,22 @@ class SO101Mujoco(Robot):
         if not self.config.viewer:
             return None
         import mujoco.viewer
+        before = set(threading.enumerate())
         v = mujoco.viewer.launch_passive(self.m, self.d, key_callback=self._key)
+        # The viewer's render-loop thread (launch_passive doesn't hand it out), for _close_viewer.
+        v._blush_threads = [t for t in set(threading.enumerate()) - before if "_launch_internal" in t.name]
         v.cam.lookat[:] = (0.38, 0.22, 0.25)
         v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.95, 215, -22
         return v
+
+    @staticmethod
+    def _close_viewer(v):
+        # ⚠️ close() only asks the viewer's render loop to stop, and is_running() turns false before
+        # it has. A new viewer opened next to a still-running loop, or the process exiting while it
+        # runs (glfw.terminate at exit), hangs forever (seen 2026-10-20). Join the thread itself.
+        v.close()
+        for t in getattr(v, "_blush_threads", []):
+            t.join(timeout=5)
 
     def _key(self, keycode):
         if keycode == KEY_N:
@@ -145,7 +179,7 @@ class SO101Mujoco(Robot):
             if self._want_new.is_set():
                 self._want_new.clear()
                 if v is not None:
-                    v.close()
+                    self._close_viewer(v)
                 with self._lock:
                     self._save_log()
                     self._build(self.seed + 1)
@@ -160,8 +194,9 @@ class SO101Mujoco(Robot):
                     for k in self.det.step():
                         f = self.info["fruit"][k]
                         print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N"
-                              f"{'  <- the target' if k == self.info['target'] else ''}", flush=True)
-                if not self._dropped and scene.in_crate(self.d.xpos[self._tgt_body]):
+                              f"{'  <- the target' if k == self._tgt_k else ''}", flush=True)
+                if (not self._dropped and self._tgt_body is not None
+                        and scene.in_crate(self.d.xpos[self._tgt_body])):
                     self._dropped = True
                     print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
             if v is not None and now > next_sync:
@@ -170,12 +205,20 @@ class SO101Mujoco(Robot):
                     v.sync()
             time.sleep(0.001)
         if v is not None:
-            v.close()
+            self._close_viewer(v)
 
     # --- lerobot API ---
     def connect(self, calibrate: bool = True) -> None:
         self.fm = arm_map.FollowerMap()
+        self._yolo_meta = None
+        if self.config.overlay == "yolo":
+            from yolo_client import YoloClient
+            self._yolo = YoloClient()          # loads in the background; the first frame waits for it
+            self._yolo_meta = dict(self._yolo.meta(), t_ripe_birdseye=tg.T_RIPE_BIRDSEYE)
         self._build(self.config.seed)
+        if self.config.viewer:
+            import glfw
+            glfw.init()                        # once, on this thread, before the viewer thread starts GLFW
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="so101_mujoco_physics", daemon=True)
         self._thread.start()
@@ -201,42 +244,66 @@ class SO101Mujoco(Robot):
             self.d.ctrl[self.uidx] = q
         return {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, goal)}
 
-    def _render(self):
-        import mujoco
+    def _cameras(self):
         key = (self._gen, threading.get_ident())
-        if self._renderer_key != key:          # ⚠️ a renderer is bound to one model and one GL thread
-            if self._renderer is not None:
-                self._renderer.close()
-            self._renderer = mujoco.Renderer(self.m, scene.CAM_H, scene.CAM_W)
-            self._renderer_key = key
-        r, imgs = self._renderer, {}
-        for c in CAMERAS:
-            r.update_scene(self.d, camera=CAM_IN_MODEL[c])
-            imgs[c] = r.render().copy()
-        if self.config.overlay == "true_box":
-            if self._box is None:              # fixed for the scene, like the real start-frame box
-                r.enable_segmentation_rendering()
-                r.update_scene(self.d, camera="birdseye")
-                seg = r.render()
-                r.disable_segmentation_rendering()
-                ys, xs = np.nonzero((seg[..., 0] == self._tgt_geom) & (seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM))
-                if len(xs):
-                    self._box = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
-            if self._box is not None:
-                import cv2
-                # ⚠️ Must match the real overlay's style once that script exists (not written yet).
-                cv2.rectangle(imgs["birdseye"], self._box[:2], self._box[2:], (0, 255, 0), 2)
-        elif self.config.overlay != "none":
-            raise ValueError(f"overlay={self.config.overlay!r}: only 'none' and 'true_box' exist so far")
-        return imgs
+        if self._cams_key != key:              # ⚠️ a renderer is bound to one model and one GL thread
+            if self._cams is not None:
+                self._cams.close()
+            self._cams = SimCameras(self.m)
+            self._cams_key = key
+        return self._cams
+
+    def _pick_target(self, dets_birdseye, ids, gen):
+        """The scene's start frame: which ripe fruit is the target, and its box."""
+        with self._lock:
+            if gen != self._gen:               # N was pressed meanwhile: this frame belongs to the old scene
+                return
+            info = tg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids)
+            if self.config.overlay == "true_box":
+                info["reason"] = "overlay=true_box"
+            self._box_info, self._box = info, info["box"]
+            self._tgt_k = info["target"]
+            self._tgt_body = None if self._tgt_k is None else self.m.body(info["target_name"]).id
+        why = info["reason"].replace("_", " ")
+        if info["source"] == "yolo":
+            what = f"YOLO picked it (ripe {info['yolo_conf']:.0%}, IoU {info['yolo_iou']} with its true box)"
+        elif info["source"] == "true_box":
+            what = f"true box ({why})"
+        elif info["source"] == "true_box_hidden":
+            what = f"true box around a hidden ripe fruit ({why})"
+        else:
+            what = f"no box ({why})"
+        print(f"[so101_mujoco] scene {gen} target: {info['target_name']} of {len(info['ripe'])} ripe, {what}",
+              flush=True)
 
     def get_observation(self):
         with self._lock:
             state = self._present_norm()
             obs = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, state)}
-            obs.update(self._render())
-            if self.config.state_log_dir:
-                self._log.append((self.d.time, time.time(), self.d.qpos.copy(), self.d.eq_active.copy(), state))
+            cams = self._cameras()
+            for c in CAMERAS:
+                obs[c] = cams.rgb(self.d, c)
+            # The start frame: the first one after the arm reached the leader's pose (the snap).
+            need_target = self.config.overlay != "none" and self._box_info is None and not self._snap
+            ids = cams.ids(self.d, "birdseye") if need_target else None
+            gen = self._gen
+            # ⚠️ The sim state of THIS frame (YOLO below takes ~11 ms, the physics keeps running).
+            row = (self.d.time, time.time(), self.d.qpos.copy(), self.d.eq_active.copy(), state)
+        # YOLO runs outside the lock: it must not stall the physics. ~11 ms for both cameras.
+        dets = self._yolo.many([obs[c] for c in CAMERAS]) if self._yolo is not None else [[] for _ in CAMERAS]
+        dets = dict(zip(CAMERAS, dets))
+        if need_target:
+            self._pick_target(dets["birdseye"], ids, gen)
+        if self.config.overlay == "yolo":
+            names = self._yolo.ready()
+            obs["birdseye"] = ov.draw_overlay(obs["birdseye"], dets["birdseye"], names, target=self._box,
+                                              label_target=bool(self._box_info) and self._box_info["source"] == "yolo")
+            obs["claw"] = ov.draw_overlay(obs["claw"], dets["claw"], names)
+        elif self.config.overlay == "true_box" and self._box is not None:
+            obs["birdseye"] = ov.draw_overlay(obs["birdseye"], [], {}, target=self._box)
+        with self._lock:
+            if self.config.state_log_dir and gen == self._gen:
+                self._log.append(row + (json.dumps(dets) if self._yolo is not None else "",))
         return obs
 
     def disconnect(self) -> None:
@@ -245,8 +312,11 @@ class SO101Mujoco(Robot):
             self._thread.join(timeout=5)
         with self._lock:
             self._save_log()
-            if self._renderer is not None:
-                self._renderer.close()
-                self._renderer = None
+            if self._cams is not None:
+                self._cams.close()
+                self._cams = None
+        if self._yolo is not None:
+            self._yolo.close()
+            self._yolo = None
         self._connected = False
         logger.info(f"{self} disconnected.")

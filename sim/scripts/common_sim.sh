@@ -20,6 +20,7 @@ SIM_ROBOT_FLAGS=(
   --robot.id=sim
   --robot.seed="$SEED"
   --robot.use_degrees="$USE_DEGREES"
+  --robot.overlay="${OVERLAY:-yolo}"   # birdseye target box (sim/target.py); OVERLAY=none for raw frames
 )
 TELEOP_FLAGS=(
   --teleop.type=so101_leader
