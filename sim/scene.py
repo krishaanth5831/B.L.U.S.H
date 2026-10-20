@@ -16,6 +16,8 @@ import mujoco
 import numpy as np
 
 import tomato as tm
+from cameras import pinhole_size
+from lens import LENSES
 
 HERE = pathlib.Path(__file__).resolve().parent
 SO101_XML = HERE / "assets" / "so101" / "so101_new_calib_camera.xml"
@@ -78,16 +80,19 @@ PLA_RGBA = (0.92, 0.92, 0.90, 1)   # ⚠️ unverified: real filament colours. T
 TPU_RGBA = (0.15, 0.15, 0.15, 1)
 
 # --- cameras ---
-# Birdseye: printed mast default pose (greenhouse generator LENS / LENS_TILT_DEG).
+# Birdseye: the printed mast's default pose (greenhouse generator LENS / LENS_TILT_DEG). The mast
+# isn't printed yet, so this is the design pose (unverified).
 BIRDSEYE_POS = (-0.120, 0.200, 0.423)
 BIRDSEYE_TILT_DEG = 20.0
-# ⚠️ unverified: the generator's LENS_VFOV = 60 is a design guess, not a measurement of the
-# InnoMaker 130 deg lens in 640x480 MJPG mode. Measure intrinsics + distortion, then replace.
-BIRDSEYE_FOVY = 60.0
-CLAW_FOVY = 60.0                 # ⚠️ same lens, same caveat
-# ⚠️ Placeholder claw mount: SO-ARM100's wrist camera (32x32 UVC module) from
-# so101_new_calib_camera.xml. Its body +z points at the grasp zone (checked, dot 0.97), and a MuJoCo
-# camera looks down its own -z, so xyaxes flips y. Replace with the real claw camera mount.
+# Lens: both cameras render a wider pinhole image that lens.py bends into the 640x480 frame
+# (⚠️ guessed from the InnoMaker spec until calibrated; sim/cameras.json overrides it).
+BIRDSEYE_FOVY = LENSES["birdseye"].fovy
+CLAW_FOVY = LENSES["claw"].fovy
+OFF_W, OFF_H = pinhole_size()    # offscreen buffer must fit the pinhole renders, not just 640x480
+# Claw mount: SO-ARM100's stock wrist camera mount (32x32 UVC module) from
+# so101_new_calib_camera.xml. The user's claw camera sits on that stock mount, unchanged (2026-10-20),
+# and the InnoMaker board is 32x32 too. Its body +z points at the grasp zone (checked, dot 0.97), and
+# a MuJoCo camera looks down its own -z, so xyaxes flips y.
 CLAW_POS_IN_BODY = (0.0, 0.0, 0.03)   # just outside the housing mesh (its z reaches 27 mm)
 CLAW_XYAXES = (1, 0, 0, 0, -1, 0)
 
@@ -216,7 +221,7 @@ def world_xml(static, tomatoes, eqs):
   <compiler angle="radian"/>
   <option timestep="{TIMESTEP}" integrator="implicitfast" cone="{CONE}" impratio="{IMPRATIO}"/>
   <visual>
-    <global offwidth="{CAM_W}" offheight="{CAM_H}" azimuth="200" elevation="-25"/>
+    <global offwidth="{OFF_W}" offheight="{OFF_H}" azimuth="200" elevation="-25"/>
     <headlight diffuse="0.5 0.5 0.5" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <quality shadowsize="2048"/>
   </visual>

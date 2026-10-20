@@ -2,7 +2,8 @@
 """Watch the sim greenhouse; optionally drive the sim arm from the real leader arm.
 
   python view_scene.py --cams              3D window + a second window with the claw | birdseye
-                                           camera images (green = the true target box)
+                                           camera images through the lens model (magenta = the
+                                           true target box, drawn the way the policy sees boxes)
   python view_scene.py --leader --cams     the real leader arm drives the sim follower (no recording)
   python view_scene.py --seed 7            another random vine layout
 
@@ -23,7 +24,10 @@ import numpy as np
 
 import arm_map
 import scene
+import target  # noqa: F401  (puts the repo root on sys.path for harvest/)
 import tomato as tm
+from cameras import SimCameras
+from harvest.target_box import draw_target_box
 
 HERE = pathlib.Path(__file__).resolve().parent
 HW_ENV = HERE.parent / "config" / "hardware.env"
@@ -56,12 +60,6 @@ def connect_leader():
     return leader
 
 
-def true_box(seg, geom_id):
-    """Pixel box (x0, y0, x1, y1) of a geom's visible pixels in a segmentation render, or None."""
-    ys, xs = np.nonzero((seg[..., 0] == geom_id) & (seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM))
-    return (xs.min(), ys.min(), xs.max(), ys.max()) if len(xs) else None
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0, help="vine layout seed")
@@ -90,10 +88,10 @@ def main():
         mujoco.mj_forward(m, d)
         print("leader connected: move it, the sim arm follows. Close the window to stop.")
 
-    renderer = cv2 = None
+    cams = cv2 = None
     if a.cams:
         import cv2
-        renderer = mujoco.Renderer(m, scene.CAM_H, scene.CAM_W)
+        cams = SimCameras(m)
     cam_dt, next_cam, next_print = 1.0 / 15, 0.0, 0.0   # preview at 15 fps; recording will use 30
 
     with mujoco.viewer.launch_passive(m, d) as v:
@@ -122,22 +120,14 @@ def main():
                     sim = fm.rad_to_norm(d.qpos[qidx])
                 print("leader " + " ".join(f"{x:+6.1f}" for x in norm) + "  | sim " +
                       " ".join(f"{x:+6.1f}" for x in sim), flush=True)
-            if renderer and now > next_cam:
+            if cams and now > next_cam:
                 next_cam = now + cam_dt
-                imgs = []
                 with v.lock():
-                    for cam in ("arm/claw", "birdseye"):
-                        renderer.update_scene(d, camera=cam)
-                        rgb = renderer.render().copy()
-                        if cam == "birdseye":
-                            renderer.enable_segmentation_rendering()
-                            renderer.update_scene(d, camera=cam)
-                            box = true_box(renderer.render(), tgt_geom)
-                            renderer.disable_segmentation_rendering()
-                            if box is not None:
-                                cv2.rectangle(rgb, box[:2], box[2:], (0, 255, 0), 2)
-                        imgs.append(rgb)
-                cv2.imshow("claw | birdseye (green = true target box)", np.hstack(imgs)[..., ::-1])
+                    claw, bird = cams.rgb(d, "claw"), cams.rgb(d, "birdseye")
+                    box, _ = cams.true_box(d, "birdseye", tgt_geom)
+                if box is not None:
+                    bird = draw_target_box(bird, box)
+                cv2.imshow("claw | birdseye (magenta = true target box)", np.hstack([claw, bird])[..., ::-1])
                 cv2.waitKey(1)
             time.sleep(0.002)
     if leader:

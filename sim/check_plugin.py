@@ -71,8 +71,10 @@ def main():
                           f"at a lag of {lag} frames ({lag * 1000 / fps:.0f} ms)")
     report(np.percentile(t_act, 95) < 1 / fps, f"send_action + get_observation p95 {np.percentile(t_act, 95)*1000:.1f} ms "
                                                f"(budget {1000/fps:.1f} ms at {fps} fps)")
-    green = (o["birdseye"][..., 1] == 255) & (o["birdseye"][..., 0] == 0) & (o["birdseye"][..., 2] == 0)
-    report(green.sum() > 50, f"true_box overlay drawn on birdseye ({int(green.sum())} box pixels)")
+    from harvest.target_box import COLOUR
+    box_px = int(np.all(o["birdseye"] == COLOUR, axis=-1).sum())
+    report(box_px > 200 and robot._box_info["source"] == "true_box",
+           f"true_box overlay drawn on birdseye ({box_px} box pixels, harvest/target_box.py style)")
 
     # Record exactly like lerobot-record: default processors -> features -> frames -> AV1 episode.
     tap, rap, rop = make_default_processors()
@@ -113,6 +115,25 @@ def main():
         report(True, "rerun accepts the observation (both camera images) and the action")
     except Exception as e:  # noqa: BLE001
         report(False, f"rerun logging: {e}")
+
+    # overlay=yolo: the ripeness YOLO in its own env picks the start-frame box (what sim/scripts use).
+    ycfg = RobotConfig.get_choice_class("so101_mujoco")(viewer=False, overlay="yolo", state_log_dir=None,
+                                                        snap_to_first_action=False)
+    yrobot = make_robot_from_config(ycfg)
+    t0 = time.perf_counter()
+    yrobot.connect()
+    yobs = yrobot.get_observation()
+    t_first = time.perf_counter() - t0
+    info = yrobot._box_info
+    t_next = []
+    for _ in range(30):
+        t1 = time.perf_counter(); yobs = yrobot.get_observation(); t_next.append(time.perf_counter() - t1)
+    yrobot.disconnect()
+    report(info is not None and info["source"] in ("yolo", "true_box", "true_box_hidden"),
+           f"overlay=yolo picked a start-frame box: source {info and info['source']} ({info and info['reason'] or 'matched'}), "
+           f"{info and info['n_dets']} YOLO boxes, first frame {t_first:.1f} s incl. loading the weights")
+    report(np.percentile(t_next, 95) < 1 / fps, f"overlay=yolo later frames p95 {np.percentile(t_next, 95)*1000:.1f} ms "
+                                               "(YOLO runs once per scene, not per frame)")
 
     import shutil
     shutil.rmtree(tmp)

@@ -19,6 +19,7 @@ import numpy as np  # noqa: E402
 
 import arm_map  # noqa: E402
 import scene  # noqa: E402
+from cameras import SimCameras  # noqa: E402
 import tomato as tm  # noqa: E402
 
 FAILS = 0
@@ -98,7 +99,7 @@ def check_full_scene(seeds):
     for seed in seeds:
         m, d, info = scene.build(seed)
         qidx, uidx = scene.arm_ids(m)
-        r = mujoco.Renderer(m, scene.CAM_H, scene.CAM_W)   # ⚠️ one per model: a renderer is bound to its model
+        cams = SimCameras(m)   # ⚠️ one per model: a renderer is bound to its model
         arm_geoms = [i for i in range(m.ngeom) if m.geom(i).name.startswith("arm/") or
                      m.body(m.geom_bodyid[i]).name.startswith("arm/")]
         house = [i for i in range(m.ngeom) if not m.body(m.geom_bodyid[i]).name.startswith(("arm/", "s"))
@@ -112,20 +113,16 @@ def check_full_scene(seeds):
         drift = np.degrees(np.abs(d.qpos[qidx] - d.ctrl[uidx])).max()
         report(np.all(np.isnan(det.detached_at)) and drift < 2.0,
                f"seed {seed}: 2 s at the start pose, no release, arm holds within {drift:.2f} deg")
-        # Cameras: the ripe target in the birdseye view, the fingers in the claw view.
-        r.enable_segmentation_rendering()
-        r.update_scene(d, camera="birdseye")
-        seg = r.render()
+        # Cameras (through the lens model): the ripe target in the birdseye view, the fingers in the claw view.
         tgt = gid(m, info["fruit"][info["target"]]["geom"])
-        px = int(np.sum((seg[..., 0] == tgt) & (seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM)))
+        box, px = cams.true_box(d, "birdseye", tgt)
         report(px >= 30, f"seed {seed}: ripe target visible in birdseye, {px} px "
-                         f"(≈{2*np.sqrt(px/np.pi):.0f} px across at {scene.CAM_W}x{scene.CAM_H})")
-        r.update_scene(d, camera="arm/claw")
-        seg = r.render()
-        fing = {gid(m, "arm/finger_fixed"), gid(m, "arm/finger_moving")}
-        fpx = int(np.sum(np.isin(seg[..., 0], list(fing)) & (seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM)))
+                         f"({box and box[2] - box[0] + 1} px across at {scene.CAM_W}x{scene.CAM_H})")
+        ids = cams.ids(d, "claw")
+        fing = [gid(m, "arm/finger_fixed"), gid(m, "arm/finger_moving")]
+        fpx = int(np.isin(ids, fing).sum())
         report(fpx > 500, f"seed {seed}: claw camera sees the fin-ray fingers, {fpx} px")
-        r.close()
+        cams.close()
 
 
 # ----------------------------------------------------------------------------------------------

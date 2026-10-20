@@ -42,7 +42,9 @@ On a vine with ten fruits, the policy doesn't know which one the gate chose.
 for the whole episode. The claw gate confirms just before the close (precision-tuned) or
 aborts and logs `claw_veto`. v1 scenes hold exactly one ripe fruit, so the box can be drawn
 after recording. ⚠️ That box-drawing script isn't written yet, and `harvest_loop.py`
-and `control/` still follow the older hybrid design.
+and `control/` still follow the older hybrid design. The box **style** is fixed in
+`target_box.py` (magenta, 5 px, outside the fruit), the one function the sim, the overlay script
+and the rollout all draw with. The birdseye selection rule is `ripeness/gate/birdseye.py`.
 
 ## Locked recording decisions
 
