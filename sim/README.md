@@ -82,7 +82,7 @@ All print PASS/FAIL (or a table) and write nothing.
 | File | What |
 |---|---|
 | `tomato.py` | Trusses + tomatoes. Each fruit hangs on a soft weld (the tether). `Detacher` switches the weld off once its force stays above the fruit's break force (OrchardBench fruit logic) |
-| `scene.py` | Greenhouse (laser-cut dimensions), SO-101 + bending fin-ray fingers + palm, vines with 2–3 ripe fruits, `birdseye` + `arm/claw` cameras |
+| `scene.py` | Greenhouse (laser-cut dimensions), SO-101 facing the vine row + bending fin-ray fingers + palm, crate on its right, vines with 2–3 ripe fruits (each one IK-checked reachable), `birdseye` + `arm/claw` cameras |
 | `arm_map.py` | lerobot units (`use_degrees=false`) ↔ sim joint angles through `follower_white.json`, the way the real follower converts them |
 | `lens.py` | The InnoMaker 130° lens on MuJoCo's pinhole cameras: render wider, remap through a fisheye model (OpenCV `cv2.fisheye` K, D). ⚠️ Guessed from the spec; a calibration in `cameras.json` replaces it |
 | `cameras.py` | Renders `birdseye` + `claw` through the lens; true fruit boxes from the segmentation render |
@@ -92,6 +92,15 @@ All print PASS/FAIL (or a table) and write nothing.
 | `eval_yolo_recall.py` | The recall score |
 | `view_scene.py` | The window; `--leader` reads the real leader |
 | `check_*.py` | Checks |
+
+## The layout
+
+K7's call (2026-10-20): the arm base faces the vine row R1 (turned 90° left from facing down the
+aisle, which reached only a third of the tomatoes) and the crate stands on its right, down the
+aisle, 18 cm from the base. Every ripe fruit is one IK can reach: the grasp point between the
+fingers gets to its centre within 3 mm (`scene.ik_gap`). Each scene starts with the arm tucked to
+its left (`scene.START_NORM`), clear of fruit, posts and crate, until the first leader command snaps
+it to your pose. The MuJoCo window opens behind the robot, so its left and right are yours.
 
 ## The fin-ray fingers
 
@@ -134,6 +143,12 @@ finger curls in is for the real finger to show.
   sprung ball joint. The most fragile fruit (0.58 N) now come off as the jaw closes on them, and stay
   in the grip (`check_grasp.py` checks that).
 - ⚠️ **One renderer per model.** A `mujoco.Renderer` is bound to the model it was made with.
+- ⚠️ **The start pose.** With the base facing the row, the joint zero (arm straight out) starts inside
+  the vines, the old folded pose leans into row 0's floor rail, and a fully folded elbow presses
+  into the shoulder so the servo can't hold it. `START_NORM` avoids all three.
+- ⚠️ **Which way the grasp test's truss runs matters.** The stand-in truss must pivot beyond the
+  fingertips, as the scene's trusses do for an arm facing the row. Pivoting across the jaw, a 20 mm
+  fruit gripped at the palm slid out on the pull, and some fruit came off while the jaw closed.
 - ⚠️ **Camera renders go through EGL.** A GLFW camera renderer starting while the MuJoCo window's thread
   starts GLFW tripped a GLFW assertion and aborted the process (1 run in 2).
 - ⚠️ **Segmentation renders blend ids at edges.** The offscreen buffer is multisampled, so two
@@ -154,7 +169,7 @@ finger curls in is for the real finger to show.
   (median 26). If the spec guess holds, that's ~4x the ~6 px the older notes estimated. If the
   camera squashes 16:9 instead of cropping, horizontal FOV is wider (set `lens.ASPECT = "squash"`).
   Calibrate before trusting the recall score.
-- **Recall score on the flat-colour tier: 21 %** (`eval_yolo_recall.py`, 100 layouts with 2–3 ripe
+- **Recall score on the flat-colour tier: 18 %** (`eval_yolo_recall.py`, 100 layouts with 2–3 ripe
   fruits, `pretrain_v4`, t 0.25). YOLO puts some box on a ripe fruit every time but mostly calls the
   flat red sphere `not_tomato`, so most recorded labels will read `not_tomato` until step 6. That's
   expected (it learned from photos), and it's what the re-render tiers should raise.
@@ -176,15 +191,16 @@ finger curls in is for the real finger to show.
   SO-101 wrist mount, which the sim already uses.
 - **Selection threshold and weights** for the birdseye (`target.T_RIPE_BIRDSEYE` 0.25, `pretrain_v4`):
   the real ones come from a measured birdseye session (Roadmap M2.5).
-- **Arm yaw and target row** (`scene.ARM_YAW_DEG`, `TARGET_ROW`).
+- **The crate's exact spot and size** (`scene.CRATE_CENTRE`, `CRATE_SIZE`): "on the robot's right" is K7's; the numbers are a guess.
 - **Contact and plant constants**: break force, truss stiffness, finger stiffness and friction (1.2).
 - **Filament colours** (`PLA_RGBA`, `TPU_RGBA`).
 - Checked by K7 with the leader (2026-10-20): joint directions and poses (`arm_map.SIGN`).
+- Decided by K7 (2026-10-20): the base faces R1, the crate stands on its right.
 
 ## Status
 
 1. ✅ Tomato release (`check_tomato_release.py`, all pass)
 2. ✅ Scene (`check_scene.py`, `check_grasp.py`, all pass; the unverified list above still applies)
 3. ✅ Teleop recorder: K7 drove the sim with the leader (2026-10-20): joints and poses match. `lerobot-record` itself hasn't run a full session yet. Full state + calibration hash go to the state log, not the dataset metadata
-4. ✅ YOLO view in sim: lens model, 2–3 ripe fruits, live YOLO view in both recorded cameras, green start-frame target with true-box fallback, recall score 21 % on the flat tier. Camera numbers are spec guesses
+4. ✅ YOLO view in sim: lens model, 2–3 ripe fruits, live YOLO view in both recorded cameras, green start-frame target with true-box fallback, recall score 18 % on the flat tier (base facing the row). Camera numbers are spec guesses
 5. ⬜ Collect · 6. ⬜ Re-render tiers · 7. ⬜ Real episodes + training

@@ -136,18 +136,21 @@ def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None, avoid=()):
     return rachis, "\n".join(bodies), "\n".join(eqs), fruit
 
 
-def single_xml(name, centre, r, threshold, ripeness="ripe", pedicel_len=0.012):
+def single_xml(name, centre, r, threshold, ripeness="ripe", pedicel_len=0.012, lever_dir=(1.0, 0.0, 0.0)):
     """One tomato whose centre sits exactly at `centre`, hanging straight down from the end of a
-    stand-in truss: an anchor on a sprung ball joint RACHIS_LEVER_M away along +x (same compliance
-    as a real truss in truss_xml)."""
+    stand-in truss: an anchor on a sprung ball joint RACHIS_LEVER_M away along `lever_dir` (same
+    compliance as a real truss in truss_xml). ⚠️ The direction matters for grasps: the scene's
+    trusses run from the row out toward the aisle, so for an arm facing the row the pivot lies
+    beyond the fingertips (check_grasp.py passes the arm's forward direction)."""
     centre = np.asarray(centre, float)
     top = centre + np.array([0, 0, r + pedicel_len])
+    piv = np.asarray(lever_dir, float) / np.linalg.norm(lever_dir) * RACHIS_LEVER_M
     ped, body, eq, info = _fruit(name, np.zeros(3), top, np.array([0, 0, -pedicel_len]), r, ripeness,
                                  threshold)
     anchor = (f'<body name="{name}_anchor" pos="{top[0]:.5f} {top[1]:.5f} {top[2]:.5f}">'
-              f'<joint name="{name}_anchor_ball" type="ball" pos="{RACHIS_LEVER_M} 0 0" '
+              f'<joint name="{name}_anchor_ball" type="ball" pos="{piv[0]:.5f} {piv[1]:.5f} {piv[2]:.5f}" '
               f'stiffness="{RACHIS_STIFFNESS}" damping="{RACHIS_DAMPING}" armature="{RACHIS_ARMATURE}"/>'
-              f'<geom type="capsule" fromto="0 0 0 {RACHIS_LEVER_M} 0 0" size="0.002" mass="0.002" '
+              f'<geom type="capsule" fromto="0 0 0 {piv[0]:.5f} {piv[1]:.5f} {piv[2]:.5f}" size="0.002" mass="0.002" '
               f'rgba="{STEM_RGBA}" contype="0" conaffinity="0"/>'
               f'{ped}</body>')
     return anchor, body, eq, info

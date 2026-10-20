@@ -48,13 +48,27 @@ PLY_RGBA = "0.82 0.70 0.52 1"    # birch ply, guess (unverified; Tier 1 swaps in
 # Shoulder at (370, +-200, 117) mm in the generator. The base sits on the table at (0.37, 0.2, 0);
 # the 117 mm is the URDF shoulder_lift height above the base (checked: upper_arm body at z 0.117).
 ARM_BASE = (0.370, 0.200, 0.0)
-# ⚠️ unverified: which way the real base faces. Yaw 0 = shoulder_pan 0 points down the aisle (+x),
-# away from the birdseye mast, so pan +-90 deg faces the two rows.
-ARM_YAW_DEG = 0.0
-TARGET_ROW = 0.400               # ⚠️ unverified: R1. The aisle at y = 0.2 serves rows 0.4 and 0.
+# K7 (2026-10-20): the base faces the vine row, i.e. turned 90 deg left from facing down the aisle
+# (+x, away from the mast), so shoulder_pan 0 points at R1 (+y). Facing down the aisle the arm
+# reached a third of the tomatoes (sampled IK, seed 3); facing the row, every ripe one (IK_REACH_TOL_M).
+ARM_YAW_DEG = 90.0
+TARGET_ROW = 0.400               # R1, the row the base faces (K7, 2026-10-20). The aisle at y = 0.2 serves rows 0.4 and 0.
 SHOULDER_IN_BASE = np.array([0.069, -0.018, 0.117])   # upper_arm body origin at q = 0 (MJCF, checked)
-REACH_M = 0.30                   # comfortable reach from the shoulder for a picking target (guess, unverified;
-                                 # the generator's 0.40 is full stretch to the jaw tip)
+REACH_M = 0.30                   # quick prefilter: within this of the shoulder (guess; the generator's 0.40
+                                 # is full stretch to the jaw tip). Ripe fruit must also pass the IK check.
+# A ripe fruit must be reachable for real: IK on the bare arm (follower joint limits) gets the grasp
+# point (between the fingers, mid-length, centred on a 25 mm fruit) to the fruit centre within this.
+# The 30 cm sphere alone let 6 of 100 layouts hold a ripe fruit 1-35 mm out of reach (2026-10-20).
+IK_REACH_TOL_M = 0.003
+# Where every scene starts, until the first leader command snaps the sim arm to the leader's pose
+# (and where rollouts start). Normalised units: arm tucked low, turned to the robot's LEFT (toward the
+# mast end; pan -90 turns that way on this arm). >= 19 mm from every fruit, post, rail and the crate
+# in 30 layouts, and no ripe fruit hidden from the birdseye (2026-10-20). ⚠️ Not:
+# - the joint zero: the arm straight out reaches into the vines now that the base faces the row
+# - the old folded pose: it leans back into row 0's floor rail
+# - the same pose turned right: the hand lands in the crate or on the table
+# - elbow 100 (fully folded): the lower arm presses into the shoulder and the servo can't hold it
+START_NORM = (-90.0, -40.0, 90.0, -40.0, 0.0, 50.0)
 # lerobot so_follower configure(): gripper Max_Torque_Limit 500 = 50 % of max. MJCF max is 3.35 N.m.
 # ⚠️ The servo also drops to Overload_Torque 25 % once it's stalled long enough (squeezing a
 # fruit), so check_scene.py tests the grip at 25 % too.
@@ -128,10 +142,10 @@ CLAW_POS_IN_BODY = (0.0, 0.0, 0.03)   # just outside the housing mesh (its z rea
 CLAW_XYAXES = (1, 0, 0, 0, -1, 0)
 
 # --- crate (harvest.env TASK: "...place it in the crate") ---
-# ⚠️ unverified: where the real crate stands. Here: on the table down the aisle, on the row-0 side of
-# the arm, inside reach (centre 0.13 m from the shoulder) and clear of the row-0 anchor rail.
-# Size of a cherry-tomato punnet tray, guess.
-CRATE_CENTRE = (0.50, 0.09)
+# K7 (2026-10-20): on the robot's right. With the base facing R1 that's down the aisle (+x): centred
+# on the aisle, 18 cm from the base; IK puts the grasp point 10 cm above its centre exactly.
+# ⚠️ unverified: the exact spot and size (a cherry-tomato punnet tray, guess).
+CRATE_CENTRE = (0.55, 0.20)
 CRATE_SIZE = (0.12, 0.10, 0.05)    # outer x, y, height
 CRATE_WALL = 0.003
 CRATE_RGBA = "0.20 0.35 0.65 1"
@@ -254,7 +268,8 @@ def shoulder_world():
     return np.asarray(ARM_BASE) + R @ SHOULDER_IN_BASE
 
 
-def world_xml(static, tomatoes, eqs):
+def world_xml(static, tomatoes, eqs, scenery=True):
+    """scenery=False: just the table (check_grasp.py tests the gripper in free space)."""
     return f"""<mujoco model="blush_greenhouse">
   <compiler angle="radian"/>
   <option timestep="{TIMESTEP}" integrator="implicitfast" cone="{CONE}" impratio="{IMPRATIO}"/>
@@ -268,8 +283,8 @@ def world_xml(static, tomatoes, eqs):
     <light name="side" pos="-0.4 0.6 0.9" dir="0.7 -0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
-    {greenhouse_xml()}
-    {crate_xml()}
+    {greenhouse_xml() if scenery else ''}
+    {crate_xml() if scenery else ''}
     {static}
     {tomatoes}
   </worldbody>
@@ -478,8 +493,8 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE):
     return s
 
 
-def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE):
-    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs))
+def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE, scenery=True):
+    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
@@ -496,8 +511,8 @@ def build(seed=0, arm=True, gripper_torque=GRIPPER_TORQUE):
     rng = np.random.default_rng(seed)
     static, tomatoes, eqs, fruit = vines_xml(rng)
     m, d = compose(static, tomatoes, eqs, arm, gripper_torque)
-    # 2-3 ripe fruits among the reachable ones, kept apart. Colour is set on the model, not in the
-    # XML, the same way re-renders will recolour fruit later.
+    # 2-3 ripe fruits among the reachable ones (the 30 cm sphere, then IK), kept apart. Colour is set
+    # on the model, not in the XML, the same way re-renders will recolour fruit later.
     sh = shoulder_world()
     reach = [k for k, f in enumerate(fruit) if np.linalg.norm(f["pos"] - sh) < REACH_M]
     n_ripe = int(rng.integers(N_RIPE[0], N_RIPE[1] + 1))
@@ -505,13 +520,81 @@ def build(seed=0, arm=True, gripper_torque=GRIPPER_TORQUE):
     for k in rng.permutation(reach):
         if len(ripe) == n_ripe:
             break
-        if all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in ripe):
+        if (all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in ripe)
+                and ik_gap(fruit[k]["pos"]) < IK_REACH_TOL_M):
             ripe.append(int(k))
     for k in ripe:
         fruit[k]["ripeness"] = "ripe"
         m.geom_rgba[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, fruit[k]["geom"])] = tm.RIPENESS_RGBA["ripe"]
+    if arm:
+        import arm_map
+        q, u = arm_ids(m)
+        d.qpos[q] = arm_map.FollowerMap().norm_to_rad(START_NORM)
+        d.ctrl[u] = d.qpos[q]
     mujoco.mj_forward(m, d)
     return m, d, dict(seed=seed, fruit=fruit, ripe=sorted(ripe), reachable=reach)
+
+
+class _ArmReach:
+    """IK on the bare arm (no greenhouse), arm base at the origin: how close can the grasp point get?"""
+
+    def __init__(self, n_samples=6000):
+        import arm_map
+        spec = mujoco.MjSpec()
+        spec.attach(arm_spec(), frame=spec.worldbody.add_frame(), prefix="arm/")
+        self.m = spec.compile()
+        self.d = mujoco.MjData(self.m)
+        self.q, _ = arm_ids(self.m)
+        self.dof = [self.m.jnt_dofadr[mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, f"arm/{j}")]
+                    for j in arm_map.JOINTS[:5]]
+        self.G = self.m.body("arm/gripper").id
+        lo, hi = arm_map.FollowerMap().rad_limits()      # the real follower's range, as in the sim
+        self.lo, self.hi = lo[:5], hi[:5]
+        # The grasp point: centred on a 25 mm fruit held at mid-finger (72 mm down), gripper frame.
+        ch = json.loads((FINRAY / "chain.json").read_text())["fixed"]
+        (x0, z0), (x1, z1) = ch["front_line_gripper_mm"]
+        self.point = np.array([(x0 + (x1 - x0) * (-72.0 - z0) / (z1 - z0)) / 1000 + 0.0125,
+                               ch["y_mid_mm"] / 1000, -0.072])
+        rng = np.random.default_rng(0)                   # fixed samples: the same scene for the same seed
+        self.Q = rng.uniform(self.lo, self.hi, (n_samples, 5))
+        self.P = np.array([self._fk(x) for x in self.Q])
+
+    def _fk(self, x):
+        self.d.qpos[self.q[:5]] = x
+        mujoco.mj_kinematics(self.m, self.d)
+        return self.d.xpos[self.G] + self.d.xmat[self.G].reshape(3, 3) @ self.point
+
+    def gap(self, p, starts=4, iters=40):
+        """Distance (m) the grasp point stays from p (arm base frame) at best: damped least squares
+        from the nearest sampled poses, within the joint limits."""
+        best = np.inf
+        for i in np.argsort(np.linalg.norm(self.P - p, axis=1))[:starts]:
+            x = self.Q[i].copy()
+            for _ in range(iters):
+                g = self._fk(x)
+                e = p - g
+                if np.linalg.norm(e) < 1e-4:
+                    break
+                mujoco.mj_comPos(self.m, self.d)
+                jac = np.zeros((3, self.m.nv))
+                mujoco.mj_jac(self.m, self.d, jac, None, g, self.G)
+                J = jac[:, self.dof]
+                x = np.clip(x + J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), e), self.lo, self.hi)
+            best = min(best, float(np.linalg.norm(p - self._fk(x))))
+        return best
+
+
+_ARM_REACH = None
+
+
+def ik_gap(p_world):
+    """How close (m) the arm's grasp point can get to a world point, with the base at ARM_BASE / ARM_YAW_DEG."""
+    global _ARM_REACH
+    if _ARM_REACH is None:
+        _ARM_REACH = _ArmReach()
+    yaw = np.radians(ARM_YAW_DEG)
+    R = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    return _ARM_REACH.gap(R.T @ (np.asarray(p_world, float) - np.asarray(ARM_BASE)))
 
 
 def arm_ids(m):

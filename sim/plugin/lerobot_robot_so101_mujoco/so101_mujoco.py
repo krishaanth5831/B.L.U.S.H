@@ -153,8 +153,10 @@ class SO101Mujoco(Robot):
         v = mujoco.viewer.launch_passive(self.m, self.d, key_callback=self._key)
         # The viewer's render-loop thread (launch_passive doesn't hand it out), for _close_viewer.
         v._blush_threads = [t for t in set(threading.enumerate()) - before if "_launch_internal" in t.name]
-        v.cam.lookat[:] = (0.38, 0.22, 0.25)
-        v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.95, 215, -22
+        # From behind the robot, looking at the vines over its shoulder: its left and right are yours
+        # (crate on the right). Through the gap between row 0's rails.
+        v.cam.lookat[:] = (0.42, 0.30, 0.18)
+        v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.75, 90, -35
         return v
 
     @staticmethod
