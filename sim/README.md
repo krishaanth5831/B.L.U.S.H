@@ -107,7 +107,7 @@ All print PASS/FAIL (or a table) and write nothing.
   real follower and read its gripper value, then tune the finger contact until the sim stalls there.
 - ⚠️ **The lens is a guess from the retail spec** (130° diagonal, 103° horizontal at 1080p), with
   640x480 assumed to be a 4:3 crop. That gives 72° x 52° at 640x480 and targets 10–35 px across
-  (median 23), not the ~6 px the older notes estimated. If the camera squashes 16:9 instead of
+  (median 23). If the spec guess holds, that's ~4x the ~6 px the older notes estimated. If the camera squashes 16:9 instead of
   cropping, horizontal FOV is wider (set `lens.ASPECT = "squash"`). Calibrate before trusting the
   recall score.
 - **Recall score on the flat-colour tier: 18 %** (`eval_yolo_recall.py`, 100 layouts, `pretrain_v4`,
