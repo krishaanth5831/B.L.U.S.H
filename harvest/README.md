@@ -40,11 +40,19 @@ On a vine with ten fruits, the policy doesn't know which one the gate chose.
 **Chosen (2026-10-10): overlay, two cameras.** The birdseye gate selects the target
 (recall-tuned) and its box, detected on the start frame, is drawn onto the birdseye frames
 for the whole episode. The claw gate confirms just before the close (precision-tuned) or
-aborts and logs `claw_veto`. v1 scenes hold exactly one ripe fruit, so the box can be drawn
-after recording. ⚠️ That box-drawing script isn't written yet, and `harvest_loop.py`
-and `control/` still follow the older hybrid design. The box **style** is fixed in
-`target_box.py` (magenta, 5 px, outside the fruit), the one function the sim, the overlay script
-and the rollout all draw with. The birdseye selection rule is `ripeness/gate/birdseye.py`.
+aborts and logs `claw_veto`. ⚠️ `harvest_loop.py` and `control/` still follow the older
+hybrid design.
+
+**Since 2026-10-20 (K7): the frames carry the full YOLO view, and scenes hold several ripe
+fruits.** Every frame of both cameras gets a red box + class + confidence on every detection, and
+the birdseye gets a green box on the target, picked on the start frame and held
+(`yolo_overlay.py`, the one module that draws it; selection rule `ripeness/gate/birdseye.py`).
+The sim already records this way. For the real rig that means:
+- real recordings draw the same view with the same weights, either live or afterwards frame by
+  frame (the box-drawing script isn't written yet, on hold)
+- with 2–3 ripe fruits the teleoperator must know the target while recording, so the green box
+  has to be visible live (or be drawn afterwards on the fruit that was actually picked)
+- the gated rollout runs YOLO on both cameras every frame and draws identically
 
 ## Locked recording decisions
 

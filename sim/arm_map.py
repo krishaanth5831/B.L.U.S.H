@@ -14,9 +14,10 @@ middle of the calibrated range, the same zero as so101_new_calib.xml ("virtual z
 the joint range"). so101-il-dev-toolkit drives a MuJoCo follower with this formula and sign +1 on
 all five arm joints.
 
-⚠️ SIGN = +1 on every joint and the zero offsets are unverified on our arms. Check with
-`view_scene.py --leader`: each leader joint must move the sim joint the same way, and the poses
-must match the real follower by eye.
+SIGN = +1 on every joint and these zeros were checked on our arms by K7 (2026-10-20): with
+`sim/scripts/teleop_sim.sh` every leader joint moved the sim joint the same way, and 3 poses
+matched the real follower by eye. (The real follower's wrist_flex trails the leader by a few ticks,
+its own calibration; accepted.)
 """
 import hashlib
 import json
@@ -28,7 +29,7 @@ JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_ro
 FOLLOWER_CALIB = (pathlib.Path.home() / ".cache/huggingface/lerobot/calibration/robots/so_follower"
                   / "follower_white.json")
 MAX_RES = 4095                  # STS3215 resolution - 1, as in lerobot's DEGREES formula
-SIGN = np.ones(6)               # ⚠️ unverified, see module docstring
+SIGN = np.ones(6)               # checked with the leader 2026-10-20, see module docstring
 
 # The gripper is range-normalised 0 (closed) .. 100 (open). Its closed end is the jaw angle where
 # the fingers meet: -10 deg in so101_new_calib (the URDF lower limit; stock tips touch there,

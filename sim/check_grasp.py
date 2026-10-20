@@ -36,7 +36,7 @@ SHAKE = (("wrist_flex", 0.4, 1.0), ("shoulder_pan", 0.4, 1.0), ("wrist_roll", 0.
 SHAKE_S = 2.0                      # per joint
 # The fruit may shift this much in the gripper while shaking and still count as held: a third of a
 # 25 mm fruit. (Set at 6 mm first, a guess; the only cases above it are a 30 mm fruit gripped hard
-# against the palm, which settles ~6.5 mm out to mid-finger and stays. A fruit that slips out moves 100+ mm.)
+# against the palm, which settles 6.1-6.4 mm out toward mid-finger and stays. A fruit that slips out moves 100+ mm.)
 DRIFT_OK_M = 0.008
 JOINT_IDX = {j: k for k, j in enumerate(("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"))}
 CASES = [(pose, h, oy, r) for pose in ("side", "down") for h in ("base", "mid", "tip")
