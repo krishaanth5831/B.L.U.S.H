@@ -1,12 +1,13 @@
-"""The start-frame target box in the sim: YOLO selects, the sim's true box checks it and fills in.
+"""The start-frame target in the sim: YOLO selects one of the ripe fruits, the sim's truth checks it.
 
 Same rule as the real rig (BLUSH Sim Teleop Plan, "same overlay rule as real"): on the first
 birdseye frame of a scene, the birdseye gate picks one ripe box, and that box stays fixed for the
-whole episode. The sim knows where the ripe fruit really is, so:
-- YOLO's pick matches the true target -> use YOLO's box               (source "yolo")
-- YOLO picks nothing, or a different fruit -> use the true box instead   (source "true_box", reason
-  "yolo_missed" / "yolo_wrong"), so no episode is lost
-- the target is hidden behind something -> box around its outline       (source "true_box_hidden")
+whole episode. Each scene has 2-3 ripe fruits (scene.N_RIPE), so the box is what says which one
+to pick. The sim knows every fruit's true box, so:
+- YOLO's pick lands on a ripe fruit -> that fruit is the target, YOLO's box is drawn   (source "yolo")
+- YOLO picks nothing, or a fruit that isn't ripe -> the most visible ripe fruit is the target and
+  its true box is drawn (source "true_box", reason "yolo_missed" / "yolo_wrong"), so no episode is lost
+- every ripe fruit is hidden at the start frame -> box around one's outline     (source "true_box_hidden")
 How often the first case happens is the recall score (eval_yolo_recall.py): per render tier, it
 says how real the sim looks to the gate.
 """
@@ -25,7 +26,7 @@ from ripeness.gate.birdseye import iou, select_target  # noqa: E402
 # ⚠️ unverified: the real t_ripe_birdseye comes from a measured birdseye test session (Roadmap M2.5).
 # 0.25 = live_view.py's default draw threshold, leaning to recall as M2.5 asks.
 T_RIPE_BIRDSEYE = 0.25
-# A YOLO box counts as the target if it overlaps the true box this much, or its centre is inside it.
+# A YOLO box counts as a fruit if it overlaps the fruit's true box this much, or its centre is inside it.
 # Loose on purpose: a 20 px fruit's YOLO box is often a few px off the pixel-tight true box.
 MATCH_IOU = 0.3
 # Reach mask: the image area where a reachable fruit can hang. The real one gets drawn by hand on
@@ -55,32 +56,48 @@ def reach_mask(cams, d):
     return [(float(x), float(y)) for x, y in hull]
 
 
-def true_target(cams, d, m, info, ids=None):
-    """The target's box in the birdseye frame: visible pixels, else its outline if hidden."""
-    if info["target"] is None:
-        return None, 0, False
-    t = info["fruit"][info["target"]]
-    gid = m.geom(t["geom"]).id
-    box, px = cams.true_box(d, "birdseye", gid, ids)
-    if box is not None:
-        return box, px, True
-    return cams.sphere_box(d, "birdseye", d.geom_xpos[gid], m.geom_size[gid][0]), 0, False
+def fruit_boxes(cams, d, m, info, ids=None):
+    """Every fruit's visible box in the birdseye frame: [(box or None, pixel count), ...] in fruit order."""
+    ids = cams.ids(d, "birdseye") if ids is None else ids
+    return [cams.true_box(d, "birdseye", m.geom(f["geom"]).id, ids) for f in info["fruit"]]
 
 
-def choose(dets, true_box, visible, mask, t_ripe=T_RIPE_BIRDSEYE):
-    """The box to draw for this scene, plus what happened (logged per scene for the recall score)."""
+def matched_fruit(det_box, boxes):
+    """Index of the fruit a detection sits on (best overlap), or None."""
+    hits = [(iou(det_box, b), k) for k, (b, _) in enumerate(boxes) if b is not None and matches(det_box, b)]
+    return max(hits)[1] if hits else None
+
+
+def start_frame(cams, d, m, info, dets, t_ripe=T_RIPE_BIRDSEYE, ids=None, mask=None):
+    """Pick the scene's target and its box, plus what happened (logged per scene for the recall score)."""
+    mask = reach_mask(cams, d) if mask is None else mask
+    boxes = fruit_boxes(cams, d, m, info, ids)
+    ripe = info["ripe"]
     pick = select_target(dets, t_ripe, mask)
-    out = dict(true_box=None if true_box is None else [int(v) for v in true_box], visible=bool(visible),
+    hit = None if pick is None else matched_fruit(pick["box"], boxes)
+    name = lambda k: None if k is None else info["fruit"][k]["tomato"]   # noqa: E731
+    out = dict(ripe=[name(k) for k in ripe], n_dets=len(dets), t_ripe=t_ripe,
                yolo_box=None if pick is None else [round(v, 1) for v in pick["box"]],
-               yolo_conf=None if pick is None else round(pick["conf"], 3), t_ripe=t_ripe,
-               n_dets=len(dets),
-               yolo_iou=None if pick is None or true_box is None else round(iou(pick["box"], true_box), 3))
-    if pick is not None and true_box is not None and matches(pick["box"], true_box):
-        out.update(source="yolo", box=out["yolo_box"], reason="")
-    elif true_box is None:
-        # The target is out of view: draw nothing rather than a wrong fruit.
-        out.update(source="none", box=None, reason="target_out_of_view")
+               yolo_conf=None if pick is None else round(pick["conf"], 3), yolo_fruit=name(hit))
+    if hit is not None and hit in ripe:
+        k, source, reason, box = hit, "yolo", "", out["yolo_box"]
     else:
-        out.update(source="true_box" if visible else "true_box_hidden", box=out["true_box"],
-                   reason="yolo_missed" if pick is None else "yolo_wrong")
+        reason = "yolo_missed" if pick is None else "yolo_wrong"
+        seen = [k for k in ripe if boxes[k][0] is not None]
+        if seen:
+            k = max(seen, key=lambda j: boxes[j][1])          # the most visible ripe fruit
+            source, box = "true_box", list(boxes[k][0])
+        elif ripe:
+            k = ripe[0]
+            gid = m.geom(info["fruit"][k]["geom"]).id
+            sb = cams.sphere_box(d, "birdseye", d.geom_xpos[gid], m.geom_size[gid][0])
+            source, box = ("true_box_hidden", list(sb)) if sb is not None else ("none", None)
+            if sb is None:
+                reason = "target_out_of_view"
+        else:
+            k, source, box, reason = None, "none", None, "no_ripe_fruit"
+    tb = None if k is None or boxes[k][0] is None else [int(v) for v in boxes[k][0]]
+    out.update(target=k, target_name=name(k), source=source, reason=reason, box=box, true_box=tb,
+               visible_px=0 if k is None else int(boxes[k][1]),
+               yolo_iou=None if pick is None or tb is None else round(iou(pick["box"], tb), 3))
     return out

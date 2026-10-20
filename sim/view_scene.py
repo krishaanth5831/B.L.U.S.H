@@ -2,8 +2,9 @@
 """Watch the sim greenhouse; optionally drive the sim arm from the real leader arm.
 
   python view_scene.py --cams              3D window + a second window with the claw | birdseye
-                                           camera images through the lens model (magenta = the
-                                           true target box, drawn the way the policy sees boxes)
+                                           images exactly as they get recorded: lens model + the
+                                           YOLO view (red = every detection, green = the target)
+  python view_scene.py --cams --overlay true_box   no YOLO, just the green target box from the sim's truth
   python view_scene.py --leader --cams     the real leader arm drives the sim follower (no recording)
   python view_scene.py --seed 7            another random vine layout
 
@@ -27,7 +28,7 @@ import scene
 import target  # noqa: F401  (puts the repo root on sys.path for harvest/)
 import tomato as tm
 from cameras import SimCameras
-from harvest.target_box import draw_target_box
+from harvest import yolo_overlay as ov
 
 HERE = pathlib.Path(__file__).resolve().parent
 HW_ENV = HERE.parent / "config" / "hardware.env"
@@ -65,6 +66,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0, help="vine layout seed")
     ap.add_argument("--cams", action="store_true", help="also show the claw + birdseye images")
     ap.add_argument("--leader", action="store_true", help="drive the sim arm from the real leader arm")
+    ap.add_argument("--overlay", choices=("yolo", "true_box", "none"), default="yolo",
+                    help="what --cams draws (default yolo: the recorded view)")
     a = ap.parse_args()
 
     m, d, info = scene.build(a.seed)
@@ -72,10 +75,9 @@ def main():
     det = tm.Detacher(m, d, info["fruit"])
     fm = arm_map.FollowerMap()
     d.ctrl[uidx] = d.qpos[qidx]
-    tgt = info["target"]
-    tgt_geom = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, info["fruit"][tgt]["geom"])
-    print(f"seed {a.seed}: {len(info['fruit'])} tomatoes, target {info['fruit'][tgt]['tomato']} "
-          f"(breaks at {info['fruit'][tgt]['threshold']:.2f} N)")
+    tgt, picked, by_yolo = None, False, False   # picked on the first camera frame, like the plugin does
+    print(f"seed {a.seed}: {len(info['fruit'])} tomatoes, ripe: " +
+          ", ".join(f"{info['fruit'][k]['tomato']} (breaks at {info['fruit'][k]['threshold']:.2f} N)" for k in info["ripe"]))
     print(f"follower calibration {fm.path.name} sha256 {fm.sha256[:12]}")
 
     leader = connect_leader() if a.leader else None
@@ -88,10 +90,14 @@ def main():
         mujoco.mj_forward(m, d)
         print("leader connected: move it, the sim arm follows. Close the window to stop.")
 
-    cams = cv2 = None
+    cams = cv2 = yolo = None
+    box = None
     if a.cams:
         import cv2
         cams = SimCameras(m)
+        if a.overlay == "yolo":
+            from yolo_client import YoloClient
+            yolo = YoloClient()
     cam_dt, next_cam, next_print = 1.0 / 15, 0.0, 0.0   # preview at 15 fps; recording will use 30
 
     with mujoco.viewer.launch_passive(m, d) as v:
@@ -124,14 +130,24 @@ def main():
                 next_cam = now + cam_dt
                 with v.lock():
                     claw, bird = cams.rgb(d, "claw"), cams.rgb(d, "birdseye")
-                    box, _ = cams.true_box(d, "birdseye", tgt_geom)
-                if box is not None:
-                    bird = draw_target_box(bird, box)
-                cv2.imshow("claw | birdseye (magenta = true target box)", np.hstack([claw, bird])[..., ::-1])
+                    ids = cams.ids(d, "birdseye") if not picked and a.overlay != "none" else None
+                dets_b, dets_c = yolo.many([bird, claw]) if yolo else ([], [])
+                if ids is not None:          # the start frame: pick the target, hold it from here on
+                    with v.lock():
+                        st = target.start_frame(cams, d, m, info, dets_b, ids=ids)
+                    tgt, box, picked, by_yolo = st["target"], st["box"], True, st["source"] == "yolo"
+                    print(f"target: {st['target_name']} ({st['source']} {st['reason']})")
+                if a.overlay != "none":
+                    names = yolo.ready() if yolo else {}
+                    bird = ov.draw_overlay(bird, dets_b, names, target=box, label_target=by_yolo)
+                    claw = ov.draw_overlay(claw, dets_c, names)
+                cv2.imshow("claw | birdseye (red = YOLO, green = target)", np.hstack([claw, bird])[..., ::-1])
                 cv2.waitKey(1)
             time.sleep(0.002)
     if leader:
         leader.disconnect()
+    if yolo:
+        yolo.close()
 
 
 if __name__ == "__main__":

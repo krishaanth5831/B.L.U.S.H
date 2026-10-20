@@ -17,11 +17,13 @@ class SO101MujocoConfig(RobotConfig):
     # Teleop: put the sim arm where the leader is on the first action of each scene, so it doesn't
     # swing across at full gain. Rollouts set this false: the policy starts from the sim's pose.
     snap_to_first_action: bool = True
-    # Birdseye target box for the policy input, picked on the scene's first frame and held fixed,
-    # like the real start-frame box (sim/target.py):
-    #   "yolo"      the ripeness YOLO selects (ripeness env, sim/yolo_worker.py); the true box fills
-    #               in when it misses or picks another fruit. What sim/scripts use.
-    #   "true_box"  the sim's own target box, no YOLO
+    # What gets drawn into the camera frames (harvest/yolo_overlay.py):
+    #   "yolo"      the YOLO view, every frame: red boxes + class + confidence on every detection on
+    #               both cameras, and the green target box on the birdseye, picked among the ripe
+    #               fruits on the scene's first frame and then held (sim/target.py). The true box fills
+    #               in when YOLO misses. YOLO runs in the ripeness env (sim/yolo_worker.py). What
+    #               sim/scripts use.
+    #   "true_box"  only the green target box, from the sim's truth, no YOLO
     #   "none"      raw camera images
     overlay: str = "none"
     # Full sim state per frame for offline re-renders (step 6). None = don't log.

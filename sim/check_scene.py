@@ -71,7 +71,8 @@ def check_mapping():
 
 # ----------------------------------------------------------------------------------------------
 def check_layouts(n_seeds, n_settle):
-    bad_overlap, bad_target, bad_settle, counts = [], [], [], []
+    bad_overlap, bad_ripe, bad_settle, counts, n_ripe = [], [], [], [], []
+    sh = scene.shoulder_world()
     for seed in range(n_seeds):
         m, d, info = scene.build(seed, arm=False)
         fruit = info["fruit"]
@@ -79,8 +80,13 @@ def check_layouts(n_seeds, n_settle):
         tg = [gid(m, f["geom"]) for f in fruit]
         if contacts(m, d, tg, tg):
             bad_overlap.append(seed)
-        if info["target"] is None or sum(f["ripeness"] == "ripe" for f in fruit) != 1:
-            bad_target.append(seed)
+        ripe = [k for k, f in enumerate(fruit) if f["ripeness"] == "ripe"]
+        n_ripe.append(len(ripe))
+        apart = all(np.linalg.norm(fruit[a]["pos"] - fruit[b]["pos"]) >= scene.RIPE_GAP_M
+                    for a in ripe for b in ripe if a < b)
+        if (ripe != info["ripe"] or not scene.N_RIPE[0] <= len(ripe) <= scene.N_RIPE[1] or not apart
+                or any(np.linalg.norm(fruit[k]["pos"] - sh) >= scene.REACH_M for k in ripe)):
+            bad_ripe.append(seed)
         if seed < n_settle:
             det = tm.Detacher(m, d, fruit)
             for _ in range(int(2.0 / scene.TIMESTEP)):
@@ -89,9 +95,11 @@ def check_layouts(n_seeds, n_settle):
             if not np.all(np.isnan(det.detached_at)):
                 bad_settle.append((seed, int(np.sum(~np.isnan(det.detached_at)))))
     report(not bad_overlap, f"{n_seeds} layouts: no two tomatoes start overlapping {bad_overlap[:10]}")
-    report(not bad_target, f"{n_seeds} layouts: exactly one ripe fruit, within reach {bad_target[:10]}")
+    report(not bad_ripe, f"{n_seeds} layouts: {scene.N_RIPE[0]}-{scene.N_RIPE[1]} ripe fruits, all within reach, "
+                         f">= {scene.RIPE_GAP_M * 100:.0f} cm apart {bad_ripe[:10]}")
     report(not bad_settle, f"{n_settle} layouts: 2 s settle without a single release {bad_settle[:10]}")
-    print(f"     fruit per scene: {min(counts)}-{max(counts)}, mean {np.mean(counts):.1f}")
+    print(f"     fruit per scene: {min(counts)}-{max(counts)}, mean {np.mean(counts):.1f}; "
+          f"ripe per scene: {dict(zip(*np.unique(n_ripe, return_counts=True)))}")
 
 
 # ----------------------------------------------------------------------------------------------
@@ -113,11 +121,11 @@ def check_full_scene(seeds):
         drift = np.degrees(np.abs(d.qpos[qidx] - d.ctrl[uidx])).max()
         report(np.all(np.isnan(det.detached_at)) and drift < 2.0,
                f"seed {seed}: 2 s at the start pose, no release, arm holds within {drift:.2f} deg")
-        # Cameras (through the lens model): the ripe target in the birdseye view, the fingers in the claw view.
-        tgt = gid(m, info["fruit"][info["target"]]["geom"])
-        box, px = cams.true_box(d, "birdseye", tgt)
-        report(px >= 30, f"seed {seed}: ripe target visible in birdseye, {px} px "
-                         f"({box and box[2] - box[0] + 1} px across at {scene.CAM_W}x{scene.CAM_H})")
+        # Cameras (through the lens model): the ripe fruits in the birdseye view, the fingers in the claw view.
+        seen = [cams.true_box(d, "birdseye", gid(m, info["fruit"][k]["geom"])) for k in info["ripe"]]
+        report(max(px for _, px in seen) >= 30,
+               f"seed {seed}: ripe fruits visible in birdseye, " + ", ".join(
+                   f"{px} px ({b and b[2] - b[0] + 1} px across)" for b, px in seen) + f" at {scene.CAM_W}x{scene.CAM_H}")
         ids = cams.ids(d, "claw")
         fing = [gid(m, "arm/finger_fixed"), gid(m, "arm/finger_moving")]
         fpx = int(np.isin(ids, fing).sum())
