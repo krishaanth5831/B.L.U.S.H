@@ -309,6 +309,10 @@ def _ladder_body(parent, name, at, parent_origin, k, axis, geoms):
     j.stiffness, j.damping, j.armature = [k, 0, 0], [2 * FINRAY_DAMPING_RATIO * k / FINRAY_OMEGA_MAX, 0, 0], armature
     j.limited = True
     j.range = (-np.radians(FINRAY_RANGE_DEG), np.radians(FINRAY_RANGE_DEG))
+    # ⚠️ Limits keep MuJoCo's default softness. Driven hard into the table by the arm's servos a
+    # hinge can fold far past this (up to 132 deg in a 20 s random-motion test) and springs back
+    # straight once clear. Near-hard limits (like the rib pins) were worse: the looped plates jammed
+    # against them and stayed bent 11 deg.
     mass = geoms(body)
     # The plate's TPU mass, with the inertia of an 18 mm plate (the finger width) on every axis: a
     # 1.2-1.6 mm plate's thin-axis inertia is tiny, and the hinge armature dominates anyway.

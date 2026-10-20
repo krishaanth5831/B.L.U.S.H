@@ -272,6 +272,33 @@ def main():
         report(np.all(np.isfinite(d.qpos)) and rest < 1.0,
                f"jaw snaps shut on nothing (fingers bend up to {np.degrees(bend_max):.1f} deg) and reopens: "
                f"fingers back straight within {rest:.2f} deg, no blow-up")
+    # 0b. Teleop-speed crashes into the scenery: 20 s of random arm targets at 1.5 rad/s, so the fingers
+    #     hit the table, crate and posts. Nothing may go unstable (MuJoCo would silently reset the sim
+    #     mid-session) and the fingers must spring back straight once clear.
+    if scene.FINRAY_BENDING:
+        import arm_map
+        fm = arm_map.FollowerMap()
+        m, d, _ = scene.build(0)
+        qidx, uidx = scene.arm_ids(m)
+        d.ctrl[uidx] = d.qpos[qidx]
+        hinges = [m.jnt_qposadr[j] for j in range(m.njnt) if m.joint(j).name.startswith("arm/finray_")]
+        rng = np.random.default_rng(0)
+        target, bend = d.qpos[qidx].copy(), 0.0
+        for k in range(int(20 / scene.TIMESTEP)):
+            if k % int(0.5 / scene.TIMESTEP) == 0:
+                target = fm.norm_to_rad(np.r_[rng.uniform(-100, 100, 5), rng.uniform(0, 100)])
+            d.ctrl[uidx] += np.clip(target - d.ctrl[uidx], -1.5 * scene.TIMESTEP, 1.5 * scene.TIMESTEP)
+            mujoco.mj_step(m, d)
+            bend = max(bend, float(np.abs(d.qpos[hinges]).max()))
+        d.ctrl[uidx] = fm.norm_to_rad((0, -100, 100, 60, 0, 60))   # folded up, jaw open, clear of everything
+        for _ in range(int(3 / scene.TIMESTEP)):
+            mujoco.mj_step(m, d)
+        bad = sum(d.warning[w].number for w in (mujoco.mjtWarning.mjWARN_BADQACC, mujoco.mjtWarning.mjWARN_BADQPOS,
+                                                mujoco.mjtWarning.mjWARN_BADQVEL))
+        rest = float(np.degrees(np.abs(d.qpos[hinges]).max()))
+        report(bad == 0 and np.all(np.isfinite(d.qpos)) and rest < 1.0,
+               f"20 s of random teleop-speed motion into the scenery: {bad} instability warnings, fingers folded up to "
+               f"{np.degrees(bend):.0f} deg in crashes and sprang back to {rest:.2f} deg")
     # 1. Closing on the most fragile fruit (weakest break force), 3 or 8 mm off the fixed finger: it
     #    either stays on the truss, or comes off INSIDE the grip and stays there. Coming off on the close
     #    is a pick; what must not happen is a fruit knocked off and dropped. (Until 2026-10-20 this

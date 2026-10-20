@@ -160,6 +160,14 @@ finger curls in is for the real finger to show.
   expected (it learned from photos), and it's what the re-render tiers should raise.
 - **The label text doesn't reach the policy.** π0.5 sees 224x168; the boxes survive that, the ~3 px
   text doesn't. Per-class box colours would carry the class if that matters.
+- **Recording is close to the 30 fps budget with the YOLO view on.** A full record-loop iteration
+  (action, observation with YOLO on both cameras, dataset frame, rerun) took 27.5 ms median, 30 ms
+  p95, 1 in 600 over 33 ms (2026-10-20, offscreen). If `lerobot-record` warns that the loop runs
+  slower than its fps, the episode gets time-compressed: record with `OVERLAY=none` and draw the
+  view afterwards instead.
+- **Fingers crashed into the scenery fold too far.** Driven into the table by the arm's servos, a
+  finger hinge folds up to 132° (a printed rib cell can't) and springs back straight once clear
+  (`check_grasp.py` checks the spring-back and that nothing goes unstable).
 
 ## Unverified (needs the real rig)
 
