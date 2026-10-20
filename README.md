@@ -1,6 +1,6 @@
 # B.L.U.S.H (Berry Localization Using Selective Harvesting)
 
-Vinea's harvest module, built on an SO-101 leader/follower pair in a printed test
+Vinea's harvest module, built on an SO-101 leader/follower pair in a laser-cut test
 greenhouse. The arm looks at a cherry tomato vine, decides which fruits are ripe,
 and picks **single ripe fruits** into a crate. It leaves everything else on the vine.
 
@@ -10,17 +10,19 @@ and its recording plan, the eval logs, and the greenhouse CAD.
 ## The pipeline
 
 ```
-birdseye cam ──► coarse: "red fruit over there" ──► arm moves to the approach pose
-                                                             │
-claw cam ──► ripeness gate (YOLO11n, per fruit) ─────────────┤
-             unripe / turning / ripe + confidence            ▼
-                                       pick target = largest confident `ripe` fruit
-                                                             │  none → skip, log it
-                                                             ▼
-claw + birdseye + joint state ──► picking policy (ACT → SmolVLA) ──► fruit in crate
-                                                             │
-                                                             ▼
-                                                  logs/harvest_log.csv
+birdseye cam ──► ripeness gate SELECTS (YOLO, recall-tuned) ──► target box
+                 unripe / turning / ripe / not_tomato              │  none → skip, log it
+                                                                   ▼
+             target box drawn onto the birdseye frames (overlay, fixed for the episode)
+                                                                   │
+claw + birdseye (with overlay) + joint state ──► π0.5 picking policy
+                                                                   │
+claw cam ──► ripeness gate CONFIRMS just before the close ─────────┤
+             (precision-tuned)   not ripe → abort, log claw_veto   ▼
+                                                             fruit in crate
+                                                                   │
+                                                                   ▼
+                                                        logs/harvest_log.csv
 ```
 
 The gate decides **whether** to pick and the policy decides **how**. They are
@@ -46,7 +48,7 @@ into picking a green fruit.
 | Released ripeness weights (`best.pt`, a few MB) + results | **this repo**, `ripeness/models/` | Small, and they need to be versioned with the data they came from |
 | Public pretraining sets (Laboro, Mendeley, tomatOD) | local only, gitignored, `ripeness/data/public/` | Two are non-commercial. The repo holds the download notes, not the images. |
 | LeRobot episode datasets (video) | **Hugging Face Hub**, listed in [`harvest/datasets.md`](harvest/datasets.md) | Hundreds of MB of video. GitHub rejects files over 100 MB. |
-| ACT / SmolVLA checkpoints | **Hugging Face Hub**, same manifest | Same reason |
+| ACT / π0.5 checkpoints | **Hugging Face Hub**, same manifest | Same reason |
 | Training runs (`runs/`, `outputs/`) | local only, gitignored | Scratch |
 
 ⚠️ Git LFS is not installed on the laptop. If the claw-camera data outgrows plain
@@ -67,6 +69,7 @@ Each step's "done when" gates the next one.
 1. Picking end effector + hanging-vine rig: [`hardware/end_effector/`](hardware/end_effector/), [`hardware/greenhouse/`](hardware/greenhouse/)
 2. Ripeness gate: [`ripeness/`](ripeness/)
 3. Record picking episodes: [`harvest/`](harvest/)
-4. ACT baseline
-5. SmolVLA fine-tune (rented GPU)
+4. ACT baseline, trained locally, only as a check that the data is learnable
+5. π0.5 fine-tune from `lerobot/pi05_base`. The laptop's 6 GB GPU can't run it, so it trains
+   and serves remotely: a rented GPU with lerobot `async_inference`, or the hosted π API
 6. Gated end-to-end runs, success and false-pick rate measured
