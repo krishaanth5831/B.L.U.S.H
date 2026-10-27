@@ -101,6 +101,9 @@ def main():
     ap.add_argument("--watch", action="store_true", help="MuJoCo window on the recording pass, at real time")
     ap.add_argument("--dry", action="store_true", help="dry runs only: plan + judge, write no dataset")
     ap.add_argument("--max-attempts", type=int, default=None)
+    ap.add_argument("--resume", action="store_true",
+                    help="append to an existing dataset: kept counts from its earlier attempt logs, seeds continue "
+                         "after the last one logged (unless --seed-start is given)")
     a = ap.parse_args()
     n_eps = 5 if a.pilot else a.episodes
     repo_id = a.repo_id + ("_pilot" if a.pilot else "")
@@ -122,17 +125,23 @@ def main():
         from lerobot.utils.constants import ACTION, OBS_STR, HF_LEROBOT_HOME
         from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
         root = HF_LEROBOT_HOME / repo_id
-        if root.exists():
-            sys.exit(f"⚠️ {root} exists already. Delete it or pick another --repo-id (nothing was written).")
+        if root.exists() and not a.resume:
+            sys.exit(f"⚠️ {root} exists already. --resume to append, or pick another --repo-id (nothing was written).")
+        if a.resume and not root.exists():
+            sys.exit(f"⚠️ --resume, but {root} doesn't exist.")
         tap, _, rop = make_default_processors()
         features = combine_feature_dicts(
             aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(
                 action=robot.action_features), use_videos=True),
             aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(
                 observation=robot.observation_features), use_videos=True))
-        ds = LeRobotDataset.create(repo_id, expert.FPS, root=root, robot_type=robot.name, features=features,
-                                   use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
-                                   image_writer_threads=4)
+        if a.resume:
+            ds = LeRobotDataset.resume(repo_id, root=root, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
+                                       image_writer_threads=4)
+        else:
+            ds = LeRobotDataset.create(repo_id, expert.FPS, root=root, robot_type=robot.name, features=features,
+                                       use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
+                                       image_writer_threads=4)
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{repo_id.split('/')[-1]}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
@@ -141,6 +150,21 @@ def main():
 
     robot.connect()
     kept = dict(n=0, same=0, twist=0, miss=0)
+    if a.resume:
+        # Earlier runs into this dataset: their logs are <name>_<stamp>.jsonl (a pilot's are <name>_pilot_...,
+        # which "_2" skips; dry runs share the name but have no "ok" records). A crash mid-seed logs nothing
+        # for that seed, so the next run starts on it again.
+        name = repo_id.split("/")[-1]
+        runs = [[json.loads(l) for l in open(f)] for f in sorted(LOG_DIR.glob(f"{name}_2*.jsonl")) if f != log_path]
+        runs = [rs for rs in runs if any(r.get("reason") == "ok" for r in rs)]      # recording runs only
+        ok = [r for rs in runs for r in rs if r.get("reason") == "ok"]
+        if len(ok) != ds.meta.total_episodes:
+            sys.exit(f"⚠️ the logs list {len(ok)} kept episodes, the dataset has {ds.meta.total_episodes}: not resuming.")
+        kept.update(n=len(ok), same=sum(r["same_truss"] for r in ok), twist=sum(r["twist"] for r in ok),
+                    miss=sum(r["near_miss"] for r in ok))
+        if a.seed_start == ap.get_default("seed_start"):
+            a.seed_start = max(r["seed"] for rs in runs for r in rs if "seed" in r) + 1
+        print(f"resuming at episode {kept['n']}, seed {a.seed_start}: {kept}", flush=True)
     want_same = round(SAME_TRUSS_SHARE * n_eps)
     seed = a.seed_start - 1
     attempts, t_start = 0, time.time()

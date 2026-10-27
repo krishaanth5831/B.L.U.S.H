@@ -23,12 +23,29 @@ class SimCameras:
     def __init__(self, m):
         self.m = m
         self._r = {}
+        self._seg = {}
 
     def _renderer(self, lens):
         key = (lens.pin_h, lens.pin_w)
         if key not in self._r:
             self._r[key] = mujoco.Renderer(self.m, lens.pin_h, lens.pin_w)
         return self._r[key]
+
+    def _seg_renderer(self, lens):
+        """A renderer for segmentation only, without multisampling. ⚠️ With MSAA the ids (spread over the
+        RGB bytes) blend at edges byte by byte: once a scene has more than 256 geoms (22 fruit x 5 calyx
+        sepals) a blended pixel decodes to an id past the last geom, and MuJoCo's render() raised
+        IndexError (seed 100060, 2026-10-27). offsamples is read when the GL context is made."""
+        key = (lens.pin_h, lens.pin_w)
+        if key not in self._seg:
+            keep = int(self.m.vis.quality.offsamples)
+            self.m.vis.quality.offsamples = 0
+            try:
+                self._seg[key] = mujoco.Renderer(self.m, lens.pin_h, lens.pin_w)
+            finally:
+                self.m.vis.quality.offsamples = keep
+            self._seg[key].enable_segmentation_rendering()
+        return self._seg[key]
 
     def rgb(self, d, cam):
         lens = LENSES[cam]
@@ -39,13 +56,9 @@ class SimCameras:
     def ids(self, d, cam):
         """Per pixel: the geom id seen there, -1 for none (the segmentation render through the lens)."""
         lens = LENSES[cam]
-        r = self._renderer(lens)
-        r.enable_segmentation_rendering()
-        try:
-            r.update_scene(d, camera=CAM_IN_MODEL[cam])
-            seg = r.render()
-        finally:
-            r.disable_segmentation_rendering()
+        r = self._seg_renderer(lens)
+        r.update_scene(d, camera=CAM_IN_MODEL[cam])
+        seg = r.render()
         geom = np.where(seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM, seg[..., 0] + 1, 0).astype(np.uint16)
         # ⚠️ nearest, not linear: blending two ids gives a third, unrelated id.
         return lens.distort(geom, nearest=True).astype(np.int32) - 1
@@ -91,6 +104,6 @@ class SimCameras:
         return (max(x0, 0), max(y0, 0), min(x1, lens.w - 1), min(y1, lens.h - 1))
 
     def close(self):
-        for r in self._r.values():
+        for r in (*self._r.values(), *self._seg.values()):
             r.close()
-        self._r = {}
+        self._r, self._seg = {}, {}
