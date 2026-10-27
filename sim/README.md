@@ -63,7 +63,8 @@ crate, back to the start pose. Each seed is dry-run with physics first and only 
 the recording uses the same features, units, YOLO view and codec as `lerobot-record`.
 
 ```bash
-systemd-run --user --scope -p MemoryMax=3G python generate_scripted.py --pilot --watch --max-attempts 40
+export BLUSH_RIPENESS_PYTHON=$PWD/scripts/capped_ripeness_python.sh   # the YOLO worker in its own 3 GB scope
+systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0 python generate_scripted.py --pilot --watch --max-attempts 40
 lerobot-dataset-viz --repo-id krish5831/blush_sim_scripted_v0_pilot --episode-index 0
 python generate_scripted.py --dry --episodes 10 --max-attempts 30    # plan + judge only, writes no dataset
 ```

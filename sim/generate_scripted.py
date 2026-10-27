@@ -21,6 +21,8 @@ drawn speed and the route through the tucks.
 Writes: the dataset (~/.cache/huggingface/lerobot/<repo-id>), the sim state log (~/.cache/blush_sim/states/),
 the attempt log (~/.cache/blush_sim/scripted/<name>_<stamp>.jsonl). Never pushes to the Hub.
 Run in the lerobot env, under the memory cap:  systemd-run --user --scope -p MemoryMax=3G python ...
+⚠️ with BLUSH_RIPENESS_PYTHON=$PWD/scripts/capped_ripeness_python.sh: the YOLO worker (~1-1.4 GB) is a child
+process, and inside the same 3 GB scope the recording pass got OOM-killed (pilot, 2026-10-27).
 ⚠️ Yield is ~20-25 % of seeds (2026-10-27): most misses are a green neighbour on the same truss knocked
 off as the jaw closes or pulls. Cap a run with --max-attempts.
 """
