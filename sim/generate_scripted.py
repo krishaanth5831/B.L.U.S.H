@@ -137,7 +137,7 @@ def main():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{repo_id.split('/')[-1]}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
-    print(f"dataset {repo_id if ds else '(dry, none)'}  task {task!r}\nattempt log {log_path}", flush=True)
+    print(f"dataset {repo_id if ds is not None else '(dry, none)'}  task {task!r}\nattempt log {log_path}", flush=True)
 
     robot.connect()
     kept = dict(n=0, same=0, twist=0, miss=0)
