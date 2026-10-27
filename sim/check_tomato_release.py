@@ -126,7 +126,7 @@ def run_checks():
     report(np.isnan(det.detached_at[0]),
            f"a {spike_steps*TIMESTEP*1000:.0f} ms 3 N spike (hold {det.hold_steps*TIMESTEP*1000:.0f} ms) does not pluck")
 
-    # 4. Neighbours: plucking one tomato off a 6-tomato truss leaves the other five on.
+    # 4. Neighbours: plucking one tomato off a truss (asked for 6) leaves the others on.
     m, d, fruit = scene(n=6, seed=1, thresholds=[1.0] * 6)
     det = tm.Detacher(m, d, fruit)
     b = bid(m, fruit[2]["tomato"])
@@ -135,9 +135,11 @@ def run_checks():
     for _ in range(int(2.0 / TIMESTEP)):
         d.xfrc_applied[b, :3] = (0, 2.0, 0) if np.isnan(det.detached_at[2]) else (0, 0, 0)
         mujoco.mj_step(m, d); det.step()
-    others = [k for k in range(6) if k != 2]
+    # ⚠️ truss_xml drops fruit that would overlap, so "6" can come out fewer (4 for seed 1 since the
+    # 2026-10-27 hang/lean ranges): count what's there.
+    others = [k for k in range(len(fruit)) if k != 2]
     report(not np.isnan(det.detached_at[2]) and np.all(np.isnan(det.detached_at[others])),
-           "plucking tomato 2 of 6 leaves the other five hanging")
+           f"plucking tomato 2 of {len(fruit)} leaves the other {len(others)} hanging")
 
     print(f"\n{'ALL PASS' if not fails else f'{fails} FAIL'}")
     return fails

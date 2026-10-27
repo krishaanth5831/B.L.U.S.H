@@ -7,6 +7,7 @@ source "$HERE/../../harvest/harvest.env"     # TASK, timings: identical strings 
 # Sim datasets get their own names, so sim and real never mix by accident. Same robot_type
 # (so_follower) and features as real, so they can be merged on purpose for co-training.
 SIM_DATASET=$HF_USER/blush_sim_pick_v1     # placeholder, lock before the first real session
+SIM_SCRIPTED_DATASET=$HF_USER/blush_sim_scripted_v0   # generate_scripted.py (the scripted picker, K7 2026-10-27)
 COTRAIN_DATASET=$HF_USER/blush_cotrain_v1  # sim + real merged (train_sim.sh merge)
 SIM_ACT_POLICY=$HF_USER/act_blush_sim_v1
 SIM_PI05_POLICY=$HF_USER/pi05_blush_sim_v1

@@ -12,6 +12,7 @@ Run in the `lerobot` env (`conda activate lerobot`), from `sim/`:
 python view_scene.py --cams              # greenhouse window + claw | birdseye exactly as recorded (red = YOLO, green = target)
 python check_grasp.py --windowed         # the fin-ray fingers closing on, plucking and shaking a tomato, slowed down
 python eval_yolo_recall.py --show        # the recall score: per layout, the start frame's YOLO view (key = next)
+python generate_scripted.py --pilot --watch   # the scripted picker recording 5 episodes, MuJoCo window at real time
 python view_scene.py --leader --cams     # the real leader arm drives the sim arm (read only, records nothing)
 python check_tomato_release.py --windowed   # one truss: double-click a tomato, Ctrl + right-drag to pluck it
 ```
@@ -54,6 +55,31 @@ refuses mixed robot types. Sim and real are told apart by the dataset name.
 Full sim state per frame goes to `~/.cache/blush_sim/states/<session>/` for re-renders, with every
 frame's raw YOLO output, the target, and the weights' sha256 (new weights change the training images).
 
+## Scripted episodes (`generate_scripted.py`, K7 2026-10-27)
+
+A scripted picker (`expert.py`) instead of a person on the leader: IK to a grasp pose on the target,
+an approach that the kinematic sweep keeps out of the scenery, close, pull (or twist then pull), lift,
+crate, back to the start pose. Each seed is dry-run with physics first and only recorded if it passed;
+the recording uses the same features, units, YOLO view and codec as `lerobot-record`.
+
+```bash
+systemd-run --user --scope -p MemoryMax=3G python generate_scripted.py --pilot --watch --max-attempts 40
+lerobot-dataset-viz --repo-id krish5831/blush_sim_scripted_v0_pilot --episode-index 0
+python generate_scripted.py --dry --episodes 10 --max-attempts 30    # plan + judge only, writes no dataset
+```
+
+- Mix of the kept episodes: 35 % same-truss scenes, 30 % twist then pull, 10 % near miss + correction.
+  2–3 ripe per scene. Domain randomisation (`randomize.py`): lights, colours inside each ripeness
+  class, camera poses, finger friction + stiffness, truss stiffness, fruit mass.
+- The close command is "fully closed" (`expert.CLOSE_NORM` 0–2): the jaw stalls on the fruit by
+  itself, at about −9.5° for 20–25 mm fruit. ⚠️ Redo once the real `gripper.pos` holding a fruit is read.
+- ⚠️ A twist doesn't weaken the tether in the sim (the `Detacher` only counts translational force),
+  so a twisted fruit still comes off on the pull.
+- ⚠️ Yield ~20–25 % of seeds. Most misses: a green neighbour 22–38 mm from the target (same truss) gets
+  knocked off as the jaw closes or pulls. Every fruit uses the same 0.58–2.46 N break force, ripe or not.
+- Writes the dataset under `~/.cache/huggingface/lerobot/<repo-id>` (refuses if it exists), the state
+  log, and `~/.cache/blush_sim/scripted/<name>_<stamp>.jsonl` (every attempt and why). Never pushes.
+
 ## Setup (once)
 
 ```bash
@@ -81,7 +107,7 @@ All print PASS/FAIL (or a table) and write nothing.
 
 | File | What |
 |---|---|
-| `tomato.py` | Trusses + tomatoes. Each fruit hangs on a soft weld (the tether). `Detacher` switches the weld off once its force stays above the fruit's break force (OrchardBench fruit logic) |
+| `tomato.py` | Trusses + tomatoes (pedicel lean 15–45° + swing, fruit hanging off-vertical, visual calyx). Each fruit hangs on a soft weld (the tether). `Detacher` switches the weld off once its force stays above the fruit's break force (OrchardBench fruit logic) |
 | `scene.py` | Greenhouse (laser-cut dimensions), SO-101 facing the vine row + bending fin-ray fingers + palm, crate on its right, vines with 2–3 ripe fruits (each one IK-checked reachable), `birdseye` + `arm/claw` cameras |
 | `arm_map.py` | lerobot units (`use_degrees=false`) ↔ sim joint angles through `follower_white.json`, the way the real follower converts them |
 | `lens.py` | The InnoMaker 130° lens on MuJoCo's pinhole cameras: render wider, remap through a fisheye model (OpenCV `cv2.fisheye` K, D). ⚠️ Guessed from the spec; a calibration in `cameras.json` replaces it |
@@ -90,6 +116,9 @@ All print PASS/FAIL (or a table) and write nothing.
 | `../harvest/yolo_overlay.py` | Draws the YOLO view; shared with the real recordings and rollout |
 | `yolo_worker.py`, `yolo_client.py` | The ripeness YOLO in its own env (no ultralytics in the lerobot env); frames through `/dev/shm` |
 | `eval_yolo_recall.py` | The recall score |
+| `expert.py` | The scripted picker: arm IK, kinematic sweep (collisions, neighbour press), pick planner, min-jerk frames |
+| `generate_scripted.py` | Scripted episodes: dry run, judge, record (above) |
+| `randomize.py` | Domain randomisation per scene seed (own RNG stream, so the layout doesn't change) |
 | `view_scene.py` | The window; `--leader` reads the real leader |
 | `check_*.py` | Checks |
 
@@ -169,8 +198,8 @@ finger curls in is for the real finger to show.
   (median 26). If the spec guess holds, that's ~4x the ~6 px the older notes estimated. If the
   camera squashes 16:9 instead of cropping, horizontal FOV is wider (set `lens.ASPECT = "squash"`).
   Calibrate before trusting the recall score.
-- **Recall score on the flat-colour tier: 18 %** (`eval_yolo_recall.py`, 100 layouts with 2–3 ripe
-  fruits, `pretrain_v4`, t 0.25). YOLO puts some box on a ripe fruit every time but mostly calls the
+- **Recall score on the flat-colour tier: 46 %** (`eval_yolo_recall.py`, 100 layouts with 2–3 ripe
+  fruits, `pretrain_v4`, t 0.25; 18 % before the calyx and the varied hang, 2026-10-27). YOLO puts some box on a ripe fruit every time but mostly calls the
   flat red sphere `not_tomato`, so most recorded labels will read `not_tomato` until step 6. That's
   expected (it learned from photos), and it's what the re-render tiers should raise.
 - **The label text doesn't reach the policy.** π0.5 sees 224x168; the boxes survive that, the ~3 px
@@ -202,5 +231,5 @@ finger curls in is for the real finger to show.
 1. ✅ Tomato release (`check_tomato_release.py`, all pass)
 2. ✅ Scene (`check_scene.py`, `check_grasp.py`, all pass; the unverified list above still applies)
 3. ✅ Teleop recorder: K7 drove the sim with the leader (2026-10-20): joints and poses match. `lerobot-record` itself hasn't run a full session yet. Full state + calibration hash go to the state log, not the dataset metadata
-4. ✅ YOLO view in sim: lens model, 2–3 ripe fruits, live YOLO view in both recorded cameras, green start-frame target with true-box fallback, recall score 18 % on the flat tier (base facing the row). Camera numbers are spec guesses
-5. ⬜ Collect · 6. ⬜ Re-render tiers · 7. ⬜ Real episodes + training
+4. ✅ YOLO view in sim: lens model, 2–3 ripe fruits, live YOLO view in both recorded cameras, green start-frame target with true-box fallback, recall score 46 % on the flat tier (18 % before the calyx, 2026-10-27). Camera numbers are spec guesses
+5. 🔶 Collect: scripted picker + generator built (2026-10-27), pilot of 5 pending K7's look; teleop sessions not yet · 6. ⬜ Re-render tiers · 7. ⬜ Real episodes + training

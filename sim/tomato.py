@@ -39,7 +39,20 @@ PEDICEL_LEN_M = (0.010, 0.015)
 PEDICEL_STIFFNESS = 0.004     # N.m/rad
 PEDICEL_DAMPING = 2e-4        # N.m.s/rad
 PEDICEL_ARMATURE = 1e-6       # ⚠️ without it the near-massless pedicel body makes the ball joint jitter
-PEDICEL_LEAN_DEG = 30.0       # pedicels lean out from the rachis, alternating sides (guess from photos)
+# Pedicels lean out from the rachis, alternating sides. Was a fixed 30 deg; K7 (2026-10-27) asked for
+# fruit in different orientations, so each pedicel now draws its lean and a sideways swing (guess from
+# photos, unverified).
+PEDICEL_LEAN_DEG = (15.0, 45.0)
+PEDICEL_SWING_DEG = 25.0      # +- turn of the lean direction around the vertical
+# The fruit doesn't hang dead below its calyx: the centre sits up to this far off straight down from
+# the pedicel tip, so the calyx (below) shows at different angles (guess from photos, unverified).
+HANG_TILT_DEG = (0.0, 35.0)
+# Calyx: 5 sepals lying on the fruit around the pedicel. Visual only (no collision, no mass), so the
+# grasp physics is the same as the bare sphere; it gives the fruit a visible orientation and looks
+# more like the photos the gate learned from. Sizes are a guess from supermarket vine tomatoes.
+CALYX_SEPALS = 5
+CALYX_SPREAD_DEG = 42.0       # sepal tip, measured from the calyx centre over the fruit surface
+CALYX_RGBA = "0.22 0.38 0.12 1"
 
 # The truss stem (rachis) hangs off the vine on a sprung ball joint, so a truss sways when the
 # gripper drags a fruit. Rigid, it pushed all of a closing jaw's ~8 mm drag into the tether and
@@ -70,20 +83,38 @@ def _rgba(rip):
     return " ".join(f"{c:.2f}" for c in RIPENESS_RGBA[rip])
 
 
-def _fruit(name, local, world, tip, r, rip, threshold):
-    """Pedicel body (local pos in its parent), tomato body (world), weld, info dict."""
+def _calyx(r, up, spin):
+    """Sepal geoms (fruit body frame) around the point of the fruit facing `up` (unit, toward the pedicel)."""
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    e1 = np.cross(up, [1.0, 0, 0] if abs(up[0]) < 0.9 else [0, 1.0, 0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+    c0, sp = up * r * 1.02, np.radians(CALYX_SPREAD_DEG)
+    out = []
+    for k in range(CALYX_SEPALS):
+        th = spin + 2 * np.pi * k / CALYX_SEPALS
+        tipp = (np.cos(sp) * up + np.sin(sp) * (np.cos(th) * e1 + np.sin(th) * e2)) * r * 1.04
+        out.append(f'<geom type="capsule" fromto="{c0[0]:.5f} {c0[1]:.5f} {c0[2]:.5f} {tipp[0]:.5f} {tipp[1]:.5f} '
+                   f'{tipp[2]:.5f}" size="0.0011" density="0" rgba="{CALYX_RGBA}" contype="0" conaffinity="0"/>')
+    return "".join(out)
+
+
+def _fruit(name, local, world, tip, r, rip, threshold, hang=(0.0, 0.0, -1.0), spin=0.0):
+    """Pedicel body (local pos in its parent), tomato body (world), weld, info dict.
+    hang: unit direction from the pedicel tip to the fruit centre (straight down by default)."""
     tn, pn = f"{name}", f"{name}_ped"
     ped = (f'<body name="{pn}" pos="{local[0]:.5f} {local[1]:.5f} {local[2]:.5f}">'
            f'<joint name="{pn}_ball" type="ball" stiffness="{PEDICEL_STIFFNESS}" '
            f'damping="{PEDICEL_DAMPING}" armature="{PEDICEL_ARMATURE}"/>'
            f'<geom type="capsule" fromto="0 0 0 {tip[0]:.5f} {tip[1]:.5f} {tip[2]:.5f}" size="0.0012" '
            f'mass="0.0005" rgba="{STEM_RGBA}" contype="0" conaffinity="0"/></body>')
-    c = world + tip + np.array([0, 0, -r])
+    hang = np.asarray(hang, float) / np.linalg.norm(hang)
+    c = world + tip + hang * r
     # Tomatoes are world children (free bodies), not children of the pedicel, so that switching
     # the weld off really frees them.
     body = (f'<body name="{tn}" pos="{c[0]:.5f} {c[1]:.5f} {c[2]:.5f}"><freejoint/>'
             f'<geom name="{tn}_g" type="sphere" size="{r:.5f}" density="{DENSITY}" rgba="{_rgba(rip)}" '
-            f'friction="0.8 0.01 0.001" condim="4"/></body>')
+            f'friction="0.8 0.01 0.001" condim="4"/>{_calyx(r, -hang, spin)}</body>')
     eq = (f'<weld name="{tn}_tether" body1="{tn}" body2="{pn}" '
           f'solref="{TETHER_SOLREF[0]} {TETHER_SOLREF[1]}"/>')
     return ped, body, eq, dict(tomato=tn, pedicel=pn, eq=f"{tn}_tether", geom=f"{tn}_g", radius=r,
@@ -104,18 +135,23 @@ def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None, avoid=()):
     L = np.linalg.norm(axis)
     out = np.cross(axis / L, [0, 0, 1])
     out = out / np.linalg.norm(out) if np.linalg.norm(out) > 1e-6 else np.array([1.0, 0, 0])
-    lean = np.radians(PEDICEL_LEAN_DEG)
     placed = list(avoid)
     peds, bodies, eqs, fruit = [], [], [], []
     for i in range(n):
         p_world = a + (i + 0.5) / n * axis
         side = 1 if i % 2 == 0 else -1
         lp = rng.uniform(*PEDICEL_LEN_M)
-        tip = (side * np.sin(lean) * out + np.array([0, 0, -np.cos(lean)])) * lp
+        lean = np.radians(rng.uniform(*PEDICEL_LEAN_DEG))
+        sw = np.radians(rng.uniform(-PEDICEL_SWING_DEG, PEDICEL_SWING_DEG))
+        o = side * (np.cos(sw) * out + np.sin(sw) * np.cross([0, 0, 1.0], out))
+        tip = (np.sin(lean) * o + np.array([0, 0, -np.cos(lean)])) * lp
+        tilt, az = np.radians(rng.uniform(*HANG_TILT_DEG)), rng.uniform(0, 2 * np.pi)
+        hang = np.array([np.sin(tilt) * np.cos(az), np.sin(tilt) * np.sin(az), -np.cos(tilt)])
+        spin = rng.uniform(0, 2 * np.pi)
         rip = ripeness[i] if ripeness else str(rng.choice(list(RIPENESS_RGBA)))
         r = rng.uniform(*RADIUS_M)
         for _ in range(4):
-            c = p_world + tip + np.array([0, 0, -r])
+            c = p_world + tip + hang * r
             if all(np.linalg.norm(c - c2) >= r + r2 + FRUIT_GAP_M for c2, r2 in placed):
                 break
             r *= 0.85
@@ -124,7 +160,8 @@ def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None, avoid=()):
         if r < RADIUS_M[0] * 0.8:
             continue
         ped, body, eq, info = _fruit(f"{name}_t{i}", p_world - mid, p_world, tip, r, rip,
-                                     rng.uniform(*DETACH_FORCE_N))
+                                     rng.uniform(*DETACH_FORCE_N), hang=hang, spin=spin)
+        info["truss"] = name
         placed.append((info["pos"], r))
         peds.append(ped); bodies.append(body); eqs.append(eq); fruit.append(info)
     rachis = (f'<body name="{name}_rachis" pos="{mid[0]:.5f} {mid[1]:.5f} {mid[2]:.5f}">'

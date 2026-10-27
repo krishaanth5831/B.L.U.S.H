@@ -158,6 +158,12 @@ TRUSS_Z = (0.16, 0.34)           # generator PICK_ZONE z 0.10-0.35, trimmed so f
 TRUSS_GAP_Z = 0.09
 TRUSSES_PER_STEM = (1, 2)
 TRUSS_LEN = (0.06, 0.10)
+# Truss direction from its stem: toward the aisle (1), plus a sideways spread along the row and a
+# droop, as (x, z) components before normalising. Was x +-0.3, z -0.3 fixed; K7 (2026-10-27) asked for
+# fruit in different orientations, so trusses now range from nearly level to hanging steeply
+# (guess from photos, unverified).
+TRUSS_SPREAD_X = (-0.5, 0.5)
+TRUSS_DROOP_Z = (-0.8, -0.1)
 FRUITS_PER_TRUSS = (4, 8)
 # K7 (2026-10-20): 2-3 ripe fruits per scene, all within reach, so the policy has to follow the box
 # instead of going for "the red one". The rest stay green or turning.
@@ -166,6 +172,11 @@ N_RIPE = (2, 3)
 # (harvest/yolo_overlay.py) and a 25 mm fruit is ~23 px here, so a ripe neighbour closer than this
 # could sit inside the box and blur which fruit is meant.
 RIPE_GAP_M = 0.04
+# K7 (2026-10-27): 35 % of scenes have at least two of their ripe fruits on the SAME truss (one vine,
+# several ripe), so the box has to pick between neighbours. The rest put every ripe fruit on its own
+# truss. Before this, 22 % came out same-truss by chance (100 seeds). info["same_truss"] says which a
+# scene really got: a draw that can't be met falls back to the other kind.
+SAME_TRUSS_P = 0.35
 
 
 def _box(name, lo, hi, rgba=PLY_RGBA, collide=True):
@@ -251,7 +262,7 @@ def vines_xml(rng):
                     zs.append(z)
                     break
         for k, z in enumerate(zs):
-            d = np.array([rng.uniform(-0.3, 0.3), toward_aisle, -0.3])
+            d = np.array([rng.uniform(*TRUSS_SPREAD_X), toward_aisle, rng.uniform(*TRUSS_DROOP_Z)])
             d = d / np.linalg.norm(d) * rng.uniform(*TRUSS_LEN)
             a = np.array([x, y_stem, z])
             nf = int(rng.integers(FRUITS_PER_TRUSS[0], FRUITS_PER_TRUSS[1] + 1))
@@ -516,13 +527,43 @@ def build(seed=0, arm=True, gripper_torque=GRIPPER_TORQUE):
     sh = shoulder_world()
     reach = [k for k, f in enumerate(fruit) if np.linalg.norm(f["pos"] - sh) < REACH_M]
     n_ripe = int(rng.integers(N_RIPE[0], N_RIPE[1] + 1))
-    ripe = []
-    for k in rng.permutation(reach):
-        if len(ripe) == n_ripe:
-            break
-        if (all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in ripe)
-                and ik_gap(fruit[k]["pos"]) < IK_REACH_TOL_M):
-            ripe.append(int(k))
+    want_same = bool(rng.random() < SAME_TRUSS_P)
+    order = [int(k) for k in rng.permutation(reach)]
+    ik_ok = {}
+
+    def fits(k, chosen):
+        if not all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in chosen):
+            return False
+        if k not in ik_ok:
+            ik_ok[k] = ik_gap(fruit[k]["pos"]) < IK_REACH_TOL_M
+        return ik_ok[k]
+
+    def pick(same):
+        ripe = []
+        if same:                       # a pair on one truss first, trusses in random order
+            trusses = list(dict.fromkeys(fruit[k]["truss"] for k in order))
+            for t in [trusses[i] for i in rng.permutation(len(trusses))]:
+                pair = []
+                for k in (k for k in order if fruit[k]["truss"] == t):
+                    if fits(k, pair):
+                        pair.append(k)
+                    if len(pair) == 2:
+                        break
+                if len(pair) == 2:
+                    ripe = pair
+                    break
+            if not ripe:
+                return None
+        for k in order:
+            if len(ripe) == n_ripe:
+                break
+            if k in ripe or (not same and fruit[k]["truss"] in {fruit[j]["truss"] for j in ripe}):
+                continue
+            if fits(k, ripe):
+                ripe.append(k)
+        return ripe if len(ripe) >= N_RIPE[0] else None
+
+    ripe = pick(want_same) or pick(not want_same) or []
     for k in ripe:
         fruit[k]["ripeness"] = "ripe"
         m.geom_rgba[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, fruit[k]["geom"])] = tm.RIPENESS_RGBA["ripe"]
@@ -532,7 +573,9 @@ def build(seed=0, arm=True, gripper_torque=GRIPPER_TORQUE):
         d.qpos[q] = arm_map.FollowerMap().norm_to_rad(START_NORM)
         d.ctrl[u] = d.qpos[q]
     mujoco.mj_forward(m, d)
-    return m, d, dict(seed=seed, fruit=fruit, ripe=sorted(ripe), reachable=reach)
+    trusses = [fruit[k]["truss"] for k in ripe]
+    return m, d, dict(seed=seed, fruit=fruit, ripe=sorted(ripe), reachable=reach,
+                      same_truss=len(set(trusses)) < len(trusses))
 
 
 class _ArmReach:

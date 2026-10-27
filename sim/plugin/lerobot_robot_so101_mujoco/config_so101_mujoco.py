@@ -28,3 +28,13 @@ class SO101MujocoConfig(RobotConfig):
     overlay: str = "none"
     # Full sim state per frame for offline re-renders (step 6). None = don't log.
     state_log_dir: str | None = "~/.cache/blush_sim/states"
+    # True (teleop, rollouts): physics runs in its own thread at wall-clock speed, like a real arm.
+    # False (scripted episodes, sim/generate_scripted.py): no thread; every send_action advances the
+    # sim exactly 1/fps, so an episode is deterministic and never time-compressed by a slow frame.
+    realtime: bool = True
+    fps: int = 30                    # realtime=False only: sim time per send_action = 1/fps
+    # Randomise lighting, colours (within ripeness class), camera poses and the physics guesses per
+    # scene, drawn from the scene seed (sim/randomize.py). Off = the nominal scene.
+    domain_rand: bool = False
+    # Sim seconds to let the vines settle (arm held at the start pose) before a scene's first frame.
+    settle_s: float = 0.0

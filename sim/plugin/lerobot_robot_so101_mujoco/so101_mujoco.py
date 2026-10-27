@@ -5,6 +5,7 @@
 - send_action takes the leader's normalised values and converts them through follower_white.json,
   as the real follower does (sim/arm_map.py).
 - Physics runs in its own thread at wall-clock speed, like a real arm moving between calls.
+  realtime=False instead steps it exactly 1/fps inside each send_action (scripted episodes).
 - Cameras go through the InnoMaker lens model (sim/lens.py). overlay="yolo" runs the ripeness YOLO
   on both cameras every frame and draws its view into the frames (harvest/yolo_overlay.py): red
   boxes + class + confidence on every detection, and on the birdseye a green box on the target, which
@@ -37,6 +38,7 @@ if str(SIM_DIR) not in sys.path:
     sys.path.insert(0, str(SIM_DIR))
 
 import arm_map  # noqa: E402
+import randomize  # noqa: E402
 import scene  # noqa: E402
 import target as tg  # noqa: E402
 import tomato as tm  # noqa: E402
@@ -73,6 +75,8 @@ class SO101Mujoco(Robot):
         self._yolo = None
         self._gen = 0
         self._session = time.strftime("%Y%m%d_%H%M%S")
+        self._viewer = None
+        self.extra = {}                       # per-scene notes a caller adds (scripted plan), into session.json
 
     # --- features (callable while disconnected) ---
     @property
@@ -102,9 +106,11 @@ class SO101Mujoco(Robot):
     # --- scene ---
     def _build(self, seed):
         self.m, self.d, self.info = scene.build(seed)
+        self.info["dr"] = randomize.apply(self.m, seed, self.info["fruit"]) if self.config.domain_rand else None
         self.qidx, self.uidx = scene.arm_ids(self.m)
         self.det = tm.Detacher(self.m, self.d, self.info["fruit"])
         self.d.ctrl[self.uidx] = self.d.qpos[self.qidx]
+        self.extra = {}
         self.seed = seed
         self._gen += 1
         self._snap = self.config.snap_to_first_action
@@ -114,6 +120,9 @@ class SO101Mujoco(Robot):
         self._tgt_body = None
         self._dropped = False
         self._log = []
+        if self.config.settle_s > 0:          # the vines swing for ~1 s after the build
+            self._advance(self.d.time + self.config.settle_s, quiet=True)
+        self._t_frame = self.d.time           # realtime=False: sim time at the last frame boundary
         breaks = ", ".join(f"{self.info['fruit'][k]['threshold']:.2f}" for k in self.info["ripe"])
         print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(self.info['fruit'])} tomatoes, "
               f"{len(self.info['ripe'])} ripe (break at {breaks} N). "
@@ -140,7 +149,9 @@ class SO101Mujoco(Robot):
                                "target": self._box_info and self._box_info["target_name"],
                                "dropped_in_crate": self._dropped, "overlay": self.config.overlay,
                                "display_conf": ov.DISPLAY_CONF, "box": self._box_info,
-                               "yolo": self._yolo_meta})
+                               "yolo": self._yolo_meta, "domain_rand": self.info.get("dr"),
+                               "same_truss": self.info.get("same_truss"), "settle_s": self.config.settle_s,
+                               "realtime": self.config.realtime, **self.extra})
         meta.write_text(json.dumps(info, indent=2))
         self._log = []
 
@@ -172,8 +183,35 @@ class SO101Mujoco(Robot):
         if keycode == KEY_N:
             self._want_new.set()
 
-    def _run(self):
+    def _advance(self, until, quiet=False):
+        """Step physics up to sim time `until`: tethers checked after every step, plucks + crate printed.
+        The one stepping path for both modes, so a scripted dry run and its recording match exactly."""
         import mujoco
+        while self.d.time < until - 1e-9:
+            mujoco.mj_step(self.m, self.d)
+            for k in self.det.step():
+                f = self.info["fruit"][k]
+                if not quiet:
+                    print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N"
+                          f"{'  <- the target' if k == self._tgt_k else ''}", flush=True)
+        if (not self._dropped and self._tgt_body is not None
+                and scene.in_crate(self.d.xpos[self._tgt_body])):
+            self._dropped = True
+            if not quiet:
+                print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
+
+    def new_scene(self, seed, log=True):
+        """realtime=False: next scene with this seed, now. log=False drops its state log (a dry run)."""
+        with self._lock:
+            self._save_log()
+            if self._viewer is not None:
+                self._close_viewer(self._viewer)
+            self._build(seed)
+            self._log_on = log
+            if self.config.viewer:
+                self._viewer = self._launch_viewer()
+
+    def _run(self):
         v = self._launch_viewer()
         t_wall, t_sim = time.time(), self.d.time
         next_sync = 0.0
@@ -191,16 +229,7 @@ class SO101Mujoco(Robot):
             with self._lock:
                 if now - t_wall > (self.d.time - t_sim) + MAX_CATCH_UP_S:
                     t_sim = self.d.time - (now - t_wall) + MAX_CATCH_UP_S
-                while self.d.time - t_sim < now - t_wall:
-                    mujoco.mj_step(self.m, self.d)
-                    for k in self.det.step():
-                        f = self.info["fruit"][k]
-                        print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N"
-                              f"{'  <- the target' if k == self._tgt_k else ''}", flush=True)
-                if (not self._dropped and self._tgt_body is not None
-                        and scene.in_crate(self.d.xpos[self._tgt_body])):
-                    self._dropped = True
-                    print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
+                self._advance(t_sim + (now - t_wall))
             if v is not None and now > next_sync:
                 next_sync = now + 1 / 60
                 if v.is_running():
@@ -217,13 +246,17 @@ class SO101Mujoco(Robot):
             from yolo_client import YoloClient
             self._yolo = YoloClient()          # loads in the background; the first frame waits for it
             self._yolo_meta = dict(self._yolo.meta(), t_ripe_birdseye=tg.T_RIPE_BIRDSEYE)
+        self._log_on = True
         self._build(self.config.seed)
         if self.config.viewer:
             import glfw
             glfw.init()                        # once, on this thread, before the viewer thread starts GLFW
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="so101_mujoco_physics", daemon=True)
-        self._thread.start()
+        if self.config.realtime:
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._run, name="so101_mujoco_physics", daemon=True)
+            self._thread.start()
+        elif self.config.viewer:
+            self._viewer = self._launch_viewer()
         self._connected = True
         logger.info(f"{self} connected (follower calibration sha256 {self.fm.sha256[:12]}).")
 
@@ -244,6 +277,11 @@ class SO101Mujoco(Robot):
                 mujoco.mj_forward(self.m, self.d)
                 self._snap = False
             self.d.ctrl[self.uidx] = q
+            if not self.config.realtime:
+                self._t_frame += 1.0 / self.config.fps
+                self._advance(self._t_frame)
+                if self._viewer is not None and self._viewer.is_running():
+                    self._viewer.sync()
         return {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, goal)}
 
     def _cameras(self):
@@ -304,7 +342,7 @@ class SO101Mujoco(Robot):
         elif self.config.overlay == "true_box" and self._box is not None:
             obs["birdseye"] = ov.draw_overlay(obs["birdseye"], [], {}, target=self._box)
         with self._lock:
-            if self.config.state_log_dir and gen == self._gen:
+            if self.config.state_log_dir and gen == self._gen and self._log_on:
                 self._log.append(row + (json.dumps(dets) if self._yolo is not None else "",))
         return obs
 
@@ -312,6 +350,9 @@ class SO101Mujoco(Robot):
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
+        if self._viewer is not None:
+            self._close_viewer(self._viewer)
+            self._viewer = None
         with self._lock:
             self._save_log()
             if self._cams is not None:
