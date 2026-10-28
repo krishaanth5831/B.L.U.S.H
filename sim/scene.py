@@ -125,10 +125,20 @@ PLA_RGBA = (0.92, 0.92, 0.90, 1)   # ⚠️ unverified: real filament colours. T
 TPU_RGBA = (0.15, 0.15, 0.15, 1)
 
 # --- cameras ---
-# Birdseye: the printed mast's default pose (greenhouse generator LENS / LENS_TILT_DEG). The mast
-# isn't printed yet, so this is the design pose (unverified).
-BIRDSEYE_POS = (-0.120, 0.200, 0.423)
-BIRDSEYE_TILT_DEG = 20.0
+# Birdseye (K7 2026-10-28, same setup as S.H.E.A.R sim/layout.py): on a mast behind the empty row R0,
+# level, looking straight at the vine row R1 through the gap between R0's crop rail and anchor rail.
+# Centred on the row, ~0.55 m from it: the 72 x 52 deg frame (lens.py) covers ~0.8 m of row and z ~0.08-0.60.
+# It no longer looks over the arm's shoulder down the aisle (the old pose: (-0.120, 0.200, 0.423), 20 deg down,
+# from the printed-mast design). Design pose, unverified until the new mast stands in the greenhouse.
+BIRDSEYE_POS = (0.370, -0.150, 0.340)
+BIRDSEYE_TILT_DEG = 0.0          # + = looking down
+# The mast (S.H.E.A.R layout.py, design guesses): base plate, pole behind the lens, bracket, camera housing.
+# ⚠️ The housing starts MAST_LENS_GAP behind the lens point: randomize.py moves the camera up to +-1 cm, and
+# a camera inside its own housing renders black.
+MAST_POLE_R, MAST_BACK, MAST_LENS_GAP = 0.012, 0.055, 0.012
+MAST_BASE_XYT = (0.11, 0.11, 0.008)
+CAM_BOARD = (0.032, 0.032, 0.020)   # InnoMaker 32 x 32 mm board in its housing: width, height, depth
+LENS_R, LENS_LEN = 0.008, 0.012
 # Lens: both cameras render a wider pinhole image that lens.py bends into the 640x480 frame
 # (⚠️ guessed from the InnoMaker spec until calibrated; sim/cameras.json overrides it).
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
@@ -208,9 +218,7 @@ def greenhouse_xml():
         g.append(_box(f"anchor{j}_web", (0, r - T / 2, 0), (HOUSE_L, r + T / 2, ANCHOR_WEB_H)))
         g.append(_box(f"anchor{j}_flange", (0, r - FLANGE_W / 2, ANCHOR_WEB_H), (HOUSE_L, r + FLANGE_W / 2, ANCHOR_WEB_H + T)))
     g.append(_box("ridge", (0, -0.02, apex - 0.055), (HOUSE_L, 0.02, apex - 0.015)))
-    # Camera mast (printed, MAST_BASE x -120 y 151): pole + base plate, cosmetic only.
-    g.append('<geom name="mast_pole" type="cylinder" pos="-0.120 0.151 0.21" size="0.012 0.21" rgba="0.6 0.6 0.6 1" contype="0" conaffinity="0"/>')
-    g.append(_box("mast_base", (-0.175, 0.096, 0), (-0.065, 0.206, 0.008), "0.6 0.6 0.6 1", collide=False))
+    g.append(mast_xml())                             # the birdseye's mast, behind row R0
     return "\n".join(g)
 
 
@@ -232,8 +240,27 @@ def in_crate(pos):
 
 def _birdseye_xyaxes():
     s, c = np.sin(np.radians(BIRDSEYE_TILT_DEG)), np.cos(np.radians(BIRDSEYE_TILT_DEG))
-    # Looking +x, tilted down: image right = -y, image up = (sin, 0, cos).
-    return f"0 -1 0 {s:.5f} 0 {c:.5f}"
+    # Looking +y (at the row), tilted down by the tilt: image right = +x, image up = (0, sin, cos).
+    return f"1 0 0 0 {s:.5f} {c:.5f}"
+
+
+def mast_xml():
+    """The birdseye's mast: base plate, pole, bracket, camera housing and lens, all behind the lens point."""
+    x, y, z = BIRDSEYE_POS
+    yl = y - MAST_LENS_GAP                       # lens barrel front
+    yb = yl - LENS_LEN - CAM_BOARD[2] / 2        # housing centre
+    yp = y - MAST_BACK                           # pole axis
+    grey, black = "0.6 0.6 0.62 1", "0.12 0.12 0.12 1"
+    bw, bh, bd = CAM_BOARD
+    return "\n".join([
+        _box("mast_base", (x - MAST_BASE_XYT[0] / 2, yp - MAST_BASE_XYT[1] / 2, 0),
+             (x + MAST_BASE_XYT[0] / 2, yp + MAST_BASE_XYT[1] / 2, MAST_BASE_XYT[2]), grey),
+        f'<geom name="mast_pole" type="cylinder" fromto="{x} {yp} {MAST_BASE_XYT[2]} {x} {yp} {z}" '
+        f'size="{MAST_POLE_R}" rgba="{grey}"/>',
+        _box("mast_bracket", (x - 0.010, yp, z - 0.006), (x + 0.010, yb - bd / 2, z + 0.006), grey),
+        _box("mast_cam", (x - bw / 2, yb - bd / 2, z - bh / 2), (x + bw / 2, yb + bd / 2, z + bh / 2), black),
+        f'<geom name="mast_lens" type="cylinder" fromto="{x} {yl - LENS_LEN} {z} {x} {yl} {z}" size="{LENS_R}" '
+        f'rgba="{black}"/>'])
 
 
 def vines_xml(rng):
@@ -289,9 +316,17 @@ def world_xml(static, tomatoes, eqs, scenery=True):
     <headlight diffuse="0.5 0.5 0.5" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <quality shadowsize="2048"/>
   </visual>
+  <asset>
+    <!-- A pale sky behind the greenhouse: the level birdseye sees past the frame, and an empty black
+         background left the YOLO nothing like its training photos (2026-10-28). Colours as S.H.E.A.R (unverified). -->
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.85 0.90 0.95" rgb2="0.55 0.65 0.75" width="256" height="1536"/>
+  </asset>
   <worldbody>
     <light name="top" pos="0.37 0 1.6" dir="0 0 -1" directional="true" diffuse="0.6 0.6 0.6"/>
-    <light name="side" pos="-0.4 0.6 0.9" dir="0.7 -0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
+    <!-- ⚠️ The side light was at (-0.4, 0.6, 0.9) aiming back toward -y. With the birdseye behind row R0
+         facing +y (2026-10-28) that lit the fruit from behind, and the ripeness YOLO picked 0 of 100 layouts.
+         Mirrored to the camera's side of the row. -->
+    <light name="side" pos="-0.4 -0.6 0.9" dir="0.7 0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {greenhouse_xml() if scenery else ''}

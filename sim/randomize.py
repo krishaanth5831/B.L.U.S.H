@@ -11,7 +11,7 @@ What is randomised and why:
 - Lights + table/greenhouse colours: the real room's lighting and the photo textures aren't known yet.
 - Fruit colour, jittered INSIDE its ripeness class (hue/saturation/brightness), so a ripe fruit stays
   red and a green one never drifts toward ripe: the gate's classes must keep meaning the same thing.
-- Camera poses: the birdseye mast isn't printed (its pose is the generator's design pose) and the claw
+- Camera poses: the birdseye mast (behind row R0, facing the row since 2026-10-28) isn't built yet and the claw
   camera sits on a 3D-printed mount, so both get a small pose jitter.
 - Physics guesses that change the grasp: finger friction and stiffness, truss and pedicel stiffness,
   fruit mass. ⚠️ Not fruit friction: the finger geoms have contact priority, so their friction is the
