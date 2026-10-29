@@ -104,6 +104,10 @@ def main():
     ap.add_argument("--resume", action="store_true",
                     help="append to an existing dataset: kept counts from its earlier attempt logs, seeds continue "
                          "after the last one logged (unless --seed-start is given)")
+    ap.add_argument("--replay-log", type=pathlib.Path, default=None,
+                    help="attempt log of a run whose dataset was lost (power cut before finalize leaves the "
+                         "parquet without a footer): record its kept seeds first, in order and without the dry "
+                         "run, then go on after its last seed. Move that log out of the log folder first")
     a = ap.parse_args()
     n_eps = 5 if a.pilot else a.episodes
     repo_id = a.repo_id + ("_pilot" if a.pilot else "")
@@ -166,11 +170,29 @@ def main():
             a.seed_start = max(r["seed"] for rs in runs for r in rs if "seed" in r) + 1
         print(f"resuming at episode {kept['n']}, seed {a.seed_start}: {kept}", flush=True)
     want_same = round(SAME_TRUSS_SHARE * n_eps)
+    replay = []
+    if a.replay_log:
+        # Its kept seeds, in order: the kept counts then grow exactly as before, so every seed draws the same
+        # twist/near-miss and plan rng. Its last lines can be NULs (power cut mid-write).
+        old = []
+        for line in a.replay_log.open(errors="replace"):
+            try:
+                old.append(json.loads(line))
+            except ValueError:
+                pass
+        replay = [r["seed"] for r in old if r.get("reason") == "ok"]
+        if a.seed_start == ap.get_default("seed_start"):
+            a.seed_start = max(r["seed"] for r in old if "seed" in r) + 1
+        print(f"replaying {len(replay)} kept seeds from {a.replay_log}, then seed {a.seed_start} on", flush=True)
+    replay_set = set(replay)
     seed = a.seed_start - 1
     attempts, t_start = 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
-            seed += 1
+            if replay:
+                seed = replay.pop(0)
+            else:
+                seed = max(seed + 1, a.seed_start)
             attempts += 1
             rec = dict(seed=seed)
 
@@ -213,6 +235,9 @@ def main():
                         break                              # stricter won't find what looser couldn't
                     continue
                 rec["plan"] = plan.meta
+                if seed in replay_set:                     # passed its dry run before; the recording is judged
+                    ok = True
+                    break
                 t0 = robot.d.time
                 while not plan.done:
                     robot.send_action(plan.act(robot._present_norm()))
