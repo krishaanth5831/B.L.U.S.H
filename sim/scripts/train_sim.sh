@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # train_sim.sh: train on sim data, or on sim + real merged (lerobot env). Same recipes as harvest/scripts.
 #   sim/scripts/train_sim.sh act-smoke        500 ACT steps on the laptop: data loads, both cameras, loss falls
+#   sim/scripts/train_sim.sh act-laptop [ds] ACT on the scripted episodes on the laptop GPU (100k steps)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -19,6 +20,13 @@ case "${1:-}" in
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.push_to_hub=false --batch_size=8 --steps=500 --save_freq=500 \
       --output_dir=$OUT/act_sim_smoke --job_name=act_sim_smoke --wandb.enable=false ;;
+  act-laptop)
+    # ACT on the scripted sim episodes, on the laptop's 6 GB RTX 1000 Ada (K7, 2026-10-31). Batch 8 like
+    # act-smoke; 100k steps is a guess (unverified), checkpoints every 10k so any of them can be tried.
+    DS=${2:-$HF_USER/blush_sim_scripted_v1}
+    lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
+      --policy.push_to_hub=false --batch_size=8 --steps=100000 --save_freq=10000 --log_freq=50 --num_workers=8 \
+      --output_dir=$OUT/act_scripted_v1 --job_name=act_scripted_v1 --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \
@@ -35,5 +43,5 @@ case "${1:-}" in
     lerobot-train --dataset.repo_id="$DS" "${PI05[@]}" --policy.repo_id="$SIM_PI05_POLICY" \
       --output_dir=$OUT/pi05_sim_v1 --job_name=pi05_sim_v1 --batch_size=32 --steps=30000 --save_freq=5000 \
       --num_workers=8 --wandb.enable=true ;;
-  *) echo "usage: $0 act-smoke | act-full | merge <real_ds> | pi05-smoke [ds] | pi05-full [ds]"; exit 1 ;;
+  *) echo "usage: $0 act-smoke | act-laptop [ds] | act-full | merge <real_ds> | pi05-smoke [ds] | pi05-full [ds]"; exit 1 ;;
 esac
