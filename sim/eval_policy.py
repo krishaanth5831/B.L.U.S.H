@@ -11,9 +11,10 @@ loop sleeps off the rest of each frame.
 
 Novel scenes: every run starts at a fresh random seed (>= 1,000,000, so never one of the training seeds
 100000-100640), so each run shows new tomato positions and orientations. The seeds are printed; replay
-one scene with --seed-start <seed> --scenes 1. A scene is
-skipped unless its target tomato is at least --min-novel-mm away from every training episode's target
-(positions from rebuilding those 200 seeds once; cached in ~/.cache/blush_sim/train_targets_<name>.json).
+one scene with --seed-start <seed> --scenes 1. Every scene runs (K7, 2026-11-01: no skipping); each
+prints how far its target is from the nearest training episode's target (positions from rebuilding those
+200 seeds once; cached in ~/.cache/blush_sim/train_targets_<name>.json). --min-novel-mm X skips the close
+ones again. Only a scene with no ripe target at all is skipped: there is nothing to grade.
 Same scene settings as the scripted episodes: domain randomisation on, vines settled 1 s, YOLO overlay.
 
 Graded like generate_scripted.py's judge, at the end of each scene: success = target in the crate, no
@@ -102,8 +103,8 @@ def main():
     ap.add_argument("--scenes", type=int, default=20, help="novel scenes to run")
     ap.add_argument("--seed-start", type=int, default=None,
                     help="first scene seed; default: a random one per run (replay a scene with its printed seed)")
-    ap.add_argument("--min-novel-mm", type=float, default=25.0,
-                    help="skip scenes whose target is closer than this to a training target (a tomato is ~28 mm wide)")
+    ap.add_argument("--min-novel-mm", type=float, default=0.0,
+                    help="skip scenes whose target is closer than this to a training target (a tomato is ~28 mm wide); 0 = run all")
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     a = ap.parse_args()
     policy_path = a.policy.resolve()
