@@ -33,6 +33,7 @@ import eval_policy as ev  # noqa: E402
 import expert  # noqa: E402
 import scene  # noqa: E402
 import target as tg  # noqa: E402
+from add_box_feature import box_vector  # noqa: E402
 from generate_scripted import task_string  # noqa: E402
 
 CLOSE_DROP = 15.0         # norm units below the peak gripper command = "closing" (open 50-70, close ~1)
@@ -58,7 +59,7 @@ def set_target(robot, k):
 
 def episode(robot, policy, pre, post, features, rop, task, device, seed, mode, swap_to=None, png=None):
     from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
-    from lerobot.utils.constants import OBS_STR
+    from lerobot.utils.constants import OBS_ENV_STATE, OBS_STR
     from lerobot.utils.feature_utils import build_dataset_frame
     robot.new_scene(seed, log=False)
     obs = robot.get_observation()
@@ -78,6 +79,8 @@ def episode(robot, policy, pre, post, features, rop, task, device, seed, mode, s
     t0, peak, close, min_d = robot.d.time, -1e9, None, np.full(len(fruit), np.inf)
     while robot.d.time - t0 < EPISODE_S:
         frame = build_dataset_frame(features, rop(obs), prefix=OBS_STR)
+        if policy.config.env_state_feature:      # the box as numbers (add_box_feature.py)
+            frame[OBS_ENV_STATE] = box_vector(robot._box)
         with torch.inference_mode():
             act = post(policy.select_action(pre(prepare_observation_for_inference(frame, device, task, robot.name))))
         a = make_robot_action(act, features)

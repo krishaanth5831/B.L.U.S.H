@@ -40,6 +40,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import scene  # noqa: E402
+from add_box_feature import box_vector  # noqa: E402
 from generate_scripted import task_string  # noqa: E402
 
 TRAIN_DATASET = "krish5831/blush_sim_scripted_v1"
@@ -115,7 +116,7 @@ def main():
     from lerobot.datasets import LeRobotDatasetMetadata
     from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
     from lerobot.processor import make_default_processors
-    from lerobot.utils.constants import ACTION, OBS_STR, HF_LEROBOT_HOME
+    from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STR, HF_LEROBOT_HOME
     from lerobot.utils.feature_utils import build_dataset_frame
     from lerobot.utils.import_utils import register_third_party_plugins
     register_third_party_plugins()
@@ -160,6 +161,8 @@ def main():
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
                 frame = build_dataset_frame(features, rop(obs), prefix=OBS_STR)
+                if policy.config.env_state_feature:      # the box as numbers (add_box_feature.py)
+                    frame[OBS_ENV_STATE] = box_vector(robot._box)
                 with torch.inference_mode():
                     x = prepare_observation_for_inference(frame, device, task, robot.name)
                     act = post(policy.select_action(pre(x)))
