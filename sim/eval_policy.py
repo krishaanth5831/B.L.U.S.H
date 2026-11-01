@@ -9,7 +9,9 @@ policy gets (YOLO overlay included, as in training). Keys in a camera window: N 
 Q = quit. Runs at real time (30 fps): the sim steps 1/30 s per action, like generate_scripted.py, and the
 loop sleeps off the rest of each frame.
 
-Novel scenes: seeds from --seed-start (900000, far from the training seeds 100000-100640). A scene is
+Novel scenes: every run starts at a fresh random seed (>= 1,000,000, so never one of the training seeds
+100000-100640), so each run shows new tomato positions and orientations. The seeds are printed; replay
+one scene with --seed-start <seed> --scenes 1. A scene is
 skipped unless its target tomato is at least --min-novel-mm away from every training episode's target
 (positions from rebuilding those 200 seeds once; cached in ~/.cache/blush_sim/train_targets_<name>.json).
 Same scene settings as the scripted episodes: domain randomisation on, vines settled 1 s, YOLO overlay.
@@ -98,12 +100,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("policy", type=pathlib.Path, help="a checkpoint's pretrained_model folder")
     ap.add_argument("--scenes", type=int, default=20, help="novel scenes to run")
-    ap.add_argument("--seed-start", type=int, default=900000)
+    ap.add_argument("--seed-start", type=int, default=None,
+                    help="first scene seed; default: a random one per run (replay a scene with its printed seed)")
     ap.add_argument("--min-novel-mm", type=float, default=25.0,
                     help="skip scenes whose target is closer than this to a training target (a tomato is ~28 mm wide)")
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     a = ap.parse_args()
     policy_path = a.policy.resolve()
+    if a.seed_start is None:
+        a.seed_start = int(np.random.default_rng().integers(1_000_000, 2**31 - 100_000))
+    print(f"seeds from {a.seed_start} (replay one: --seed-start <its seed> --scenes 1)", flush=True)
 
     from lerobot.datasets import LeRobotDatasetMetadata
     from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
