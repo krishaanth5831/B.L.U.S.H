@@ -122,17 +122,22 @@ FINGER_PRIORITY = 1
 # flanks at their base, guess (unverified).
 PALM_BOX_MM = ((-13.0, -10.0, -40.0), (8.0, 10.0, -37.0))
 # --- cut-and-hold fingertips (truss harvesting, K7 2026-11-03: "blade on the fingertips") ---
-# ⚠️ Design guesses until K7 picks and mounts real parts. Closed empty, the fin-ray tips stay ~3 mm apart at
+# ⚠️ Design guesses until K7 picks and mounts real parts. Closed empty, the finger tips stay ~3 mm apart at
 # the -10 deg stop and 16 mm at 0 deg (probe, 2026-11-03): a 3-5 mm stalk slips through bare fingers. So each
 # tip cap carries a rigid insert: a blade on its stem-side face (gripper -y), and a spring-loaded clamp pad on
 # the rest of its width. The pads stand proud of the blades, so they touch the stalk first; the blades bypass
 # each other like secateurs (they don't collide with each other) and cut where the stalk leaves the stem side;
 # the pads keep the truss side squeezed after the cut. Sizes below are in the tip cap's own frame (x across
 # the jaw, y = gripper y, z along the finger, tip at -z).
-# Blade edge past the cap face. ⚠️ The fin-ray tips are soft: the jaw reaches its -10 deg stop with the tips
-# bent back, and the blade force is what that bending gives. 5.5 mm (edges meet at ~-4 deg) squeezed a stalk
-# with 4.5-5 N, 8 mm 3.5-5.8 N, 12 mm 11-18 N, against a 6.4-10.7 N cut force (check_truss_cut.py, 2026-11-03).
-BLADE_PROTRUDE = 0.012
+# ⚠️ Rigid fingers. On the soft TPU fin-ray tips (2 N/mm) the inserts didn't cut: the finger curls around the
+# stalk (the fin-ray effect), twisting the blades ~30 deg off it, and the stalk slid out (blade edge 5.5-12 mm
+# out: 4-20 N peaks, never held 50 ms; check_truss_cut.py renders, 2026-11-03). The same finger shape 20x
+# stiffer cut 3-5 mm stalks in 0.45 s and held them through the shake. K7 (2026-11-03): print the fingers
+# in PLA for truss harvesting. The sim keeps the fin-ray ladder with near-rigid hinges for that.
+RIGID_FINGER_K_N_PER_MM = 40.0
+# Blade edge past the cap face: 4 mm squeezed a 3-5 mm stalk with 25-29 N against a 6.4-10.7 N cut force on
+# the rigid fingers (check_truss_cut.py, 2026-11-03); 6 mm cut too, with no gain.
+BLADE_PROTRUDE = 0.004
 BLADE_T_COL = 0.002              # collision thickness (SHEAR scene.BLADE_T_COL: a thinner box tunnels at 2 ms)
 BLADE_Y = {"fixed": (-0.009, -0.007), "moving": (-0.007, -0.005)}   # bypass: side by side in y, stem side
 # Blade + pad extent along the finger (cap is -2..+2 mm). ⚠️ The closing tips aren't parallel, and an 8 mm
@@ -584,7 +589,8 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE, cut_hold=False):
             g.contype, g.conaffinity, g.group = 1, 1, 2
             _finger_contact(g)
         else:
-            _finray_ladder(s, b, part, chain[part], finray_stiffness(part, chain[part]))
+            _finray_ladder(s, b, part, chain[part],
+                           finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
     if cut_hold:
         if chain is None:
             raise ValueError("cut_hold needs the bending fin-ray fingers (FINRAY_BENDING)")

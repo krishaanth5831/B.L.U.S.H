@@ -4,7 +4,8 @@
     python check_truss_cut.py                 PASS/FAIL per stalk size, exit 1 on a FAIL
     python check_truss_cut.py --windowed      watch it in the MuJoCo window, slowed down
 
-The arm holds a fingers-down pose (check_grasp.find_pose). One truss (truss.py, 7 fruit) leaves a stand-in
+The arm holds a fingers-down pose (check_grasp.find_pose), with the truss-harvest fingers (scene.compose
+cut_hold=True: rigid PLA fingers, blade + spring pads at the tips). One truss (truss.py, 7 fruit) leaves a stand-in
 stem on the gripper's -y side (the blade side), its peduncle crossing the fingertips along gripper y, the
 cut zone at the blades. The jaw closes like the expert does (min-jerk, 0.6 s), holds, then the arm shakes
 (wrist flex, pan, wrist roll, as check_grasp.py) for 6 s. Checks, per stalk radius:
