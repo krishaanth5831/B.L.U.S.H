@@ -152,7 +152,11 @@ PAD_TRAVEL = None                 # a pad can be pushed back flush with the cap 
 PAD_K = 1000.0                   # N/m: ~6 N squeeze on a 4 mm stalk at the -10 deg stop (guess, unverified)
 PAD_PRELOAD = 0.001              # m: the spring rests this far past the pad's stop (1 N preload)
 PAD_ARMATURE = 0.01              # kg: keeps the 1000 N/m slide stable at the 2 ms step (design choice)
-PAD_FRICTION = (1.5, 0.02, 0.0001)   # rubber on stalk, guess (unverified)
+# Rubber on stalk, guess (unverified). Torsional 0.002 m = the contact patch's radius on a 3-5 mm stalk:
+# ⚠️ at 0.02 the pads held a 6-8 fruit truss stiffly sticking out 10-17 cm from the jaw (its weight's
+# ~0.07 N.m stayed under 0.02 m x 6 N), so it never hung down and hardly fit any crate (2026-11-03). Real pads
+# on a round stalk let it swing down to hang below the grip, as a truss does in cut-and-hold shears.
+PAD_FRICTION = (1.5, 0.002, 0.0001)
 BLADE_BITS = (8, 1)              # touches the stalk, fruit and scenery (contype 1); not the fingers or the other blade
 PAD_BITS = (16, 1)               # same, and not the other pad
 STEEL_RGBA, PAD_RGBA = (0.78, 0.80, 0.84, 1), (0.85, 0.45, 0.15, 1)

@@ -24,6 +24,8 @@ CUT_Y, CUT_Z = -0.0082, -0.1015
 W_DIR = 0.05                     # m per unit of the y-axis residual (expert.ArmIK.W_ANG)
 # Fingers run along gripper -z, so R[2,2] (gripper z's world-up part) is how far they point DOWN. At least this.
 DOWN_MIN = 0.2
+# Sampled poses tried as LM starts. 12 missed cut poses at the reach edge that a scene had found (2026-11-03).
+N_STARTS = 24
 
 
 def cut_point_in_gripper(r):
@@ -41,7 +43,7 @@ class TrussIK(expert.ArmIK):
         g = self.P + np.einsum("nij,j->ni", self.R, point)
         cost = np.linalg.norm(g - p, axis=1) + W_DIR * (1 - np.einsum("ni,i->n", self.R[:, :, 1], s))
         cost += 0.05 * (self.R[:, 2, 2] < DOWN_MIN)      # prefer fingers-down starts
-        starts = ([np.asarray(x0, float)] if x0 is not None else []) + [self.Q[i] for i in np.argsort(cost)[:12]]
+        starts = ([np.asarray(x0, float)] if x0 is not None else []) + [self.Q[i] for i in np.argsort(cost)[:N_STARTS]]
         best = None
         for x in starts:
             x, e = self._lm_y(x.copy(), p, point, s, iters)

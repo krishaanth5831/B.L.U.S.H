@@ -10,7 +10,8 @@ stem on the gripper's -y side (the blade side), its peduncle crossing the finger
 cut zone at the blades. The jaw closes like the expert does (min-jerk, 0.6 s), holds, then the arm shakes
 (wrist flex, pan, wrist roll, as check_grasp.py) for 6 s. Checks, per stalk radius:
   - the blades cut it (TrussCutter) before the jaw has finished closing + 0.5 s
-  - the pads still hold it: the truss moves less than HOLD_DRIFT_M in the gripper while shaking
+  - the pads still hold it: the stalk slips less than HOLD_DRIFT_M through the jaw while shaking (it may swing
+    round the jaw's closing axis: that's how a truss hangs from cut-and-hold pads, scene.PAD_FRICTION)
   - no fruit came off the truss (tomato.Detacher)
 Free space, no greenhouse: this tests the fingertips, not the layout. Writes nothing.
 """
@@ -139,7 +140,7 @@ def run(q, r, watch=False):
     step(int(HOLD_S / m.opt.timestep))
     cut_t = None if cut.cut_t is None else cut.cut_t - (d.time - HOLD_S - CLOSE_S)
     Rg = d.xmat[G].reshape(3, 3)
-    in_g0 = (d.xpos[T] - d.xpos[G]) @ Rg
+    in_g0 = stalk_point_in_gripper(m, d, info, want[1])
     drift = 0.0
     q0 = d.ctrl[uidx].copy()
     for joint, amp, hz in cg.SHAKE:
@@ -148,7 +149,7 @@ def run(q, r, watch=False):
         for i in range(n):
             d.ctrl[uidx[k]] = q0[k] + SHAKE_SCALE * amp * np.sin(2 * np.pi * hz * i * m.opt.timestep)
             step()
-            drift = max(drift, np.linalg.norm((d.xpos[T] - d.xpos[G]) @ d.xmat[G].reshape(3, 3) - in_g0))
+            drift = max(drift, np.linalg.norm(stalk_point_in_gripper(m, d, info, want[1]) - in_g0))
         d.ctrl[uidx] = q0
     if v is not None:
         cg.close_viewer(v)

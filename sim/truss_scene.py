@@ -47,10 +47,12 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
 # Crate for whole trusses: ~10-15 cm long trusses need ~18 cm. ⚠️ A truss hangs 12-15 cm below the grip, so
 # the release point is high; an IK scan (2026-11-03) reached it over x 0.56-0.62 but not near the base
 # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
-CRATE_CENTRE = (0.62, 0.17)      # IK scan: reachable over x 0.56-0.62, y 0.06-0.26; away from the hanging trusses
+# IK scan: reachable over x 0.56-0.62, y 0.06-0.26. ⚠️ Toward the aisle: at y 0.17 the arm reaching over the crate
+# passed through trusses hanging out from the row (seed 200000, 2026-11-03). x max 0.73 < the end frame at 0.74.
+CRATE_CENTRE = (0.63, 0.13)
 # 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
 # found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
-CRATE_SIZE = (0.22, 0.18, 0.05)
+CRATE_SIZE = (0.20, 0.18, 0.05)
 
 
 def in_crate(info, d, m, k):
@@ -133,6 +135,7 @@ def vines_xml(rng):
     return static, list(zip(knuckles, trusses_xml, bodies, eqs, excl)), trusses
 
 
+BUILD_SETTLE_S = 0.5             # the vines settle this long before reach is judged (the plugin settles 1 s more)
 START_CLEAR_M = 0.01             # no truss within this of the arm at the start pose (it rests there 0.4-0.8 s
                                  # and the vines settle around it; fruit hanging into it fell off, 2026-11-03)
 
@@ -185,9 +188,15 @@ def build(seed=0, arm=True):
             trusses = [t for k, t in enumerate(trusses) if k not in bad]
             m, d = _compose(static, parts, arm)
     ik = truss_ik.truss_ik()
+    if arm:
+        # ⚠️ Settle first, then judge reach where the trusses really hang. Cut poses sit at the reach edge: a 0.4 mm /
+        # 1.3 deg settle took seed 200001's ready truss from 5 of 7 cut points with a pose to none (2026-11-03).
+        _start_pose(m, d)
+        for _ in range(int(BUILD_SETTLE_S / m.opt.timestep)):
+            mujoco.mj_step(m, d)
     for t in trusses:
-        p, s = cut_target(t)
-        t["cut_ik"] = ik.solve(p, s, t["r"]) is not None
+        # a cut pose at the middle of the cut zone AND near its ends, so a little sway doesn't take it away
+        t["cut_ik"] = all(ik.solve(*cut_target_now(t, d, m, u), t["r"]) is not None for u in (0.3, 0.5, 0.7))
     # ⚠️ Crowded on purpose, but a ready truss must be reachable: some cut point with a clear slide-in and a
     # closing jaw that only touches its stalk (truss_expert.approach_ok, neighbours brushed at most). Without
     # this 6 of 12 dry runs failed on a neighbour in the way of every approach (2026-11-03).

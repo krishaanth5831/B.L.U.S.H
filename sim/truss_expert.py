@@ -80,18 +80,44 @@ def _pose(d, b):
     return d.xpos[b].copy(), d.xmat[b].reshape(3, 3).copy()
 
 
+def _axis_rot(a, t):
+    a = a / np.linalg.norm(a)
+    K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+    return np.eye(3) + np.sin(t) * K + (1 - np.cos(t)) * K @ K
+
+
+def hanging(o, R, rel, masses, grip_point):
+    """World poses [(pos, R)] of the carried truss's bodies with the gripper at (o, R): held at the grip point as at
+    the cut, then swung about the jaw's closing axis (gripper x, through the grip point) until its centre of mass
+    hangs straight below it. The pads hold the stalk but let it turn about that axis (scene.PAD_FRICTION)."""
+    P = o + R @ grip_point
+    W = [(o + R @ p, R @ Rr) for Rr, p in rel]
+    a = R[:, 0]
+    c = sum(mb * w[0] for mb, w in zip(masses, W)) / sum(masses) - P
+    c_perp = c - (c @ a) * a
+    down = np.array([0, 0, -1.0]) - (-a[2]) * a
+    if np.linalg.norm(c_perp) < 1e-6 or np.linalg.norm(down) < 1e-6:
+        return W                                  # closing axis vertical: it can't swing round it
+    c_perp, down = c_perp / np.linalg.norm(c_perp), down / np.linalg.norm(down)
+    t = np.arctan2(np.cross(c_perp, down) @ a, c_perp @ down)
+    Q = _axis_rot(a, t)
+    return [(P + Q @ (p - P), Q @ Rw) for p, Rw in W]
+
+
 class CarryChecker(rrt.Checker):
     """rrt.Checker with the cut truss riding in the jaw: before each check the truss and its fruit are put where
-    they'd be, held at the same place in the gripper as at the cut, and their geoms count as part of the arm. So a
-    route after the cut is checked for the whole carried truss (it sticks out 10-17 cm from the jaw; held by the
-    pads it doesn't dangle: seed 200013 left a fruit outside the crate, 200006 tore fruit off a neighbour on the
-    way, both planned as if it hung below the grip, 2026-11-03)."""
+    they'd hang (hanging()), and their geoms count as part of the arm. So a route after the cut is checked for the
+    whole carried truss (seed 200006 tore fruit off a neighbour on the way to the crate when it wasn't, 2026-11-03).
+    ⚠️ Static: the swing on the way (the truss settles into hanging after the cut) isn't modelled; the dry run's
+    judge counts what it hits."""
 
-    def __init__(self, m, d, carried_bodies, rel, **kw):
+    def __init__(self, m, d, carried_bodies, rel, grip_point, **kw):
         super().__init__(m, d, **kw)
         mm = self.m
         self.G = mm.body("arm/gripper").id
-        self.carried = [(mm.jnt_qposadr[mm.body_jntadr[b]], R, p) for b, (R, p) in zip(carried_bodies, rel)]
+        self.adr_c = [mm.jnt_qposadr[mm.body_jntadr[b]] for b in carried_bodies]
+        self.rel, self.grip = rel, grip_point
+        self.masses = [float(mm.body_mass[b]) for b in carried_bodies]
         carried_set = set(carried_bodies)
         for g in range(mm.ngeom):
             if mm.geom_bodyid[g] in carried_set:
@@ -102,10 +128,10 @@ class CarryChecker(rrt.Checker):
         self.d.qpos[self.adr] = q
         mujoco.mj_kinematics(self.m, self.d)
         o, R = _pose(self.d, self.G)
-        for adr, Rr, pr in self.carried:
+        for adr, (pw, Rw) in zip(self.adr_c, hanging(o, R, self.rel, self.masses, self.grip)):
             quat = np.zeros(4)
-            mujoco.mju_mat2Quat(quat, (R @ Rr).reshape(-1))
-            self.d.qpos[adr:adr + 3], self.d.qpos[adr + 3:adr + 7] = o + R @ pr, quat
+            mujoco.mju_mat2Quat(quat, Rw.reshape(-1))
+            self.d.qpos[adr:adr + 3], self.d.qpos[adr + 3:adr + 7] = pw, quat
         return super().hits(q, **kw)
 
 
@@ -264,15 +290,19 @@ class TrussPlanner:
         m, d = self.m, self.d
         bodies = [m.body(self.t["body"]).id] + [m.body(f["tomato"]).id for f in self.t["fruit"]]
         rel = [(R.T @ d.xmat[b].reshape(3, 3), R.T @ (d.xpos[b] - o)) for b in bodies]
-        return bodies, rel
+        # the stalk + pedicels' mass sits in the truss body: subtree mass, minus the fruit (free bodies of their own)
+        masses = [float(m.body_subtreemass[bodies[0]])] + [float(m.body_mass[b]) for b in bodies[1:]]
+        return bodies, rel, masses
 
     def _carried_fruit(self, x, carry):
-        """Fruit centres (world) at arm joints x with the truss held as at the cut."""
+        """Fruit centres (world) at arm joints x with the truss hanging from the grip (hanging())."""
         o, R = self.ik_free.fk(x)
-        return np.array([o + R @ p for (_, p) in carry[1][1:]])
+        W = hanging(o, R, carry[1], carry[2], truss_ik.cut_point_in_gripper(self.t["r"]))
+        return np.array([w[0] for w in W[1:]])
 
     def _after_cut(self, rng, x_cut, p_cut, f, s, r, carry):
-        cchk = CarryChecker(self.m, self.d, carry[0], carry[1], hard=self.hard, soft=self.soft)
+        cchk = CarryChecker(self.m, self.d, carry[0], carry[1], truss_ik.cut_point_in_gripper(r), hard=self.hard,
+                            soft=self.soft)
         cchk.d.qpos[self.g_adr] = np.radians(-10.0)
         # retreat: back along the fingers and up, the truss in hand (ignored); other trusses stay hard
         self.jaw(-10.0)
@@ -299,9 +329,14 @@ class TrussPlanner:
         radii = np.array([fr["radius"] for fr in self.t["fruit"]])
         inner = np.array([sx / 2 - scene.CRATE_WALL, sy / 2 - scene.CRATE_WALL])
         best = None
+        # first guess of the grip height: the truss hangs ~this far below the grip (from how it hangs at the cut);
+        # ⚠️ a fixed 0.20 m guess had no IK in 91 of 120 samples at the crate's spot (seed 200000, 2026-11-03)
+        P_cut = self.ik.frame(x_cut, r)[0]
+        drop = P_cut[2] - (self._carried_fruit(x_cut, carry)[:, 2] - radii).min()
+        z0 = scene.CRATE_WALL + 0.03 + drop
         for _ in range(RELEASE_SAMPLES):
             pitch, tilt = rng.uniform(*RELEASE_PITCH_DEG), rng.uniform(-90, 90)
-            p0 = np.array([cx + rng.uniform(-CRATE_JITTER_M, CRATE_JITTER_M), cy + rng.uniform(-1, 1) * CRATE_JITTER_M, 0.20])
+            p0 = np.array([cx + rng.uniform(-CRATE_JITTER_M, CRATE_JITTER_M), cy + rng.uniform(-1, 1) * CRATE_JITTER_M, z0])
             x0 = self.ik_free.solve(p0, pitch, tilt, point)
             if x0 is None:
                 continue
@@ -315,23 +350,22 @@ class TrussPlanner:
                 continue
             F = self._carried_fruit(xr, carry)
             slack = np.min(inner - (np.abs(F[:, :2] - [cx, cy]) + radii[:, None]))
-            if slack < 0 or (F[:, 2] + radii).max() > h + ABOVE_RIM_MAX_M:
-                continue
+            if slack < rrt.CLEARANCE + 0.001 or (F[:, 2] + radii).max() > h + ABOVE_RIM_MAX_M:
+                continue                                 # within the clearance of a wall the checks below fail anyway
             xa = self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M], pitch, tilt, point, x0=xr)
             if xa is None or not cchk.free(xa, **self.kw):
                 continue
+            # the straight lowering: solved from the release pose up (warm-started), so the arm keeps its branch
+            low = [self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
+                   for v in np.linspace(0, 1, 6)]
+            if any(x is None for x in low) or not cchk.path_ok(low, **self.kw):
+                continue
             if best is None or slack > best[0]:
-                best = (slack, xr, xa, p, pitch, tilt)
+                best = (slack, xr, low[0], p, pitch, tilt, low)
         if best is None:
             return "no release pose that fits the truss in the crate"
-        _, x_rel, x_above, p, pitch, tilt = best
+        _, x_rel, x_above, p, pitch, tilt, lower = best
         hang = float(-(self._carried_fruit(x_rel, carry)[:, 2] - p[2]).min())
-        lower = [self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=x_above)
-                 for v in np.linspace(0, 1, 6)]
-        if any(x is None for x in lower):
-            return "no IK lowering into the crate"
-        if not cchk.path_ok(lower, **self.kw):
-            return "lowering: the truss hits " + ",".join(sorted(cchk.hits(lower[-1], **self.kw)))[:50]
         to_crate = None
         for _ in range(RRT_SEEDS):
             to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, **self.kw)
