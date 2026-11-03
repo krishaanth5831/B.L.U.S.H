@@ -13,8 +13,9 @@ IK and RRT do different jobs (K7 2026-11-01: "RRT for every route, IK for the po
   straight lines, collision-checked too.
 
 What the arm must not touch (rrt.Checker sets):
-- hard: the greenhouse, crate, table, every stem, and every OTHER truss (stalks and fruit). Kept CLEARANCE away
-  on every route, so neighbouring trusses aren't brushed (K7: "doesn't affect other tomatoes").
+- hard: the greenhouse, crate, table, every stem. Kept rrt.CLEARANCE away on every move.
+- soft: every OTHER truss (stalks and fruit), NEIGHBOUR_CLEAR away: not brushed, or in a crowd at most pressed
+  2 mm, and the judge checks they didn't move (K7: "doesn't affect other tomatoes").
 - firm: the target truss's own fruit. Avoided on every move; a knocked-off fruit fails the episode.
 - the target's stalk: avoided on the way in, ignored on the slide (it goes between the open tips), and the
   whole target truss is ignored once it's cut and held.
@@ -25,6 +26,7 @@ SQUEEZE_S (longer than the single-fruit picker's 0.3-0.5 s, so a policy learns n
 closes) -> retreat toward the aisle and up -> RRT to above the crate -> lower -> open -> wait -> rise -> RRT
 back to start -> hold. Minimum-jerk timing; servo sag corrected like expert.Plan.
 """
+import mujoco
 import numpy as np
 
 import arm_map
@@ -49,10 +51,12 @@ RETREAT_M = (0.03, 0.05)         # back along the approach after the cut (5-7 cm
 RETREAT_UP_M = (0.02, 0.04)      # ...and up, so the truss clears its neighbours before any swing
 # Retreat directions tried in order: back along the approach, toward the aisle, straight up (design choice).
 CRATE_JITTER_M = 0.03            # release point around the crate centre
-RELEASE_ABOVE_M = (0.01, 0.025)  # lowest fruit this far above the crate floor at release
+RELEASE_ABOVE_M = (0.01, 0.05)   # lowest fruit this far above the crate floor at release (the truss drops in)
 ABOVE_CRATE_M = 0.08             # way-point this far above the release pose (lowered straight from there)
 RELEASE_PITCH_DEG = (10.0, 85.0)  # fingers pointing down over the crate (wide: the IK scan reached the crate's
                                   # far half at 10-85, 2026-11-03)
+RELEASE_SAMPLES = 120            # release poses tried; the one leaving the most room to the walls is kept
+ABOVE_RIM_MAX_M = 0.12           # no carried fruit higher than this over the rim at release (it'd drop far)
 DROP_S = (0.5, 0.8)
 MISS_SHORT_M = (0.015, 0.025)    # miss: the tips stop this far short of the stalk, close on nothing
 MISS_PAUSE_S = (0.3, 0.5)
@@ -60,11 +64,49 @@ SPEED = expert.SPEED
 JOINT_PEAK_NORM_S = expert.JOINT_PEAK_NORM_S
 CART_PEAK_M_S = expert.CART_PEAK_M_S
 RRT_SEEDS = 3                    # RRT attempts per route before giving up on a candidate (design choice)
+# Neighbouring trusses: kept this far from the arm on every move (rrt "soft" set, soft_clearance). A plan is
+# tried strict first; when nothing clears them, again letting the arm press them by up to 2 mm (the sprung
+# trusses give; the dry run's judge then rejects any that swing more than generate_truss.NEIGHBOUR_MOVE_M or
+# lose a fruit). In crowded scenes 6 of 12 strict plans had a neighbour within 4 mm of the slide (2026-11-03).
+NEIGHBOUR_CLEAR = {"strict": rrt.CLEARANCE, "brush": -0.002}
 CANDIDATES = 8                   # cut points drawn along the cut zone per plan
 
 
 class PlanError(Exception):
     pass
+
+
+def _pose(d, b):
+    return d.xpos[b].copy(), d.xmat[b].reshape(3, 3).copy()
+
+
+class CarryChecker(rrt.Checker):
+    """rrt.Checker with the cut truss riding in the jaw: before each check the truss and its fruit are put where
+    they'd be, held at the same place in the gripper as at the cut, and their geoms count as part of the arm. So a
+    route after the cut is checked for the whole carried truss (it sticks out 10-17 cm from the jaw; held by the
+    pads it doesn't dangle: seed 200013 left a fruit outside the crate, 200006 tore fruit off a neighbour on the
+    way, both planned as if it hung below the grip, 2026-11-03)."""
+
+    def __init__(self, m, d, carried_bodies, rel, **kw):
+        super().__init__(m, d, **kw)
+        mm = self.m
+        self.G = mm.body("arm/gripper").id
+        self.carried = [(mm.jnt_qposadr[mm.body_jntadr[b]], R, p) for b, (R, p) in zip(carried_bodies, rel)]
+        carried_set = set(carried_bodies)
+        for g in range(mm.ngeom):
+            if mm.geom_bodyid[g] in carried_set:
+                self.is_arm[g] = True
+                mm.geom_margin[g] = rrt.CLEARANCE
+
+    def hits(self, q, **kw):
+        self.d.qpos[self.adr] = q
+        mujoco.mj_kinematics(self.m, self.d)
+        o, R = _pose(self.d, self.G)
+        for adr, Rr, pr in self.carried:
+            quat = np.zeros(4)
+            mujoco.mju_mat2Quat(quat, (R @ Rr).reshape(-1))
+            self.d.qpos[adr:adr + 3], self.d.qpos[adr + 3:adr + 7] = o + R @ pr, quat
+        return super().hits(q, **kw)
 
 
 class TrussPlanner:
@@ -80,15 +122,19 @@ class TrussPlanner:
         self.target_stalk = {m.geom(g).id for g in self.t["geoms"]}
         self.target_fruit = {m.geom(f["geom"]).id for f in self.t["fruit"]}
         self.target_all = self.target_stalk | self.target_fruit
-        hard = set()
+        trusses = {gn for t in info["trusses"] for gn in t["geoms"] + [f["geom"] for f in t["fruit"]]}
+        hard, soft = set(), set()
         for g in range(m.ngeom):
             n = name(g)
             if is_arm[g] or not n or n in mine:
                 continue
-            if n.startswith("stem") or m.geom_contype[g] or m.geom_conaffinity[g]:
+            if n in trusses:
+                soft.add(g)
+            elif n.startswith("stem") or m.geom_contype[g] or m.geom_conaffinity[g]:
                 hard.add(g)
-        self.hard = hard
-        self.chk = rrt.Checker(m, d, hard=hard, firm=self.target_all)
+        self.hard, self.soft = hard, soft
+        self.chk = rrt.Checker(m, d, hard=hard, soft=soft, firm=self.target_all)
+        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["strict"])
         self.g_adr = m.joint("arm/gripper").qposadr[0]
         self.lo, self.hi = (np.asarray(v[:5]) for v in self.fm.rad_limits())
 
@@ -111,7 +157,7 @@ class TrussPlanner:
 
     def route(self, q0, q1, rng, **kw):
         for _ in range(RRT_SEEDS):
-            p = rrt.plan(self.chk, q0, q1, rng, lo=self.lo, hi=self.hi, **kw)
+            p = rrt.plan(self.chk, q0, q1, rng, lo=self.lo, hi=self.hi, **{**self.kw, **kw})
             if p is not None:
                 return p
         return None
@@ -123,46 +169,28 @@ class TrussPlanner:
 
     # --- the plan ---
     def plan(self, rng, miss=False):
+        """Strict first, then letting the arm brush neighbours by 2 mm (NEIGHBOUR_CLEAR)."""
+        why = []
+        for mode in NEIGHBOUR_CLEAR:
+            self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR[mode])
+            try:
+                plan = self._plan(rng, miss)
+                plan.meta["neighbours"] = mode
+                return plan
+            except PlanError as e:
+                why.append(f"{mode}: {e}")
+        raise PlanError(" / ".join(why))
+
+    def _plan(self, rng, miss=False):
         tried = []
         r = self.t["r"]
         q_start = self.q_now()
         for _ in range(CANDIDATES):
-            u = rng.uniform(0.2, 0.8)
-            p_cut, s = ts.cut_target_now(self.t, self.d, self.m, u)
-            x_cut = self.ik.solve(p_cut, s, r)
-            if x_cut is None:
-                tried.append("no cut pose")
+            leg = self._cut_leg(rng, r)
+            if isinstance(leg, str):
+                tried.append(leg)
                 continue
-            _, R = self.ik.frame(x_cut, r)
-            slide = None
-            for beta in rng.permutation(APPROACH_BLEND_DEG):
-                b = np.radians(beta)
-                f = np.cos(b) * -R[:, 2] + np.sin(b) * R[:, 1]   # approach: along the fingers, blended along the stalk
-                for L in (SLIDE_M,) + SLIDE_FALLBACK_M:
-                    slide = self.line_ik(p_cut - f * L, p_cut, s, r, x_cut, SLIDE_STEPS)   # warm-started at the cut
-                    if slide is not None:
-                        break
-                if slide is not None:
-                    break
-            if slide is None:
-                tried.append("no IK along the slide")
-                continue
-            slide_m = L
-            self.jaw(JAW_OPEN_DEG)
-            # the slide: tips go round the stalk (ignored), never into its fruit or anything else
-            if not self.chk.path_ok(slide, ignore=self.target_stalk):
-                tried.append("slide hits " + ",".join(sorted(self.chk.hits(slide[-1], ignore=self.target_stalk)))[:60])
-                continue
-            # the closing jaw sweeps the moving finger: still clear of everything but the stalk
-            ok = True
-            for deg in np.linspace(JAW_OPEN_DEG, -10.0, 6):
-                self.jaw(deg)
-                if self.chk.hits(slide[-1], ignore=self.target_stalk):
-                    ok = False
-                    break
-            if not ok:
-                tried.append("closing jaw hits a neighbour")
-                continue
+            x_cut, p_cut, s, f, slide, slide_m, beta, u = leg
             self.jaw(JAW_OPEN_DEG)
             to_pre = self.route(q_start, slide[0], rng)
             if to_pre is None:
@@ -173,11 +201,11 @@ class TrussPlanner:
                 d_short = rng.uniform(*MISS_SHORT_M)
                 d_short = min(d_short, slide_m - 0.005)
                 ml = self.line_ik(p_cut - f * slide_m, p_cut - f * d_short, s, r, slide[0], SLIDE_STEPS // 2 + 2)
-                if ml is None or not self.chk.path_ok(ml):
+                if ml is None or not self.chk.path_ok(ml, **self.kw):
                     tried.append("miss leg blocked")
                     continue
                 miss_leg = dict(xs=ml, short=d_short, slide_m=slide_m)
-            rest = self._after_cut(rng, x_cut, p_cut, f, s, r)
+            rest = self._after_cut(rng, x_cut, p_cut, f, s, r, self._carry(x_cut))
             if isinstance(rest, str):
                 tried.append(rest)
                 continue
@@ -186,46 +214,129 @@ class TrussPlanner:
                                        tried=tried), slide_m)
         raise PlanError("; ".join(sorted(set(tried))) or "no candidate")
 
-    def _after_cut(self, rng, x_cut, p_cut, f, s, r):
+    def _cut_leg(self, rng, r):
+        """One cut point drawn in the cut zone: its cut pose, an approach whose slide is clear, and a closing jaw
+        that touches only the stalk. Returns (x_cut, p_cut, s, f, slide, slide_m, beta, u) or why not."""
+        u = rng.uniform(0.2, 0.8)
+        p_cut, s = ts.cut_target_now(self.t, self.d, self.m, u)
+        x_cut = self.ik.solve(p_cut, s, r)
+        if x_cut is None:
+            return "no cut pose"
+        _, R = self.ik.frame(x_cut, r)
+        slide = None
+        for beta in rng.permutation(APPROACH_BLEND_DEG):
+            b = np.radians(beta)
+            f = np.cos(b) * -R[:, 2] + np.sin(b) * R[:, 1]   # approach: along the fingers, blended along the stalk
+            for L in (SLIDE_M,) + SLIDE_FALLBACK_M:
+                slide = self.line_ik(p_cut - f * L, p_cut, s, r, x_cut, SLIDE_STEPS)   # warm-started at the cut
+                if slide is not None:
+                    break
+            if slide is not None:
+                break
+        if slide is None:
+            return "no IK along the slide"
+        slide_m = L
+        self.jaw(JAW_OPEN_DEG)
+        # the slide: tips go round the stalk (ignored), never into its fruit or anything else
+        if not self.chk.path_ok(slide, ignore=self.target_stalk, **self.kw):
+            return "slide hits " + ",".join(sorted(self.chk.hits(slide[-1], ignore=self.target_stalk, **self.kw)))[:60]
+        # the closing jaw sweeps the moving finger: still clear of everything but the stalk
+        ok = True
+        for deg in np.linspace(JAW_OPEN_DEG, -10.0, 6):
+            self.jaw(deg)
+            if self.chk.hits(slide[-1], ignore=self.target_stalk, **self.kw):
+                ok = False
+                break
+        if not ok:
+            return "closing jaw hits a neighbour"
+        return x_cut, p_cut, s, f, slide, slide_m, beta, u
+
+    def approach_ok(self, rng, tries=CANDIDATES):
+        """Some cut point of this truss can be reached and closed on (neighbours brushed at most): the scene
+        builder only calls such a truss ready (truss_scene.build)."""
+        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["brush"])
+        return any(not isinstance(self._cut_leg(rng, self.t["r"]), str) for _ in range(tries))
+
+    def _carry(self, x_cut):
+        """The cut truss's bodies (stalk + fruit) and their poses in the gripper frame at the cut pose. ⚠️ The arm
+        IK model and the scene share the arm base pose, so the IK's gripper pose is the scene's (truss_ik)."""
+        o, R = self.ik.fk(x_cut)
+        m, d = self.m, self.d
+        bodies = [m.body(self.t["body"]).id] + [m.body(f["tomato"]).id for f in self.t["fruit"]]
+        rel = [(R.T @ d.xmat[b].reshape(3, 3), R.T @ (d.xpos[b] - o)) for b in bodies]
+        return bodies, rel
+
+    def _carried_fruit(self, x, carry):
+        """Fruit centres (world) at arm joints x with the truss held as at the cut."""
+        o, R = self.ik_free.fk(x)
+        return np.array([o + R @ p for (_, p) in carry[1][1:]])
+
+    def _after_cut(self, rng, x_cut, p_cut, f, s, r, carry):
+        cchk = CarryChecker(self.m, self.d, carry[0], carry[1], hard=self.hard, soft=self.soft)
+        cchk.d.qpos[self.g_adr] = np.radians(-10.0)
         # retreat: back along the fingers and up, the truss in hand (ignored); other trusses stay hard
         self.jaw(-10.0)
         dist, up = rng.uniform(*RETREAT_M), rng.uniform(*RETREAT_UP_M)
         aisle = np.array([0, -np.sign(scene.TARGET_ROW - scene.ARM_BASE[1]), 0.0])
         ret, why = None, "no IK for the retreat"
-        for back in (p_cut - f * dist + [0, 0, up], p_cut + aisle * dist + [0, 0, up], p_cut + [0, 0, dist]):
+        options = (p_cut - f * dist + [0, 0, up], p_cut + aisle * dist + [0, 0, up], p_cut + [0, 0, dist],
+                   p_cut + aisle * dist * 1.5, p_cut - f * dist * 0.6 + aisle * dist * 0.6 + [0, 0, up])
+        for back in options:
             xs = self.line_ik(p_cut, back, s, r, x_cut, 8)
             if xs is None:
                 continue
-            if not self.chk.path_ok(xs, ignore=self.target_all, firm=False):
-                why = "retreat hits a neighbour"
+            if not cchk.path_ok(xs, **self.kw):
+                why = "retreat: the truss in hand hits " + ",".join(sorted(cchk.hits(xs[-1], **self.kw)))[:50]
                 continue
             ret = xs
             break
         if ret is None:
             return why
-        # release pose: the lowest fruit just above the crate floor, fingers down over the crate
-        (cx, cy), (_, _, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
-        hang = self.hang_m()
+        # release pose: every carried fruit inside the crate walls, the lowest just above the floor. Sampled
+        # (pitch, tilt, spot), the truss's footprint in the crate computed from how it's held, best fit kept.
+        (cx, cy), (sx, sy, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
         point = truss_ik.cut_point_in_gripper(r)
-        x_rel = x_above = None
-        for _ in range(10):
-            p = np.array([cx + rng.uniform(-CRATE_JITTER_M, CRATE_JITTER_M), cy + rng.uniform(-1, 1) * CRATE_JITTER_M * 0.6,
-                          scene.CRATE_WALL + hang + rng.uniform(*RELEASE_ABOVE_M)])
-            pitch, tilt = rng.uniform(*RELEASE_PITCH_DEG), rng.uniform(-60, 60)
-            x_rel = self.ik_free.solve(p, pitch, tilt, point)
-            if x_rel is None:
+        radii = np.array([fr["radius"] for fr in self.t["fruit"]])
+        inner = np.array([sx / 2 - scene.CRATE_WALL, sy / 2 - scene.CRATE_WALL])
+        best = None
+        for _ in range(RELEASE_SAMPLES):
+            pitch, tilt = rng.uniform(*RELEASE_PITCH_DEG), rng.uniform(-90, 90)
+            p0 = np.array([cx + rng.uniform(-CRATE_JITTER_M, CRATE_JITTER_M), cy + rng.uniform(-1, 1) * CRATE_JITTER_M, 0.20])
+            x0 = self.ik_free.solve(p0, pitch, tilt, point)
+            if x0 is None:
                 continue
-            x_above = self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M], pitch, tilt, point, x0=x_rel)
-            if x_above is not None and self.chk.free(x_above, ignore=self.target_all, firm=False):
-                break
-            x_rel = None
-        if x_rel is None:
-            return "no IK above the crate"
+            F = self._carried_fruit(x0, carry)
+            # shift so the footprint is centred on the crate and the lowest fruit sits RELEASE_ABOVE over the floor
+            shift = np.array([cx - (F[:, 0].min() + F[:, 0].max()) / 2, cy - (F[:, 1].min() + F[:, 1].max()) / 2,
+                              scene.CRATE_WALL + rng.uniform(*RELEASE_ABOVE_M) - (F[:, 2] - radii).min()])
+            p = p0 + shift
+            xr = self.ik_free.solve(p, pitch, tilt, point, x0=x0)
+            if xr is None:
+                continue
+            F = self._carried_fruit(xr, carry)
+            slack = np.min(inner - (np.abs(F[:, :2] - [cx, cy]) + radii[:, None]))
+            if slack < 0 or (F[:, 2] + radii).max() > h + ABOVE_RIM_MAX_M:
+                continue
+            xa = self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M], pitch, tilt, point, x0=xr)
+            if xa is None or not cchk.free(xa, **self.kw):
+                continue
+            if best is None or slack > best[0]:
+                best = (slack, xr, xa, p, pitch, tilt)
+        if best is None:
+            return "no release pose that fits the truss in the crate"
+        _, x_rel, x_above, p, pitch, tilt = best
+        hang = float(-(self._carried_fruit(x_rel, carry)[:, 2] - p[2]).min())
         lower = [self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=x_above)
                  for v in np.linspace(0, 1, 6)]
         if any(x is None for x in lower):
             return "no IK lowering into the crate"
-        to_crate = self.route(ret[-1], x_above, rng, ignore=self.target_all, firm=False)
+        if not cchk.path_ok(lower, **self.kw):
+            return "lowering: the truss hits " + ",".join(sorted(cchk.hits(lower[-1], **self.kw)))[:50]
+        to_crate = None
+        for _ in range(RRT_SEEDS):
+            to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, **self.kw)
+            if to_crate is not None:
+                break
         if to_crate is None:
             return "retreat -> crate: no RRT route"
         self.jaw(JAW_OPEN_DEG)
@@ -234,7 +345,7 @@ class TrussPlanner:
         if home is None:
             return "crate -> start: no RRT route"
         return dict(ret=ret, to_crate=to_crate, lower=lower, home=home, release_point=p.tolist(),
-                    release_pitch=round(pitch, 1), hang_mm=round(hang * 1000, 1))
+                    release_pitch=round(pitch, 1), hang_mm=round(hang * 1000, 1), crate_slack_mm=round(best[0] * 1000, 1))
 
     # --- frames ---
     def _assemble(self, rng, to_pre, slide, miss_leg, rest, meta, slide_m):

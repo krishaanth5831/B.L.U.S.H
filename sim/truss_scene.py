@@ -11,6 +11,7 @@ Same greenhouse, cameras, arm base and start pose as scene.build (the single-fru
   learns tough situations"); fruit never overlap, stalks may pass close by fruit of other trusses;
 - 1-2 ready trusses per scene, all with a cut pose (truss_ik.py), next to "almost" decoys (red, tip still
   green) that the box has to tell apart, and unripe ones;
+- only trusses the arm can reach and close on (cut pose + a clear approach) are made ready;
 - the arm has the rigid cut-and-hold fingers (scene.add_cut_hold);
 - the crate is bigger: a truss is ~10-15 cm long;
 - trusses hanging into the arm at its start pose are left out (START_CLEAR_M).
@@ -24,10 +25,14 @@ import truss as tr
 import truss_ik
 
 # --- layout (design choices, K7 2026-11-03 "crowded"; ranges unverified against a real greenhouse) ---
-STEM_X = (0.22, 0.52)            # along the row, in front of the arm (scene.STEM_X was 0.26-0.48)
-N_STEMS = (3, 4)
-STEM_GAP = 0.06                  # m between stems (scene.STEM_GAP 0.08): trusses of neighbouring stems overlap
-TRUSSES_PER_STEM = (1, 3)
+# Along the row, in front of the arm (scene.STEM_X was 0.26-0.48). ⚠️ Not past 0.48: trusses of a stem at 0.52
+# spread over the crate, and the carried truss hit them while lowering in (6 of 14 dry runs, 2026-11-03).
+STEM_X = (0.20, 0.48)
+# ⚠️ More than it looks: trusses hanging into the arm's start pose are dropped afterwards (START_CLEAR_M), which
+# left 1-5 per scene at 3-4 stems x 1-3 trusses (2026-11-03).
+N_STEMS = (4, 5)
+STEM_GAP = 0.05                  # m between stems (scene.STEM_GAP 0.08): trusses of neighbouring stems overlap
+TRUSSES_PER_STEM = (2, 3)
 KNUCKLE_Z = (0.14, 0.32)         # where a stalk leaves its stem. truss_ik scan (2026-11-03): cut poses exist
                                  # at 0.10-0.22 m for a 45 deg droop and 0.18-0.34 m for 70 deg
 KNUCKLE_GAP_Z = 0.07             # m between trusses on one stem
@@ -42,8 +47,10 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
 # Crate for whole trusses: ~10-15 cm long trusses need ~18 cm. ⚠️ A truss hangs 12-15 cm below the grip, so
 # the release point is high; an IK scan (2026-11-03) reached it over x 0.56-0.62 but not near the base
 # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
-CRATE_CENTRE = (0.60, 0.20)
-CRATE_SIZE = (0.18, 0.16, 0.05)
+CRATE_CENTRE = (0.62, 0.17)      # IK scan: reachable over x 0.56-0.62, y 0.06-0.26; away from the hanging trusses
+# 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
+# found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
+CRATE_SIZE = (0.22, 0.18, 0.05)
 
 
 def in_crate(info, d, m, k):
@@ -181,7 +188,20 @@ def build(seed=0, arm=True):
     for t in trusses:
         p, s = cut_target(t)
         t["cut_ik"] = ik.solve(p, s, t["r"]) is not None
-    cand = [k for k, t in enumerate(trusses) if t["cut_ik"]]
+    # ⚠️ Crowded on purpose, but a ready truss must be reachable: some cut point with a clear slide-in and a
+    # closing jaw that only touches its stalk (truss_expert.approach_ok, neighbours brushed at most). Without
+    # this 6 of 12 dry runs failed on a neighbour in the way of every approach (2026-11-03).
+    t_ok = []
+    if arm:
+        import truss_expert
+        _start_pose(m, d)
+        mujoco.mj_forward(m, d)                        # ⚠️ body poses (cut_target_now reads them) aren't set before
+        check_rng = np.random.default_rng([seed, 0xA77])
+        tmp = dict(trusses=trusses, fruit=[f for t in trusses for f in t["fruit"]])
+        for k, t in enumerate(trusses):
+            t["approach_ok"] = bool(t["cut_ik"] and truss_expert.TrussPlanner(m, d, tmp, k).approach_ok(check_rng))
+    cand = [k for k, t in enumerate(trusses) if t["cut_ik"] and t.get("approach_ok", True)]
+    del t_ok
     n_ready = min(len(cand), int(rng.integers(N_READY[0], N_READY[1] + 1)))
     ready = sorted(int(k) for k in rng.choice(cand, n_ready, replace=False)) if n_ready else []
     stages = list(STAGE_P)

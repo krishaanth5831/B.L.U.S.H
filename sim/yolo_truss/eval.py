@@ -26,7 +26,7 @@ def iou(a, b):
 def main():
     weights, data = sys.argv[1], sys.argv[2]
     model = YOLO(weights)
-    r = model.val(data=data, split="test", imgsz=640, verbose=False, plots=False)
+    r = model.val(data=data, split="test", imgsz=640, batch=8, verbose=False, plots=False)
     print("test split, per class:")
     for i, c in enumerate(r.box.ap_class_index):
         p, rec, ap50, ap = r.box.class_result(i)
@@ -36,7 +36,8 @@ def main():
     imgs = sorted((root / "images" / "test").glob("*.jpg"))
     rows = []                      # (conf, is_true_positive), plus the number of true ready boxes
     n_true = 0
-    for res in model.predict([str(p) for p in imgs], conf=0.05, verbose=False, save=False, stream=True):
+    # ⚠️ one frame at a time: a list of 300 paths went through as one batch and ran the 6 GB GPU out of memory
+    for res in (r for p in imgs for r in model.predict(str(p), conf=0.05, verbose=False, save=False)):
         p = pathlib.Path(res.path)
         H, W = res.orig_shape
         truth = []
