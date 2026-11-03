@@ -51,12 +51,16 @@ RETREAT_M = (0.03, 0.05)         # back along the approach after the cut (5-7 cm
 RETREAT_UP_M = (0.02, 0.04)      # ...and up, so the truss clears its neighbours before any swing
 # Retreat directions tried in order: back along the approach, toward the aisle, straight up (design choice).
 CRATE_JITTER_M = 0.03            # release point around the crate centre
-RELEASE_ABOVE_M = (0.01, 0.05)   # lowest fruit this far above the crate floor at release (the truss drops in)
+# Release: the truss held with its lowest fruit this far above the crate RIM and its outline (seen from above)
+# inside the walls, then dropped in. ⚠️ Lowering it to just above the floor needed a rigid ~17 cm truss to fit
+# 20 x 18 cm without touching a wall at its held angle, which almost never worked (2026-11-03). It falls 5-8 cm.
+RELEASE_ABOVE_M = (0.01, 0.03)
 ABOVE_CRATE_M = 0.08             # way-point this far above the release pose (lowered straight from there)
 RELEASE_PITCH_DEG = (10.0, 85.0)  # fingers pointing down over the crate (wide: the IK scan reached the crate's
                                   # far half at 10-85, 2026-11-03)
 RELEASE_SAMPLES = 120            # release poses tried; the one leaving the most room to the walls is kept
-ABOVE_RIM_MAX_M = 0.12           # no carried fruit higher than this over the rim at release (it'd drop far)
+ABOVE_RIM_MAX_M = 0.25           # no carried fruit higher than this over the rim at release
+RELEASE_SLACK_M = 0.005          # every fruit's outline at least this far inside the walls, seen from above
 DROP_S = (0.5, 0.8)
 MISS_SHORT_M = (0.015, 0.025)    # miss: the tips stop this far short of the stalk, close on nothing
 MISS_PAUSE_S = (0.3, 0.5)
@@ -69,6 +73,14 @@ RRT_SEEDS = 3                    # RRT attempts per route before giving up on a 
 # trusses give; the dry run's judge then rejects any that swing more than generate_truss.NEIGHBOUR_MOVE_M or
 # lose a fruit). In crowded scenes 6 of 12 strict plans had a neighbour within 4 mm of the slide (2026-11-03).
 NEIGHBOUR_CLEAR = {"strict": rrt.CLEARANCE, "brush": -0.002}
+# The target truss's OWN fruit (rrt "firm"): avoided by SOFT_CLEARANCE strictly; in "brush" mode they may be touched
+# like neighbours. ⚠️ With the steep stalks a cut needs, the truss's cluster hangs right beside the jaw: every
+# slide in seed 200003 met its own fruit (2026-11-03). The judge rejects any fruit that comes off.
+OWN_FRUIT_CLEAR = {"strict": rrt.SOFT_CLEARANCE, "brush": -0.002}
+# Carrying the cut truss to the crate: it and the arm keep this far from every neighbour. ⚠️ The carried truss swings
+# on the way, which the static check (CarryChecker) doesn't see: at the cut's 2 mm it tore 2 fruit off a neighbour
+# on the way to the crate (seed 200001, 2026-11-03).
+CARRY_CLEAR_M = 0.010
 CANDIDATES = 8                   # cut points drawn along the cut zone per plan
 
 
@@ -86,12 +98,22 @@ def _axis_rot(a, t):
     return np.eye(3) + np.sin(t) * K + (1 - np.cos(t)) * K @ K
 
 
+# ⚠️ How the cut truss rides in the jaw. "rigid": as it was at the cut, fixed in the gripper. Measured (seed 200000,
+# 2026-11-03): it stays put, even with the pads' torsional friction cut to 0.002 m, because the pads touch a
+# 13 mm length of stalk and the sliding friction along that line resists the truss's ~0.04-0.08 N.m (the
+# swing-down model put the fruit 15 cm below the grip at release; they were 2 cm above it, and the truss
+# tipped off the crate). A real rubber clamp holds it the same way. "hang" swings it under the grip instead.
+CARRY = "rigid"
+
+
 def hanging(o, R, rel, masses, grip_point):
-    """World poses [(pos, R)] of the carried truss's bodies with the gripper at (o, R): held at the grip point as at
-    the cut, then swung about the jaw's closing axis (gripper x, through the grip point) until its centre of mass
-    hangs straight below it. The pads hold the stalk but let it turn about that axis (scene.PAD_FRICTION)."""
+    """World poses [(pos, R)] of the carried truss's bodies with the gripper at (o, R): held as at the cut (CARRY
+    "rigid"), or also swung about the jaw's closing axis (gripper x, through the grip point) until its centre of
+    mass hangs straight below it (CARRY "hang")."""
     P = o + R @ grip_point
     W = [(o + R @ p, R @ Rr) for Rr, p in rel]
+    if CARRY == "rigid":
+        return W
     a = R[:, 0]
     c = sum(mb * w[0] for mb, w in zip(masses, W)) / sum(masses) - P
     c_perp = c - (c @ a) * a
@@ -104,9 +126,32 @@ def hanging(o, R, rel, masses, grip_point):
     return [(P + Q @ (p - P), Q @ Rw) for p, Rw in W]
 
 
+CRATE_POSE_SAMPLES = 60000      # random arm poses sampled once per process; the ones gripping above the crate kept
+_CRATE_POSES = None
+
+
+def crate_poses(ikf, point):
+    """Arm poses (Q, gripper o, R) with the grip point above the crate area, from CRATE_POSE_SAMPLES random ones.
+    ⚠️ Shifting a sampled pose to the crate and re-solving IK failed for 40 of 40 (a 5-joint arm can't keep an
+    orientation at another spot, 2026-11-03); poses already over the crate need no shift."""
+    global _CRATE_POSES
+    if _CRATE_POSES is None:
+        (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
+        rng = np.random.default_rng(7)
+        Q = rng.uniform(ikf.lo, ikf.hi, (CRATE_POSE_SAMPLES, 5))
+        keep = []
+        for q in Q:
+            o, R = ikf.fk(q)
+            g = o + R @ point
+            if abs(g[0] - cx) < sx / 2 + 0.05 and abs(g[1] - cy) < sy / 2 + 0.05 and 0.06 < g[2] < 0.40 and R[2, 2] > 0.1:
+                keep.append((q, o, R))
+        _CRATE_POSES = ([k[0] for k in keep], np.array([k[1] for k in keep]), np.array([k[2] for k in keep]))
+    return _CRATE_POSES
+
+
 class CarryChecker(rrt.Checker):
     """rrt.Checker with the cut truss riding in the jaw: before each check the truss and its fruit are put where
-    they'd hang (hanging()), and their geoms count as part of the arm. So a route after the cut is checked for the
+    they'd be (hanging(), CARRY), and their geoms count as part of the arm. So a route after the cut is checked for the
     whole carried truss (seed 200006 tore fruit off a neighbour on the way to the crate when it wasn't, 2026-11-03).
     ⚠️ Static: the swing on the way (the truss settles into hanging after the cut) isn't modelled; the dry run's
     judge counts what it hits."""
@@ -160,7 +205,7 @@ class TrussPlanner:
                 hard.add(g)
         self.hard, self.soft = hard, soft
         self.chk = rrt.Checker(m, d, hard=hard, soft=soft, firm=self.target_all)
-        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["strict"])
+        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["strict"], firm_clearance=OWN_FRUIT_CLEAR["strict"])
         self.g_adr = m.joint("arm/gripper").qposadr[0]
         self.lo, self.hi = (np.asarray(v[:5]) for v in self.fm.rad_limits())
 
@@ -198,7 +243,7 @@ class TrussPlanner:
         """Strict first, then letting the arm brush neighbours by 2 mm (NEIGHBOUR_CLEAR)."""
         why = []
         for mode in NEIGHBOUR_CLEAR:
-            self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR[mode])
+            self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR[mode], firm_clearance=OWN_FRUIT_CLEAR[mode])
             try:
                 plan = self._plan(rng, miss)
                 plan.meta["neighbours"] = mode
@@ -280,7 +325,7 @@ class TrussPlanner:
     def approach_ok(self, rng, tries=CANDIDATES):
         """Some cut point of this truss can be reached and closed on (neighbours brushed at most): the scene
         builder only calls such a truss ready (truss_scene.build)."""
-        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["brush"])
+        self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR["brush"], firm_clearance=OWN_FRUIT_CLEAR["brush"])
         return any(not isinstance(self._cut_leg(rng, self.t["r"]), str) for _ in range(tries))
 
     def _carry(self, x_cut):
@@ -322,53 +367,54 @@ class TrussPlanner:
             break
         if ret is None:
             return why
-        # release pose: every carried fruit inside the crate walls, the lowest just above the floor. Sampled
-        # (pitch, tilt, spot), the truss's footprint in the crate computed from how it's held, best fit kept.
+        # release pose: seen from above every carried fruit inside the crate walls, the lowest just over the rim
+        # (RELEASE_ABOVE_M); then the jaw opens and the truss drops in.
         (cx, cy), (sx, sy, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
         point = truss_ik.cut_point_in_gripper(r)
         radii = np.array([fr["radius"] for fr in self.t["fruit"]])
         inner = np.array([sx / 2 - scene.CRATE_WALL, sy / 2 - scene.CRATE_WALL])
         best = None
-        # first guess of the grip height: the truss hangs ~this far below the grip (from how it hangs at the cut);
-        # ⚠️ a fixed 0.20 m guess had no IK in 91 of 120 samples at the crate's spot (seed 200000, 2026-11-03)
-        P_cut = self.ik.frame(x_cut, r)[0]
-        drop = P_cut[2] - (self._carried_fruit(x_cut, carry)[:, 2] - radii).min()
-        z0 = scene.CRATE_WALL + 0.03 + drop
-        for _ in range(RELEASE_SAMPLES):
-            pitch, tilt = rng.uniform(*RELEASE_PITCH_DEG), rng.uniform(-90, 90)
-            p0 = np.array([cx + rng.uniform(-CRATE_JITTER_M, CRATE_JITTER_M), cy + rng.uniform(-1, 1) * CRATE_JITTER_M, z0])
-            x0 = self.ik_free.solve(p0, pitch, tilt, point)
-            if x0 is None:
+        # ⚠️ Sampling (pitch, tilt, spot) at random had no IK in 97 of 120 tries over the crate (2026-11-03). So the
+        # candidates are sampled arm poses already over the crate (crate_poses): for each, where the held truss's
+        # fruit would be; those that fit, most room to the walls first, are collision-checked with the lowering.
+        ikf = self.ik_free
+        rel = np.array([q for (_, q) in carry[1][1:]])                       # fruit centres in the gripper frame
+        # ...and the stalk's ends: ⚠️ with fruit-only fits the long bare peduncle stuck out over a wall and dragged the
+        # first fruit outside as it landed (seed 200002, 2026-11-03)
+        Rt, pt = carry[1][0]
+        stalk = np.array([pt + Rt @ (q - self.t["knuckle"]) for q in
+                          (self.t["knuckle"], self.t["peduncle_end"], self.t["rachis_end"])])
+        rel = np.vstack([rel, stalk])
+        radii = np.r_[radii, [self.t["r"]] * len(stalk)]
+        Qs, Os, Rs = crate_poses(ikf, point)
+        G = Os[:, None, :] + np.einsum("nij,kj->nki", Rs, rel)              # (poses, fruit, xyz)
+        slack = (inner[None, None, :] - (np.abs(G[:, :, :2] - [cx, cy]) + radii[None, :, None])).min((1, 2))
+        low_z = (G[:, :, 2] - radii).min(1) - h                             # lowest fruit over the rim
+        ok = np.flatnonzero((slack >= RELEASE_SLACK_M) & (low_z >= RELEASE_ABOVE_M[0]) & (low_z <= RELEASE_ABOVE_M[1] + 0.04))
+        for i in ok[np.argsort(-slack[ok])][:RELEASE_SAMPLES // 4]:
+            xr = np.asarray(Qs[i])
+            p = Os[i] + Rs[i] @ point
+            pitch = np.degrees(np.arcsin(np.clip(Rs[i][2, 2], -1, 1)))
+            tilt = np.degrees(np.arcsin(np.clip(Rs[i][2, 0], -1, 1)))
+            if not cchk.free(xr, soft_clearance=CARRY_CLEAR_M):
                 continue
-            F = self._carried_fruit(x0, carry)
-            # shift so the footprint is centred on the crate and the lowest fruit sits RELEASE_ABOVE over the floor
-            shift = np.array([cx - (F[:, 0].min() + F[:, 0].max()) / 2, cy - (F[:, 1].min() + F[:, 1].max()) / 2,
-                              scene.CRATE_WALL + rng.uniform(*RELEASE_ABOVE_M) - (F[:, 2] - radii).min()])
-            p = p0 + shift
-            xr = self.ik_free.solve(p, pitch, tilt, point, x0=x0)
-            if xr is None:
-                continue
-            F = self._carried_fruit(xr, carry)
-            slack = np.min(inner - (np.abs(F[:, :2] - [cx, cy]) + radii[:, None]))
-            if slack < rrt.CLEARANCE + 0.001 or (F[:, 2] + radii).max() > h + ABOVE_RIM_MAX_M:
-                continue                                 # within the clearance of a wall the checks below fail anyway
-            xa = self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M], pitch, tilt, point, x0=xr)
-            if xa is None or not cchk.free(xa, **self.kw):
-                continue
-            # the straight lowering: solved from the release pose up (warm-started), so the arm keeps its branch
-            low = [self.ik_free.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
-                   for v in np.linspace(0, 1, 6)]
-            if any(x is None for x in low) or not cchk.path_ok(low, **self.kw):
-                continue
-            if best is None or slack > best[0]:
-                best = (slack, xr, low[0], p, pitch, tilt, low)
+            low = [ikf.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr) for v in np.linspace(0, 1, 6)]
+            if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=CARRY_CLEAR_M):
+                # ⚠️ the 5-joint arm often can't keep the release orientation along a straight 8 cm drop (22 of 22
+                # fitting poses for seed 200000, 2026-11-03): then RRT goes straight to the release pose
+                low = [xr]
+            else:
+                low[-1] = xr
+            best = (float(slack[i]), xr, low[0], p, pitch, tilt, low)
+            break
         if best is None:
             return "no release pose that fits the truss in the crate"
         _, x_rel, x_above, p, pitch, tilt, lower = best
         hang = float(-(self._carried_fruit(x_rel, carry)[:, 2] - p[2]).min())
         to_crate = None
+        ckw = dict(soft_clearance=CARRY_CLEAR_M)
         for _ in range(RRT_SEEDS):
-            to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, **self.kw)
+            to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, **ckw)
             if to_crate is not None:
                 break
         if to_crate is None:
@@ -443,7 +489,8 @@ class TrussPlanner:
         hold(rng.uniform(*SQUEEZE_S), "squeeze", sv=True)
         path(rest["ret"][1:], g_shut, "retreat", cart=float(np.linalg.norm(np.r_[RETREAT_M[1], RETREAT_UP_M[1]])))
         path(rest["to_crate"][1:], g_shut, "to_crate")
-        path(rest["lower"][1:], g_shut, "lower", cart=ABOVE_CRATE_M)
+        if len(rest["lower"]) > 1:
+            path(rest["lower"][1:], g_shut, "lower", cart=ABOVE_CRATE_M)
         jaw_to(g_open, 0.5, "release")
         hold(rng.uniform(*DROP_S), "drop")
         path(rest["home"][1:], g_open, "return", grip_to=g_start)

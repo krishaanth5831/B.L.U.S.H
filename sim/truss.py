@@ -30,8 +30,10 @@ FRUITS = (6, 8)
 # from supermarket vines, unverified: measure a few with calipers).
 PEDUNCLE_R = (0.0015, 0.0025)
 RACHIS_R_FRACTION = 0.8          # rachis a little thinner than the peduncle (guess, unverified)
-# Knuckle to the first fruit along the stalk (guess from photos, unverified).
-PEDUNCLE_LEN = (0.045, 0.060)
+# Knuckle to the first fruit along the stalk (guess from photos, unverified). ⚠️ At 45-60 mm the first fruit (on a
+# 10-15 mm pedicel leaning 15-45 deg) sat inside the 18 mm-wide fingers' path on the truss side of the cut: no
+# slide-in was clear in seed 200003, even brushing 2 mm (2026-11-03).
+PEDUNCLE_LEN = (0.055, 0.075)
 # Where a cut belongs: this far out along the peduncle from the stem surface. Growers cut just past the
 # knuckle; closer than 10 mm and the blade would rub the main stem (guess, unverified). ⚠️ The far end is set
 # by the jaw, not the plant: the clamp pads span the 18 mm finger width on the truss side of the blade, and
