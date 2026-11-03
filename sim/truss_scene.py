@@ -89,6 +89,16 @@ def cut_target(t, rng=None):
     return a + (b - a) * u, t["dir"]
 
 
+CRATE_KEEP_OUT_M = 0.04          # no truss hangs within this of the crate's outline (seen from above). ⚠️ Trusses of
+                                 # the right-hand stems spread over it, and the arm reaching in brushed them (2026-11-03)
+
+
+def _over_crate(t):
+    (cx, cy), (sx, sy, _) = CRATE_CENTRE, CRATE_SIZE
+    pts = [f["pos"] for f in t["fruit"]] + [t["peduncle_end"], t["rachis_end"]]
+    return any(abs(p[0] - cx) < sx / 2 + CRATE_KEEP_OUT_M and abs(p[1] - cy) < sy / 2 + CRATE_KEEP_OUT_M for p in pts)
+
+
 def cut_target_now(t, d, m, u=0.5):
     """Cut point and stalk direction (world) where the truss hangs NOW (it sags and sways on its knuckle).
     The truss body's frame is world-aligned at the knuckle when built (truss.truss_xml)."""
@@ -131,6 +141,8 @@ def vines_xml(rng):
                 kn, body, fb, eq, ex, t = out
                 lowest = min(f["pos"][2] - f["radius"] for f in t["fruit"])
                 if lowest < 0.02:                      # fruit on the floor
+                    continue
+                if _over_crate(t):
                     continue
                 t["stem"] = i
                 knuckles.append(kn); trusses_xml.append(body); bodies.append(fb); eqs.append(eq); excl.append(ex)
@@ -179,10 +191,23 @@ def _touching_arm(m, d, trusses):
     return hit
 
 
+LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reachable truss to make ready. ⚠️ About a third
+                                 # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
+
+
 def build(seed=0, arm=True):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
-    the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model (scene.build does the same)."""
-    rng = np.random.default_rng(seed)
+    the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model (scene.build does the same).
+    The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable."""
+    for j in range(LAYOUT_TRIES if arm else 1):
+        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]))
+        if out[2]["ready"]:
+            break
+    out[2]["layout_try"] = j
+    return out
+
+
+def _build_once(seed, arm, rng):
     static, parts, trusses = vines_xml(rng)
     m, d = _compose(static, parts, arm)
     if arm:

@@ -86,6 +86,7 @@ OWN_FRUIT_CLEAR = {"strict": rrt.SOFT_CLEARANCE, "brush": -0.002}
 # on the way, which the static check (CarryChecker) doesn't see: at the cut's 2 mm it tore 2 fruit off a neighbour
 # on the way to the crate (seed 200001, 2026-11-03).
 CARRY_CLEAR_M = 0.020            # 1 cm still tore fruit off a neighbour (seed 200001), so 2 cm and CARRY_SPEED
+CARRY_CLEAR_MIN_M = 0.010        # fallback when no route keeps 2 cm (the retreat ended closer, 2026-11-03)
 CARRY_SPEED = 0.6                # x the joint speed while the cut truss is carried: less swing (design choice)
 CANDIDATES = 8                   # cut points drawn along the cut zone per plan
 
@@ -444,9 +445,11 @@ class TrussPlanner:
         _, x_rel, x_above, p, pitch, tilt, lower = best
         hang = float(-(self._carried_fruit(x_rel, carry)[:, 2] - p[2]).min())
         to_crate = None
-        ckw = dict(soft_clearance=CARRY_CLEAR_M)
-        for _ in range(RRT_SEEDS):
-            to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, **ckw)
+        for clear in (CARRY_CLEAR_M, CARRY_CLEAR_MIN_M):   # the retreat can end closer than 2 cm to a neighbour
+            for _ in range(RRT_SEEDS):
+                to_crate = rrt.plan(cchk, ret[-1], x_above, rng, lo=self.lo, hi=self.hi, soft_clearance=clear)
+                if to_crate is not None:
+                    break
             if to_crate is not None:
                 break
         if to_crate is None:
