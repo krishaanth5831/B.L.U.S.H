@@ -3,6 +3,7 @@
 
     python generate_truss.py --pilot --watch            # 5 episodes into ..._pilot, MuJoCo window at real time
     python generate_truss.py --dry --episodes 20        # plan + dry run + judge only: keep rate and time, no dataset
+    python generate_truss.py --dry --watch --seed-start 200007 --episodes 1   # watch one in the MuJoCo window
     python generate_truss.py                            # 200 episodes into krish5831/blush_sim_truss_v1
 
 Per scene seed (as generate_scripted.py): build the truss scene (domain randomisation on, settle 1 s), take
@@ -114,19 +115,22 @@ def judge(robot, plan, t0, watch):
     return True, "ok"
 
 
-def play(robot, plan, on_frame=None):
-    """Plays a plan from the scene's start frame; returns (t0, Watch)."""
+def play(robot, plan, on_frame=None, realtime=False):
+    """Plays a plan from the scene's start frame; returns (t0, Watch). realtime: paced at FPS (a window to watch)."""
     plan.reset()
     watch = Watch(robot)
     t0 = robot.d.time
     obs = None
     while not plan.done:
+        t_f = time.time()
         state = robot._present_norm() if obs is None else [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
         act = plan.act(state)
         sent = robot.send_action(act)
         if on_frame is not None:
             obs = on_frame(sent)
         watch.step()
+        if realtime:
+            time.sleep(max(0.0, 1 / expert.FPS - (time.time() - t_f)))
     return t0, watch
 
 
@@ -136,7 +140,8 @@ def main():
     ap.add_argument("--pilot", action="store_true", help="5 episodes into <repo-id>_pilot")
     ap.add_argument("--repo-id", default=DEFAULT_REPO)
     ap.add_argument("--seed-start", type=int, default=200000)
-    ap.add_argument("--watch", action="store_true", help="MuJoCo window on the recording pass, at real time")
+    ap.add_argument("--watch", action="store_true",
+                    help="MuJoCo window at real time: on the recording pass, or with --dry on the dry run itself")
     ap.add_argument("--dry", action="store_true", help="dry runs only: plan + judge, write no dataset")
     ap.add_argument("--max-attempts", type=int, default=None)
     ap.add_argument("--yolo-weights", type=pathlib.Path, default=YOLO_TRUSS if YOLO_TRUSS.exists() else None,
@@ -201,7 +206,7 @@ def main():
                 log.write(json.dumps(rec) + "\n"); log.flush()
                 print(f"  seed {seed}: skip, {why}", flush=True)
 
-            robot.config.viewer = False
+            robot.config.viewer = a.watch and a.dry
             robot.new_scene(seed, log=False)
             if not np.all(np.isnan(robot.det.detached_at)):
                 skip("a fruit fell off while the vines settled"); continue
@@ -223,7 +228,7 @@ def main():
                 except tx.PlanError as e:
                     fails.append(f"no plan: {e}")
                     break
-                t0, watch = play(robot, plan)
+                t0, watch = play(robot, plan, realtime=a.watch and a.dry)
                 ok, why = judge(robot, plan, t0, watch)
                 if ok:
                     break
@@ -249,11 +254,14 @@ def main():
                 skip(f"recording picked another truss ({robot._box_info['target_name']})"); continue
             env = robot.env_state()
             cur = {"obs": obs}
+            # ⚠️ the box + cut point aren't robot observations: building the frame from all of ds.features looked
+            # them up in the robot's dict (KeyError 'box_cx', pilot 2026-11-03); they're added below instead
+            obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
 
             def frame(sent):
                 t_f = time.time()
                 o = cur["obs"]
-                fr = {**build_dataset_frame(ds.features, rop(o), prefix=OBS_STR),
+                fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),
                       **build_dataset_frame(ds.features, tap((sent, o)), prefix=ACTION), "task": TASK}
                 fr[OBS_ENV_STATE] = env
                 ds.add_frame(fr)
