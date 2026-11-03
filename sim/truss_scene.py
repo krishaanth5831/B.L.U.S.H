@@ -12,7 +12,8 @@ Same greenhouse, cameras, arm base and start pose as scene.build (the single-fru
 - 1-2 ready trusses per scene, all with a cut pose (truss_ik.py), next to "almost" decoys (red, tip still
   green) that the box has to tell apart, and unripe ones;
 - the arm has the rigid cut-and-hold fingers (scene.add_cut_hold);
-- the crate is bigger: a truss is ~10-15 cm long.
+- the crate is bigger: a truss is ~10-15 cm long;
+- trusses hanging into the arm at its start pose are left out (START_CLEAR_M).
 """
 import mujoco
 import numpy as np
@@ -38,10 +39,11 @@ STEM_R = 0.004                   # scene.vines_xml's stem capsule
 TRIES = 30                       # draws per truss before a stem slot is left empty
 N_READY = (1, 2)
 STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: half are hard decoys)
-# Crate for whole trusses: ~10-15 cm long trusses need ~20 cm. Same spot as scene.CRATE_CENTRE, a little
-# toward the arm (guess, unverified: the planner checks IK above it).
-CRATE_CENTRE = (0.56, 0.17)
-CRATE_SIZE = (0.20, 0.16, 0.05)
+# Crate for whole trusses: ~10-15 cm long trusses need ~18 cm. ⚠️ A truss hangs 12-15 cm below the grip, so
+# the release point is high; an IK scan (2026-11-03) reached it over x 0.56-0.62 but not near the base
+# (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
+CRATE_CENTRE = (0.60, 0.20)
+CRATE_SIZE = (0.18, 0.16, 0.05)
 
 
 def in_crate(info, d, m, k):
@@ -121,16 +123,60 @@ def vines_xml(rng):
                 trusses.append(t)
                 placed += [(f["pos"], f["radius"]) for f in t["fruit"]] + _stalk_spheres(t)
                 break
-    static_xml = "\n".join(static + knuckles + trusses_xml)
-    return static_xml, "\n".join(bodies), "\n".join(eqs), "\n".join(excl), trusses
+    return static, list(zip(knuckles, trusses_xml, bodies, eqs, excl)), trusses
+
+
+START_CLEAR_M = 0.01             # no truss within this of the arm at the start pose (it rests there 0.4-0.8 s
+                                 # and the vines settle around it; fruit hanging into it fell off, 2026-11-03)
+
+
+def _compose(static, parts, arm):
+    xml = "\n".join(static + [p[0] for p in parts] + [p[1] for p in parts])
+    return scene.compose(xml, "\n".join(p[2] for p in parts), "\n".join(p[3] for p in parts), arm, cut_hold=True,
+                         excludes="\n".join(p[4] for p in parts), crate=(CRATE_CENTRE, CRATE_SIZE))
+
+
+def _start_pose(m, d):
+    import arm_map
+    q, u = scene.arm_ids(m)
+    d.qpos[q] = arm_map.FollowerMap().norm_to_rad(scene.START_NORM)
+    d.ctrl[u] = d.qpos[q]
+
+
+def _touching_arm(m, d, trusses):
+    """Indices of trusses with a stalk or fruit within START_CLEAR_M of the arm at the start pose."""
+    import copy
+    mc = copy.deepcopy(m)
+    dc = mujoco.MjData(mc)
+    dc.qpos[:] = d.qpos
+    arm = np.array([mc.body(mc.geom_bodyid[g]).name.startswith("arm/") for g in range(mc.ngeom)])
+    mc.geom_margin[arm] = START_CLEAR_M
+    mujoco.mj_fwdPosition(mc, dc)
+    owner = {}
+    for k, t in enumerate(trusses):
+        for n in t["geoms"] + [f["geom"] for f in t["fruit"]]:
+            owner[mc.geom(n).id] = k
+    hit = set()
+    for c in dc.contact[:dc.ncon]:
+        for a, b in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
+            if arm[a] and b in owner and c.dist < START_CLEAR_M:
+                hit.add(owner[b])
+    return hit
 
 
 def build(seed=0, arm=True):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model (scene.build does the same)."""
     rng = np.random.default_rng(seed)
-    static, bodies, eqs, excl, trusses = vines_xml(rng)
-    m, d = scene.compose(static, bodies, eqs, arm, cut_hold=True, excludes=excl, crate=(CRATE_CENTRE, CRATE_SIZE))
+    static, parts, trusses = vines_xml(rng)
+    m, d = _compose(static, parts, arm)
+    if arm:
+        _start_pose(m, d)
+        bad = _touching_arm(m, d, trusses)
+        if bad:                                        # rebuild without them (rng draws below stay the same)
+            parts = [p for k, p in enumerate(parts) if k not in bad]
+            trusses = [t for k, t in enumerate(trusses) if k not in bad]
+            m, d = _compose(static, parts, arm)
     ik = truss_ik.truss_ik()
     for t in trusses:
         p, s = cut_target(t)
@@ -150,10 +196,7 @@ def build(seed=0, arm=True):
             f["ripeness"] = r
             m.geom_rgba[m.geom(f["geom"]).id] = tm.RIPENESS_RGBA[r]
     if arm:
-        import arm_map
-        q, u = scene.arm_ids(m)
-        d.qpos[q] = arm_map.FollowerMap().norm_to_rad(scene.START_NORM)
-        d.ctrl[u] = d.qpos[q]
+        _start_pose(m, d)
     mujoco.mj_forward(m, d)
     fruit = [f for t in trusses for f in t["fruit"]]
     return m, d, dict(seed=seed, kind="truss", trusses=trusses, fruit=fruit,

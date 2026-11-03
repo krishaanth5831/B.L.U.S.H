@@ -156,6 +156,10 @@ PAD_FRICTION = (1.5, 0.02, 0.0001)   # rubber on stalk, guess (unverified)
 BLADE_BITS = (8, 1)              # touches the stalk, fruit and scenery (contype 1); not the fingers or the other blade
 PAD_BITS = (16, 1)               # same, and not the other pad
 STEEL_RGBA, PAD_RGBA = (0.78, 0.80, 0.84, 1), (0.85, 0.45, 0.15, 1)
+# ⚠️ Stiff blade contacts. With the finger contacts' solimp (0.95-0.99 over 1 mm) the blades sank 5 mm into a
+# stalk held by the stiffened cut weld and the jaw reached its -10 deg stop with 7-8.5 N on the blades instead of
+# stalling on the stalk (check_truss_cut.py, 2026-11-03; 25-29 N while the truss still swung on a soft knuckle).
+BLADE_SOLIMP = (0.99, 0.999, 0.0002, 0.5, 2)
 PLA_RGBA = (0.92, 0.92, 0.90, 1)   # ⚠️ unverified: real filament colours. The claw camera sees these.
 TPU_RGBA = (0.15, 0.15, 0.15, 1)
 
@@ -490,6 +494,7 @@ def add_cut_hold(s, chain):
         g.contype, g.conaffinity, g.group = BLADE_BITS[0], BLADE_BITS[1], 2
         _finger_contact(g)
         g.friction = (0.3, 0.005, 0.0001)              # steel, guess (unverified)
+        g.solimp = BLADE_SOLIMP
         rest = BLADE_PROTRUDE + PAD_PROUD              # pad face past the cap face at rest
         pad = cap.add_body(name=f"pad_{part}_slide", pos=o + R @ [face, np.mean(PAD_Y), zc], quat=quat)
         j = pad.add_joint(name=f"pad_{part}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[s_in, 0, 0])

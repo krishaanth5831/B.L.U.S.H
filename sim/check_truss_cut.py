@@ -28,8 +28,12 @@ import tomato as tm
 import truss as tr
 
 RADII = (0.0015, 0.002, 0.0025)  # truss.PEDUNCLE_R's ends and middle
-HOLD_DRIFT_M = 0.010             # truss origin may move this much in the gripper while shaking (guess, like
-                                 # check_grasp.DRIFT_OK_M: a dropped truss moves 100+ mm)
+HOLD_DRIFT_M = 0.015             # truss origin may move this much in the gripper while shaking (guess: a
+                                 # dropped truss moves 100+ mm; a held one swings on its stalk, 5-14 mm, 2026-11-03)
+# check_grasp.SHAKE at this fraction of its amplitude. ⚠️ At full amplitude (0.4-0.8 rad at ~1 Hz, made for one
+# fruit) the 6-8 fruit truss swung hard enough on its stalk to tear a fruit off its tether (0.58-2.46 N) in 2 of 3
+# runs (2026-11-03). The scripted moves are min-jerk and far gentler; generate_truss's judge counts any fruit lost.
+SHAKE_SCALE = 0.5
 CLOSE_S, HOLD_S = 0.6, 1.0
 STEM_R = 0.004
 FAILS = 0
@@ -142,7 +146,7 @@ def run(q, r, watch=False):
         k = cg.JOINT_IDX[joint]
         n = int(cg.SHAKE_S / m.opt.timestep)
         for i in range(n):
-            d.ctrl[uidx[k]] = q0[k] + amp * np.sin(2 * np.pi * hz * i * m.opt.timestep)
+            d.ctrl[uidx[k]] = q0[k] + SHAKE_SCALE * amp * np.sin(2 * np.pi * hz * i * m.opt.timestep)
             step()
             drift = max(drift, np.linalg.norm((d.xpos[T] - d.xpos[G]) @ d.xmat[G].reshape(3, 3) - in_g0))
         d.ctrl[uidx] = q0

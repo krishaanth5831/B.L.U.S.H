@@ -50,11 +50,17 @@ RACHIS_TAIL_M = 0.008
 STALK_DENSITY = 900.0            # green stalk, a little below water (guess, unverified)
 STALK_FRICTION = (0.9, 0.01, 0.001)   # guess (unverified), like the fruit's
 # The cut weld: stiff, so a hanging truss doesn't sag on it (the knuckle's ball spring does the swaying).
-CUT_WELD_SOLREF = (0.005, 1.0)   # timeconst >= 2 x the 2 ms step (MuJoCo's stability floor)
-# Knuckle spring: same sway as tomato.RACHIS_* (guess there, unverified). An 8-fruit truss (~100 g, CoM
-# ~7 cm out) sags ~13 deg on it.
-KNUCKLE_STIFFNESS = 0.3          # N.m/rad
-KNUCKLE_DAMPING = 0.01           # N.m.s/rad
+# ⚠️ With MuJoCo's default solimp and a 2 g knuckle the weld let the truss twist 11-14 deg off its knuckle
+# while settling (2026-11-03): a soft weld's stiffness scales with the lighter body. Tight solimp + a 20 g
+# knuckle (the stem section the truss hangs on, guess) hold it.
+CUT_WELD_SOLREF = (0.004, 1.0)   # timeconst = 2 x the 2 ms step (MuJoCo's stability floor)
+CUT_WELD_SOLIMP = (0.99, 0.999, 0.0001, 0.5, 2)   # as scene.FINRAY_LOOP_SOLIMP
+KNUCKLE_MASS = 0.02
+# Knuckle spring (guess, unverified: push a real truss with a scale and measure). ⚠️ At tomato.RACHIS_STIFFNESS's
+# 0.3 N.m/rad a 6-8 fruit truss sagged 20-23 deg while the scene settled (2026-11-03), turning its stalk out of
+# the narrow band where a cut pose exists (truss_ik scan) after the scene had checked it. 3 N.m/rad: ~2 deg.
+KNUCKLE_STIFFNESS = 3.0          # N.m/rad
+KNUCKLE_DAMPING = 0.05           # N.m.s/rad, guess: settles in well under 1 s at the stiffer spring
 KNUCKLE_ARMATURE = 1e-4          # ⚠️ the near-massless knuckle body jitters without it
 
 # --- the harvest rule (K7 2026-11-03: "tip fruit coloured, most of the rest ripe") ---
@@ -78,6 +84,7 @@ CUT_FORCE_PER_MM = 15.0 / 7.0
 # A stroke takes time: the force must hold this long (SHEAR plant.CUT_DWELL_S, unverified). It also keeps the
 # blade's landing spike from counting as a cut.
 CUT_DWELL_S = 0.05
+CAPTURE_N = 0.2                  # the fixed jaw (blade or pad) must press the stalk this much for it to count as held
 
 
 def cut_force_for(r):
@@ -171,7 +178,7 @@ def truss_xml(name, stem_point, direction, rng, stage, stem_r=0.004, avoid=(), n
     knuckle = (f'<body name="{name}_knuckle" pos="{f(k0)}">'
                f'<joint name="{name}_knuckle_ball" type="ball" stiffness="{KNUCKLE_STIFFNESS}" '
                f'damping="{KNUCKLE_DAMPING}" armature="{KNUCKLE_ARMATURE}"/>'
-               f'<geom type="sphere" size="{stem_r:.4f}" mass="0.002" rgba="{tm.STEM_RGBA}" contype="0" '
+               f'<geom type="sphere" size="{stem_r:.4f}" mass="{KNUCKLE_MASS}" rgba="{tm.STEM_RGBA}" contype="0" '
                f'conaffinity="0"/></body>')
     truss = (f'<body name="{name}_truss" pos="{f(k0)}"><freejoint/>'
              f'<geom name="{name}_peduncle" type="capsule" fromto="0 0 0 {f(a)}" size="{r_ped:.5f}" '
@@ -180,7 +187,8 @@ def truss_xml(name, stem_point, direction, rng, stage, stem_r=0.004, avoid=(), n
              f'size="{r_ped * RACHIS_R_FRACTION:.5f}" density="{STALK_DENSITY}" rgba="{tm.STEM_RGBA}" {col}/>'
              + "".join(peds) + "</body>")
     eq_xml = (f'<weld name="{name}_cut" body1="{name}_truss" body2="{name}_knuckle" '
-              f'solref="{CUT_WELD_SOLREF[0]} {CUT_WELD_SOLREF[1]}"/>' + "".join(eqs))
+              f'solref="{CUT_WELD_SOLREF[0]} {CUT_WELD_SOLREF[1]}" '
+              f'solimp="{" ".join(str(v) for v in CUT_WELD_SOLIMP)}"/>' + "".join(eqs))
     # ⚠️ The truss's own fruit sit a pedicel away from its stalk; their contacts with it are excluded (they're
     # one plant, the tether holds them) so a fruit pressed onto its rachis doesn't fight its own weld.
     excl = "".join(f'<exclude body1="{name}_truss" body2="{fi["tomato"]}"/>' for fi in fruit)
@@ -192,10 +200,15 @@ def truss_xml(name, stem_point, direction, rng, stage, stem_r=0.004, avoid=(), n
 
 
 class TrussCutter:
-    """Cuts one truss's stalk when both blades press it with its cut force for CUT_DWELL_S.
+    """Cuts one truss's stalk when the moving blade presses it with its cut force for CUT_DWELL_S, while the
+    stalk is captured against the fixed jaw (its blade or pad touching it).
 
-    blades: (fixed, moving) blade geom names. Per step it keeps squeeze (the weaker blade's normal force on
-    the stalk), pad force (what the clamp pads press the stalk with, the weaker side) and their peaks.
+    ⚠️ Bypass blades, not SHEAR's edge-on-edge pair: the moving blade shears the stalk past the fixed one, and the
+    reaction comes from the fixed jaw AND the stalk's own support. With the stiffened knuckle the moving blade
+    pressed 18.5 N while the fixed blade felt 2.1 N at the servo's full torque (2026-11-03), so SHEAR's rule
+    (the weaker blade) never cut. squeeze = the moving blade's normal force once captured.
+    blades: (fixed, moving) blade geom names. Per step it keeps squeeze, pad force (what the clamp pads press
+    the stalk with, the weaker side) and their peaks.
     ⚠️ It edits the model when it cuts (the blades stop colliding); a scene rebuild puts it back."""
 
     def __init__(self, m, d, info, blades=("arm/blade_fixed", "arm/blade_moving"),
@@ -233,7 +246,9 @@ class TrussCutter:
             if other in f:
                 mujoco.mj_contactForce(m, d, i, self._f6)
                 f[other] += self._f6[0]
-        self.squeeze = min(f[b] for b in self.blades)
+        fixed_b, moving_b = self.blades
+        captured = f[fixed_b] + f[self.pads[0]] > CAPTURE_N
+        self.squeeze = f[moving_b] if captured else 0.0
         self.pad_force = min(f[p] for p in self.pads)
         for k in self.peak:
             self.peak[k] = max(self.peak[k], getattr(self, k))

@@ -50,6 +50,17 @@ def truss_boxes(cams, d, m, info, ids=None):
     return out
 
 
+def outline_box(cams, d, m, t):
+    """Box around a truss's fruit outlines and stalk whether or not something hides it (cf. target.py)."""
+    bs = [cams.sphere_box(d, "birdseye", d.xpos[m.body(f["tomato"]).id], f["radius"]) for f in t["fruit"]]
+    b = m.body(t["body"]).id
+    pts = [d.xpos[b] + d.xmat[b].reshape(3, 3) @ (q - t["knuckle"]) for q in (t["knuckle"], t["peduncle_end"], t["rachis_end"])]
+    uv = cams.project(d, "birdseye", np.array(pts))
+    bs += [(u, v, u, v) for u, v in uv if not np.isnan(u)]
+    u = _union(bs)
+    return None if u is None else [max(0, u[0]), max(0, u[1]), min(W - 1, u[2]), min(H - 1, u[3])]
+
+
 def cut_pixel(cams, d, m, t):
     """The middle of the truss's cut zone (world, where it hangs now) in birdseye pixels, or None."""
     p, _ = ts.cut_target_now(t, d, m)
@@ -106,9 +117,14 @@ def start_frame(cams, d, m, info, dets, t_ready=T_READY_BIRDSEYE, ids=None, mask
         if seen:
             k = max(seen, key=lambda j: boxes[j][1])
             source, box = "true_box", list(boxes[k][0])
+        elif ready:
+            k = ready[0]                                  # hidden (behind the arm): box around its outline
+            box = outline_box(cams, d, m, info["trusses"][k])
+            source = "true_box_hidden" if box is not None else "none"
+            if box is None:
+                k, reason = None, "target_out_of_view"
         else:
-            k, source, box = None, "none", None
-            reason = "no_ready_truss_in_view" if ready else "no_ready_truss"
+            k, source, box, reason = None, "none", None, "no_ready_truss"
     cut, cut_source = None, "none"
     if k is not None:
         cuts = [x for x in dets if int(x["cls"]) == CUT and box[0] <= (x["box"][0] + x["box"][2]) / 2 <= box[2]
