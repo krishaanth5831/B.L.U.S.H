@@ -47,7 +47,8 @@ CUT_ZONE_M = (0.010, 0.020)
 RACHIS_BEND_DEG = (-30.0, 5.0)
 # Fruit along the rachis: each next pedicel root this far past the last (alternating sides, so consecutive
 # fruit sit on opposite sides). Grown until no two fruit overlap (FRUIT_GAP_M); the rachis ends past the last.
-STEP_M = (0.010, 0.016)
+STEP_M = (0.009, 0.013)          # ⚠️ was 10-16 mm: trusses up to 24 cm long, longer than any crate that fits the
+                                  # greenhouse in reach (2026-11-03); real cherry trusses are compact
 RACHIS_TAIL_M = 0.008
 STALK_DENSITY = 900.0            # green stalk, a little below water (guess, unverified)
 STALK_FRICTION = (0.9, 0.01, 0.001)   # guess (unverified), like the fruit's

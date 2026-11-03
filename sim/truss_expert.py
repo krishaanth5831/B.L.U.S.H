@@ -59,8 +59,13 @@ ABOVE_CRATE_M = 0.08             # way-point this far above the release pose (lo
 RELEASE_PITCH_DEG = (10.0, 85.0)  # fingers pointing down over the crate (wide: the IK scan reached the crate's
                                   # far half at 10-85, 2026-11-03)
 RELEASE_SAMPLES = 120            # release poses tried; the one leaving the most room to the walls is kept
-ABOVE_RIM_MAX_M = 0.25           # no carried fruit higher than this over the rim at release
+# No carried fruit (or stalk end) higher than this over the rim at release. ⚠️ A truss held pointing up, its outline
+# inside the walls seen from above, landed on its low end and toppled over the near wall (seed 200002, 2026-11-03):
+# so the fit is checked on where it will LIE (laid_flat), not where it's held. 0.07 m alone (held flat) left no
+# release pose for 2 of 2 seeds.
+ABOVE_RIM_MAX_M = 0.20
 RELEASE_SLACK_M = 0.005          # every fruit's outline at least this far inside the walls, seen from above
+LEAN_M = 0.03                    # laid flat it may reach this far past a wall: the wall stops it, it leans there
 DROP_S = (0.5, 0.8)
 MISS_SHORT_M = (0.015, 0.025)    # miss: the tips stop this far short of the stalk, close on nothing
 MISS_PAUSE_S = (0.3, 0.5)
@@ -80,7 +85,8 @@ OWN_FRUIT_CLEAR = {"strict": rrt.SOFT_CLEARANCE, "brush": -0.002}
 # Carrying the cut truss to the crate: it and the arm keep this far from every neighbour. ⚠️ The carried truss swings
 # on the way, which the static check (CarryChecker) doesn't see: at the cut's 2 mm it tore 2 fruit off a neighbour
 # on the way to the crate (seed 200001, 2026-11-03).
-CARRY_CLEAR_M = 0.010
+CARRY_CLEAR_M = 0.020            # 1 cm still tore fruit off a neighbour (seed 200001), so 2 cm and CARRY_SPEED
+CARRY_SPEED = 0.6                # x the joint speed while the cut truss is carried: less swing (design choice)
 CANDIDATES = 8                   # cut points drawn along the cut zone per plan
 
 
@@ -90,6 +96,21 @@ class PlanError(Exception):
 
 def _pose(d, b):
     return d.xpos[b].copy(), d.xmat[b].reshape(3, 3).copy()
+
+
+def laid_flat(G):
+    """(n, k, 3) carried points -> where they'd land (x, y) if the truss tips over its lowest point until it lies flat:
+    each point at its full distance from the lowest one, along its horizontal direction from it."""
+    low = G[np.arange(len(G)), G[:, :, 2].argmin(1)]                      # (n, 3)
+    dv = G - low[:, None, :]
+    hz = dv[:, :, :2]
+    nh = np.linalg.norm(hz, axis=2, keepdims=True)
+    full = np.linalg.norm(dv, axis=2, keepdims=True)
+    # a point straight above the low one falls toward the truss's centre of points (its likely side)
+    c = hz.mean(1, keepdims=True)
+    cdir = c / np.maximum(np.linalg.norm(c, axis=2, keepdims=True), 1e-9)
+    dirs = np.where(nh > 1e-4, hz / np.maximum(nh, 1e-9), cdir)
+    return low[:, None, :2] + dirs * full
 
 
 def _axis_rot(a, t):
@@ -388,15 +409,25 @@ class TrussPlanner:
         radii = np.r_[radii, [self.t["r"]] * len(stalk)]
         Qs, Os, Rs = crate_poses(ikf, point)
         G = Os[:, None, :] + np.einsum("nij,kj->nki", Rs, rel)              # (poses, fruit, xyz)
-        slack = (inner[None, None, :] - (np.abs(G[:, :, :2] - [cx, cy]) + radii[None, :, None])).min((1, 2))
+        held = (inner[None, None, :] - (np.abs(G[:, :, :2] - [cx, cy]) + radii[None, :, None])).min((1, 2))
+        flat = (inner[None, None, :] - (np.abs(laid_flat(G) - [cx, cy]) + radii[None, :, None])).min((1, 2))
+        slack = np.minimum(held, flat + LEAN_M)
         low_z = (G[:, :, 2] - radii).min(1) - h                             # lowest fruit over the rim
-        ok = np.flatnonzero((slack >= RELEASE_SLACK_M) & (low_z >= RELEASE_ABOVE_M[0]) & (low_z <= RELEASE_ABOVE_M[1] + 0.04))
+        high_z = (G[:, :, 2] + radii).max(1) - h
+        # the low end may already be down in the crate (1 cm over its floor): tipping over from there it has the whole
+        # crate to lie in. ⚠️ Kept above the rim, 0-1 of 1462 poses fit (seeds 200000-2, 2026-11-03).
+        ok = np.flatnonzero((slack >= RELEASE_SLACK_M) & (low_z >= scene.CRATE_WALL + 0.01 - h)
+                            & (low_z <= RELEASE_ABOVE_M[1] + 0.04) & (high_z <= ABOVE_RIM_MAX_M))
+        n_hit, hit_names = 0, set()
         for i in ok[np.argsort(-slack[ok])][:RELEASE_SAMPLES // 4]:
             xr = np.asarray(Qs[i])
             p = Os[i] + Rs[i] @ point
             pitch = np.degrees(np.arcsin(np.clip(Rs[i][2, 2], -1, 1)))
             tilt = np.degrees(np.arcsin(np.clip(Rs[i][2, 0], -1, 1)))
-            if not cchk.free(xr, soft_clearance=CARRY_CLEAR_M):
+            hits = cchk.hits(xr, soft_clearance=CARRY_CLEAR_M)
+            if hits:
+                n_hit += 1
+                hit_names |= hits
                 continue
             low = [ikf.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr) for v in np.linspace(0, 1, 6)]
             if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=CARRY_CLEAR_M):
@@ -408,7 +439,8 @@ class TrussPlanner:
             best = (float(slack[i]), xr, low[0], p, pitch, tilt, low)
             break
         if best is None:
-            return "no release pose that fits the truss in the crate"
+            return (f"no release pose: {len(ok)} of {len(Qs)} poses over the crate fit the truss, {n_hit} of those "
+                    f"hit {','.join(sorted(hit_names))[:60]}")
         _, x_rel, x_above, p, pitch, tilt, lower = best
         hang = float(-(self._carried_fruit(x_rel, carry)[:, 2] - p[2]).min())
         to_crate = None
@@ -445,7 +477,7 @@ class TrussPlanner:
             n = int(round(sec * FPS))
             rows.extend([last()] * n); servo.extend([sv] * n); phases.append((name, n))
 
-        def path(xs, grip, name, sv=False, grip_to=None, cart=None):
+        def path(xs, grip, name, sv=False, grip_to=None, cart=None, slow=1.0):
             """Min-jerk along joint way-points xs (rad) with the jaw at `grip` (or ramping to grip_to). cart: the
             move's length in m for straight Cartesian legs (timed by CART_PEAK_M_S), else joint-space timing."""
             a = last()
@@ -453,8 +485,8 @@ class TrussPlanner:
             seg = np.array([np.abs(q1 - q0).max() for q0, q1 in zip(pts, pts[1:])])
             L = max(seg.sum(), 1e-6)
             if cart is None:
-                T = 1.875 * L / (JOINT_PEAK_NORM_S * speed)
-                T = float(np.clip(T * rng.uniform(0.9, 1.1), 0.6, 6.0))
+                T = 1.875 * L / (JOINT_PEAK_NORM_S * speed * slow)
+                T = float(np.clip(T * rng.uniform(0.9, 1.1), 0.6, 8.0))
             else:
                 T = float(np.clip(1.875 * cart / (CART_PEAK_M_S * speed) * rng.uniform(0.9, 1.1), 0.5, 3.0))
             sgrid = expert.min_jerk(T * FPS)[1:] * L
@@ -488,7 +520,7 @@ class TrussPlanner:
         jaw_to(g_shut, rng.uniform(*CLOSE_S), "close_cut")
         hold(rng.uniform(*SQUEEZE_S), "squeeze", sv=True)
         path(rest["ret"][1:], g_shut, "retreat", cart=float(np.linalg.norm(np.r_[RETREAT_M[1], RETREAT_UP_M[1]])))
-        path(rest["to_crate"][1:], g_shut, "to_crate")
+        path(rest["to_crate"][1:], g_shut, "to_crate", slow=CARRY_SPEED)
         if len(rest["lower"]) > 1:
             path(rest["lower"][1:], g_shut, "lower", cart=ABOVE_CRATE_M)
         jaw_to(g_open, 0.5, "release")

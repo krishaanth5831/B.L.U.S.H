@@ -49,18 +49,23 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
 # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
 # IK scan: reachable over x 0.56-0.62, y 0.06-0.26. ⚠️ Toward the aisle: at y 0.17 the arm reaching over the crate
 # passed through trusses hanging out from the row (seed 200000, 2026-11-03). x max 0.73 < the end frame at 0.74.
-CRATE_CENTRE = (0.63, 0.13)
+CRATE_CENTRE = (0.6175, 0.14)
 # 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
 # found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
-CRATE_SIZE = (0.20, 0.18, 0.05)
+# As big as the spot allows: x 0.50-0.735 (end frame tie at 0.74), y 0.03-0.25 (aisle anchor rail to 0.025). ⚠️ A
+# 6-8 fruit truss lying flat is up to ~20 cm long: at 20 x 18 cm no release pose fit 2 of 3 seeds (2026-11-03).
+CRATE_SIZE = (0.23, 0.22, 0.05)
 
+
+IN_CRATE_TOP_M = 0.03            # a fruit may sit this far over the rim: the truss leans on a wall, still inside
 
 def in_crate(info, d, m, k):
-    """Every fruit of truss k inside the crate walls, below rim + 1 cm (a truss lies on its fruit)."""
+    """Every fruit of truss k inside the crate walls, at most IN_CRATE_TOP_M over the rim (lying, or leaning on a
+    wall: a 6-8 fruit truss is up to ~20 cm long, about the crate's size)."""
     (cx, cy), (sx, sy, h) = CRATE_CENTRE, CRATE_SIZE
     for f in info["trusses"][k]["fruit"]:
         p = d.xpos[m.body(f["tomato"]).id]
-        if not (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2 and p[2] < h + 0.01):
+        if not (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2 and p[2] < h + IN_CRATE_TOP_M):
             return False
     return True
 
