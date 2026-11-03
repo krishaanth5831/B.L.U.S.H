@@ -121,6 +121,36 @@ FINGER_PRIORITY = 1
 # slides back through the palm and is lost (check_scene.py caught it). x/y extent = between the finger
 # flanks at their base, guess (unverified).
 PALM_BOX_MM = ((-13.0, -10.0, -40.0), (8.0, 10.0, -37.0))
+# --- cut-and-hold fingertips (truss harvesting, K7 2026-11-03: "blade on the fingertips") ---
+# ⚠️ Design guesses until K7 picks and mounts real parts. Closed empty, the fin-ray tips stay ~3 mm apart at
+# the -10 deg stop and 16 mm at 0 deg (probe, 2026-11-03): a 3-5 mm stalk slips through bare fingers. So each
+# tip cap carries a rigid insert: a blade on its stem-side face (gripper -y), and a spring-loaded clamp pad on
+# the rest of its width. The pads stand proud of the blades, so they touch the stalk first; the blades bypass
+# each other like secateurs (they don't collide with each other) and cut where the stalk leaves the stem side;
+# the pads keep the truss side squeezed after the cut. Sizes below are in the tip cap's own frame (x across
+# the jaw, y = gripper y, z along the finger, tip at -z).
+# Blade edge past the cap face. ⚠️ The fin-ray tips are soft: the jaw reaches its -10 deg stop with the tips
+# bent back, and the blade force is what that bending gives. 5.5 mm (edges meet at ~-4 deg) squeezed a stalk
+# with 4.5-5 N, 8 mm 3.5-5.8 N, 12 mm 11-18 N, against a 6.4-10.7 N cut force (check_truss_cut.py, 2026-11-03).
+BLADE_PROTRUDE = 0.012
+BLADE_T_COL = 0.002              # collision thickness (SHEAR scene.BLADE_T_COL: a thinner box tunnels at 2 ms)
+BLADE_Y = {"fixed": (-0.009, -0.007), "moving": (-0.007, -0.005)}   # bypass: side by side in y, stem side
+# Blade + pad extent along the finger (cap is -2..+2 mm). ⚠️ The closing tips aren't parallel, and an 8 mm
+# tall insert (-6..+2) let the squeezed stalk ride out over its palm end (3 mm stalk) or past its tip end
+# (5 mm) before the cut (check_truss_cut.py, 2026-11-03). Taller, with lips at both ends (PAD_LIP), it can't.
+TIP_Z = (-0.008, 0.008)
+PAD_LIP = (0.0015, 0.0015)       # lip height past the pad face, lip length along the finger: a channel
+PAD_Y = (-0.0045, 0.009)         # pad across the rest of the finger width (18 mm)
+PAD_T = 0.003                    # pad thickness
+PAD_PROUD = 0.001                # pad face this much past the blade edge at rest (touches the stalk first)
+PAD_TRAVEL = None                 # a pad can be pushed back flush with the cap face (BLADE_PROTRUDE + PAD_PROUD)
+PAD_K = 1000.0                   # N/m: ~6 N squeeze on a 4 mm stalk at the -10 deg stop (guess, unverified)
+PAD_PRELOAD = 0.001              # m: the spring rests this far past the pad's stop (1 N preload)
+PAD_ARMATURE = 0.01              # kg: keeps the 1000 N/m slide stable at the 2 ms step (design choice)
+PAD_FRICTION = (1.5, 0.02, 0.0001)   # rubber on stalk, guess (unverified)
+BLADE_BITS = (8, 1)              # touches the stalk, fruit and scenery (contype 1); not the fingers or the other blade
+PAD_BITS = (16, 1)               # same, and not the other pad
+STEEL_RGBA, PAD_RGBA = (0.78, 0.80, 0.84, 1), (0.85, 0.45, 0.15, 1)
 PLA_RGBA = (0.92, 0.92, 0.90, 1)   # ⚠️ unverified: real filament colours. The claw camera sees these.
 TPU_RGBA = (0.15, 0.15, 0.15, 1)
 
@@ -222,8 +252,8 @@ def greenhouse_xml():
     return "\n".join(g)
 
 
-def crate_xml():
-    (cx, cy), (sx, sy, h), w = CRATE_CENTRE, CRATE_SIZE, CRATE_WALL
+def crate_xml(centre=CRATE_CENTRE, size=CRATE_SIZE):
+    (cx, cy), (sx, sy, h), w = centre, size, CRATE_WALL
     g = [_box("crate_floor", (cx - sx/2, cy - sy/2, 0), (cx + sx/2, cy + sy/2, w), CRATE_RGBA)]
     g.append(_box("crate_wx0", (cx - sx/2, cy - sy/2, 0), (cx - sx/2 + w, cy + sy/2, h), CRATE_RGBA))
     g.append(_box("crate_wx1", (cx + sx/2 - w, cy - sy/2, 0), (cx + sx/2, cy + sy/2, h), CRATE_RGBA))
@@ -232,9 +262,9 @@ def crate_xml():
     return "\n".join(g)
 
 
-def in_crate(pos):
+def in_crate(pos, centre=CRATE_CENTRE, size=CRATE_SIZE):
     """True when a point (a fruit centre) is inside the crate walls, below the rim."""
-    (cx, cy), (sx, sy, h) = CRATE_CENTRE, CRATE_SIZE
+    (cx, cy), (sx, sy, h) = centre, size
     return abs(pos[0] - cx) < sx / 2 and abs(pos[1] - cy) < sy / 2 and pos[2] < h
 
 
@@ -306,7 +336,7 @@ def shoulder_world():
     return np.asarray(ARM_BASE) + R @ SHOULDER_IN_BASE
 
 
-def world_xml(static, tomatoes, eqs, scenery=True):
+def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
     """scenery=False: just the table (check_grasp.py tests the gripper in free space)."""
     return f"""<mujoco model="blush_greenhouse">
   <compiler angle="radian"/>
@@ -330,11 +360,12 @@ def world_xml(static, tomatoes, eqs, scenery=True):
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {greenhouse_xml() if scenery else ''}
-    {crate_xml() if scenery else ''}
+    {crate_xml(*(crate or ())) if scenery else ''}
     {static}
     {tomatoes}
   </worldbody>
   <equality>{eqs}</equality>
+  <contact>{excludes}</contact>
 </mujoco>"""
 
 
@@ -435,6 +466,45 @@ def _cap(body, part, ch, bits, origin):
     return 8 * np.prod(c["half"]) * ch["ladder"]["density"]
 
 
+def add_cut_hold(s, chain):
+    """Blade + spring pad on each fin-ray tip cap (BLADE_* / PAD_*). Geoms arm/blade_{part}, arm/pad_{part}."""
+    for part in ("fixed", "moving"):
+        c, Fc = chain[part]["ladder"]["cap"], np.array(chain[part]["ladder"]["F_cap"])
+        R = np.array(c["R"], float)
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, R.reshape(-1))
+        o = np.array(c["centre"]) - Fc                  # the cap plate's centre in the cap body
+        s_in = 1.0 if part == "fixed" else -1.0         # cap plate x points at the other finger (fixed) or away
+        face = s_in * c["half"][0]
+        cap = s.body(f"finray_{part}_cap")
+        zc, hz = np.mean(TIP_Z), (TIP_Z[1] - TIP_Z[0]) / 2
+        yb = BLADE_Y[part]
+        g = cap.add_geom(name=f"blade_{part}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                         pos=o + R @ [face + s_in * BLADE_PROTRUDE / 2, np.mean(yb), zc], quat=quat,
+                         size=[BLADE_PROTRUDE / 2, (yb[1] - yb[0]) / 2, hz], rgba=STEEL_RGBA)
+        g.contype, g.conaffinity, g.group = BLADE_BITS[0], BLADE_BITS[1], 2
+        _finger_contact(g)
+        g.friction = (0.3, 0.005, 0.0001)              # steel, guess (unverified)
+        rest = BLADE_PROTRUDE + PAD_PROUD              # pad face past the cap face at rest
+        pad = cap.add_body(name=f"pad_{part}_slide", pos=o + R @ [face, np.mean(PAD_Y), zc], quat=quat)
+        j = pad.add_joint(name=f"pad_{part}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[s_in, 0, 0])
+        j.stiffness, j.springref = [PAD_K, 0, 0], PAD_PRELOAD
+        j.damping = [2 * 0.7 * np.sqrt(PAD_K * PAD_ARMATURE), 0, 0]
+        j.armature, j.limited, j.range = PAD_ARMATURE, True, (-(PAD_TRAVEL or rest), 0.0)
+        pg = pad.add_geom(name=f"pad_{part}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=[s_in * (rest - PAD_T / 2), 0, 0],
+                          size=[PAD_T / 2, (PAD_Y[1] - PAD_Y[0]) / 2, hz], mass=0.001, rgba=PAD_RGBA)
+        pg.contype, pg.conaffinity, pg.group = PAD_BITS[0], PAD_BITS[1], 2
+        _finger_contact(pg)
+        pg.friction = PAD_FRICTION
+        for end, zl in (("lo", -hz + PAD_LIP[1] / 2), ("hi", hz - PAD_LIP[1] / 2)):   # the channel's two lips
+            lg = pad.add_geom(name=f"pad_{part}_lip_{end}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                              pos=[s_in * (rest + PAD_LIP[0] / 2), 0, zl],
+                              size=[PAD_LIP[0] / 2, (PAD_Y[1] - PAD_Y[0]) / 2, PAD_LIP[1] / 2], mass=0.0002, rgba=PAD_RGBA)
+            lg.contype, lg.conaffinity, lg.group = PAD_BITS[0], PAD_BITS[1], 2
+            _finger_contact(lg)
+            lg.friction = PAD_FRICTION
+
+
 def _connect(s, body1, body2, anchor):
     e = s.add_equality(name=f"{body1}_pin", type=mujoco.mjtEq.mjEQ_CONNECT, name1=body1, name2=body2,
                        objtype=mujoco.mjtObj.mjOBJ_BODY)
@@ -491,7 +561,7 @@ def _push_test(part, ch, k_flank, F_test, seconds=1.0):
     return F_test / max((p_now - p_mid) @ inward, 1e-9)
 
 
-def arm_spec(gripper_torque=GRIPPER_TORQUE):
+def arm_spec(gripper_torque=GRIPPER_TORQUE, cut_hold=False):
     if not SO101_XML.exists():
         raise FileNotFoundError(f"{SO101_XML} missing: run ./fetch_so101.sh in sim/ first")
     s = mujoco.MjSpec.from_file(str(SO101_XML))
@@ -515,6 +585,10 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE):
             _finger_contact(g)
         else:
             _finray_ladder(s, b, part, chain[part], finray_stiffness(part, chain[part]))
+    if cut_hold:
+        if chain is None:
+            raise ValueError("cut_hold needs the bending fin-ray fingers (FINRAY_BENDING)")
+        add_cut_hold(s, chain)
     lo, hi = (np.array(v) / 1000 for v in PALM_BOX_MM)
     palm = s.body("gripper").add_geom(name="palm", type=mujoco.mjtGeom.mjGEOM_BOX, pos=(lo + hi) / 2,
                                       size=(hi - lo) / 2, rgba=(1, 0, 0, 0.3))
@@ -539,12 +613,13 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE):
     return s
 
 
-def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE, scenery=True):
-    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery))
+def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE, scenery=True, cut_hold=False,
+            excludes="", crate=None):
+    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery, excludes, crate))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
-        world.attach(arm_spec(gripper_torque), frame=fr, prefix="arm/")
+        world.attach(arm_spec(gripper_torque, cut_hold), frame=fr, prefix="arm/")
     m = world.compile()
     return m, mujoco.MjData(m)
 
