@@ -73,6 +73,16 @@ def cut_target(t, rng=None):
     return a + (b - a) * u, t["dir"]
 
 
+def cut_target_now(t, d, m, u=0.5):
+    """Cut point and stalk direction (world) where the truss hangs NOW (it sags and sways on its knuckle).
+    The truss body's frame is world-aligned at the knuckle when built (truss.truss_xml)."""
+    b = m.body(t["body"]).id
+    R, o = d.xmat[b].reshape(3, 3), d.xpos[b]
+    a, c = t["cut_zone"]
+    p = a + (c - a) * u
+    return o + R @ (p - t["knuckle"]), R @ t["dir"]
+
+
 def vines_xml(rng):
     y_stem = scene.TARGET_ROW - np.sign(scene.TARGET_ROW - scene.ARM_BASE[1]) * scene.KEYHOLE_OFF
     toward = -np.sign(scene.TARGET_ROW - scene.ARM_BASE[1])

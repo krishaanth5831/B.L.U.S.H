@@ -38,3 +38,11 @@ class SO101MujocoConfig(RobotConfig):
     domain_rand: bool = False
     # Sim seconds to let the vines settle (arm held at the start pose) before a scene's first frame.
     settle_s: float = 0.0
+    # What gets harvested (K7 2026-11-03):
+    #   "fruit"  single cherry tomatoes (sim/scene.py), the stock fin-ray fingers. Everything before 2026-11-03.
+    #   "truss"  whole trusses (sim/truss_scene.py): crowded scenes, rigid fingers with a tip blade + clamp pads;
+    #            the target is a ready truss, its box and cut point (sim/truss_target.py); it's done when the
+    #            whole truss is in the crate.
+    task: str = "fruit"
+    # task="truss" + overlay="yolo": the truss YOLO's weights (sim/yolo_truss/). None = the single-fruit default.
+    yolo_weights: str | None = None
