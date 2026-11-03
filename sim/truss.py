@@ -39,8 +39,10 @@ PEDUNCLE_LEN = (0.045, 0.060)
 # peduncle, the rachis bent away under the pads and the cut truss fell, 2026-11-03). So cut + 18 mm finger +
 # 5 mm margin stays inside the shortest peduncle.
 CUT_ZONE_M = (0.010, 0.020)
-# The rachis bends down from the peduncle by this much (photos: the fruit weight pulls it, unverified).
-RACHIS_BEND_DEG = (10.0, 40.0)
+# The rachis turns from the peduncle by this much, + = further down (photos, unverified). With the steep
+# peduncles truss_scene needs (40-70 deg, for a cut pose), bending further down hung every truss as a vertical
+# string of fruit (render, 2026-11-03), so it mostly levels off a little instead.
+RACHIS_BEND_DEG = (-30.0, 5.0)
 # Fruit along the rachis: each next pedicel root this far past the last (alternating sides, so consecutive
 # fruit sit on opposite sides). Grown until no two fruit overlap (FRUIT_GAP_M); the rachis ends past the last.
 STEP_M = (0.010, 0.016)
