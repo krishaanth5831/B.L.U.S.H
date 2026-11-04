@@ -55,9 +55,13 @@ def main():
         domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss", yolo_weights=yolo, state_log_dir=None))
     robot.connect()
     print("running: N = next scene, Q = quit (click a camera window first)", flush=True)
+    first = True
     try:
         while True:
-            robot.new_scene(seed, log=False)
+            if not first:                              # connect() already built the first scene
+                print(f"building the next scene (seed {seed}) ...", flush=True)
+                robot.new_scene(seed, log=False)
+            first = False
             obs = robot.get_observation()
             if robot._tgt_k is None:
                 seed += 1

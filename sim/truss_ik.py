@@ -34,8 +34,12 @@ def cut_point_in_gripper(r):
 
 class TrussIK(expert.ArmIK):
     def _res_y(self, x, p, point, s):
+        # ⚠️ Written out: np.cross / np.r_ on 3-vectors were ~60 % of a truss scene's 40 s build (profile, 2026-11-04)
         o, R = self.fk(x)
-        return np.r_[p - (o + R @ point), W_DIR * np.cross(R[:, 1], s)[[0, 1, 2]]]
+        g = o + R @ point
+        y0, y1, y2 = R[0, 1], R[1, 1], R[2, 1]
+        return np.array([p[0] - g[0], p[1] - g[1], p[2] - g[2], W_DIR * (y1 * s[2] - y2 * s[1]),
+                         W_DIR * (y2 * s[0] - y0 * s[2]), W_DIR * (y0 * s[1] - y1 * s[0])])
 
     def solve(self, p, s, r, x0=None, iters=80):
         s = np.asarray(s, float) / np.linalg.norm(s)
