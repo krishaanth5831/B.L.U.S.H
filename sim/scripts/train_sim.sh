@@ -3,6 +3,7 @@
 #   sim/scripts/train_sim.sh act-smoke        500 ACT steps on the laptop: data loads, both cameras, loss falls
 #   sim/scripts/train_sim.sh act-laptop [ds] ACT on the scripted episodes on the laptop GPU (100k steps)
 #   sim/scripts/train_sim.sh act-box [ds]    act-laptop + the box as numbers + temporal ensembling (v1_box)
+#   sim/scripts/train_sim.sh smolvla-truss [ds] SmolVLA + LoRA on the truss episodes, laptop GPU (20k steps)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -38,6 +39,18 @@ case "${1:-}" in
       --policy.push_to_hub=false --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1 \
       --batch_size=8 --steps=100000 --save_freq=10000 --log_freq=50 --num_workers=8 \
       --output_dir=$OUT/act_box_v1 --job_name=act_box_v1 --wandb.enable=false ;;
+  smolvla-truss)
+    # SmolVLA (pretrained lerobot/smolvla_base) + LoRA on the 200 truss-harvesting episodes, laptop GPU (K7,
+    # 2026-11-04). Recipe = S.H.E.A.R's shear_smolvla_lora_v0 run, which fits the 6 GB RTX 1000 at batch 16.
+    # Cameras renamed to the base model's camera1/camera2. ⚠️ SmolVLA doesn't read observation.environment_state
+    # (the box + cut point numbers): it sees the green box and cross drawn into the birdseye frames instead.
+    DS=${2:-$HF_USER/blush_sim_truss_v1}
+    lerobot-train --policy.path=lerobot/smolvla_base --dataset.repo_id="$DS" --policy.device=cuda \
+      --policy.push_to_hub=false \
+      --rename_map='{"observation.images.birdseye": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}' \
+      --peft.method_type=LORA --peft.r=32 --peft.lora_alpha=64 \
+      --batch_size=16 --steps=20000 --save_freq=2000 --log_freq=100 --num_workers=8 \
+      --output_dir=$OUT/smolvla_truss_lora_v1 --job_name=smolvla_truss_lora_v1 --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \
