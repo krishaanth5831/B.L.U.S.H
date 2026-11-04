@@ -4,6 +4,7 @@
 #   sim/scripts/train_sim.sh act-laptop [ds] ACT on the scripted episodes on the laptop GPU (100k steps)
 #   sim/scripts/train_sim.sh act-box [ds]    act-laptop + the box as numbers + temporal ensembling (v1_box)
 #   sim/scripts/train_sim.sh smolvla-truss [ds] SmolVLA + LoRA on the truss episodes, laptop GPU (20k steps)
+#   sim/scripts/train_sim.sh smolvla-truss-expert [ds] SmolVLA, whole action expert trained, 60k steps (laptop)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -51,6 +52,17 @@ case "${1:-}" in
       --peft.method_type=LORA --peft.r=32 --peft.lora_alpha=64 \
       --batch_size=16 --steps=20000 --save_freq=2000 --log_freq=100 --num_workers=8 \
       --output_dir=$OUT/smolvla_truss_lora_v1 --job_name=smolvla_truss_lora_v1 --wandb.enable=false ;;
+  smolvla-truss-expert)
+    # SmolVLA with its whole action expert trained (no LoRA; the VLM stays frozen, SmolVLA's default
+    # train_expert_only / freeze_vision_encoder), 60k steps (K7, 2026-11-04: the LoRA run reached for the truss but
+    # never cut it). Batch 8: S.H.E.A.R's expert run on this 6 GB laptop GPU uses 8 (BATCH= overrides). The LR
+    # schedule decays over the whole run (SmolVLA's default decays over 30k).
+    DS=${2:-$HF_USER/blush_sim_truss_v1}
+    lerobot-train --policy.path=lerobot/smolvla_base --dataset.repo_id="$DS" --policy.device=cuda \
+      --policy.push_to_hub=false --policy.scheduler_decay_steps=60000 \
+      --rename_map='{"observation.images.birdseye": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}' \
+      --batch_size=${BATCH:-8} --steps=60000 --save_freq=5000 --log_freq=100 --num_workers=8 \
+      --output_dir=$OUT/smolvla_truss_expert_v1${RUN_SUFFIX:-} --job_name=smolvla_truss_expert_v1 --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \
