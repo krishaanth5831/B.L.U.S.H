@@ -79,7 +79,9 @@ def main():
                     help="first scene seed; default: a random one per run (replay a scene with its printed seed)")
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame, no YOLO overlay")
+    ap.add_argument("--headless", action="store_true", help="no windows (implies --fast): just the graded results")
     a = ap.parse_args()
+    a.fast = a.fast or a.headless
     policy_path = a.policy.resolve()
     if a.seed_start is None:
         a.seed_start = int(np.random.default_rng().integers(1_000_000, 2**31 - 100_000))
@@ -106,7 +108,7 @@ def main():
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
-        id="sim", seed=a.seed_start, viewer=True, overlay="yolo" if yolo else "true_box", realtime=False,
+        id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
         fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss",
         yolo_weights=yolo, state_log_dir=None))
     robot.connect()
@@ -151,7 +153,7 @@ def main():
                     print(f"  🍅 truss in the crate at {t:.1f} s", flush=True)
                 if t_crate is not None and t - t_crate > AFTER_CRATE_S:
                     break
-                key = show(obs, f"scene {n}/{a.scenes}  seed {seed}  t {t:4.1f} s")
+                key = 0 if a.headless else show(obs, f"scene {n}/{a.scenes}  seed {seed}  t {t:4.1f} s")
                 if key == ord("q"):
                     quit_ = gave_up = True
                     break
