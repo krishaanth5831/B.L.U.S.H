@@ -89,6 +89,11 @@ CARRY_CLEAR_M = 0.020            # 1 cm still tore fruit off a neighbour (seed 2
 CARRY_CLEAR_MIN_M = 0.010        # fallback when no route keeps 2 cm (the retreat ended closer, 2026-11-03)
 CARRY_SPEED = 0.6                # x the joint speed while the cut truss is carried: less swing (design choice)
 CANDIDATES = 8                   # cut points drawn along the cut zone per plan
+# Taking over from a policy mid-task (dagger_truss.py): a short pause instead of hold_start, and when the arm is
+# already pressing something, a short joint-space step toward the start pose (this share of the way) to get
+# clear before the RRT route (design choice).
+TAKEOVER_HOLD_S = (0.1, 0.3)
+ESCAPE_SHARES = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
 
 
 class PlanError(Exception):
@@ -261,23 +266,43 @@ class TrussPlanner:
         return max(np.linalg.norm(self.d.xpos[self.m.body(f["tomato"]).id] - p) + f["radius"] for f in self.t["fruit"])
 
     # --- the plan ---
-    def plan(self, rng, miss=False):
-        """Strict first, then letting the arm brush neighbours by 2 mm (NEIGHBOUR_CLEAR)."""
+    def plan(self, rng, miss=False, takeover=None):
+        """Strict first, then letting the arm brush neighbours by 2 mm (NEIGHBOUR_CLEAR).
+        takeover: plan from wherever the arm is now, mid-task (dagger_truss.py): "before_cut" (the jaw opens in
+        place, then the usual cut and carry) or "after_cut" (the cut truss is in the jaw: carry it to the crate)."""
         why = []
         for mode in NEIGHBOUR_CLEAR:
             self.kw = dict(soft_clearance=NEIGHBOUR_CLEAR[mode], firm_clearance=OWN_FRUIT_CLEAR[mode])
             try:
-                plan = self._plan(rng, miss)
+                plan = self._plan_after_cut(rng) if takeover == "after_cut" else self._plan(rng, miss, takeover)
                 plan.meta["neighbours"] = mode
                 return plan
             except PlanError as e:
                 why.append(f"{mode}: {e}")
         raise PlanError(" / ".join(why))
 
-    def _plan(self, rng, miss=False):
+    def _escape(self, q):
+        """A pose a short joint-space step from q toward the start pose that is clear (jaw open), or None."""
+        q_home = self.fm.norm_to_rad(np.asarray(scene.START_NORM, float))[:5]
+        for a in ESCAPE_SHARES:
+            qe = q + (q_home - q) * a
+            if self.chk.free(qe, **self.kw):
+                return qe
+        return None
+
+    def _plan(self, rng, miss=False, takeover=None):
         tried = []
         r = self.t["r"]
         q_start = self.q_now()
+        lead = None
+        if takeover:
+            self.jaw(JAW_OPEN_DEG)
+            if not self.chk.free(q_start, **self.kw):
+                # ⚠️ rrt.plan refuses a start that isn't clear, and a policy handing over often presses something
+                qe = self._escape(q_start)
+                if qe is None:
+                    raise PlanError("takeover pose not clear, no escape toward the start pose")
+                lead, q_start = [q_start, qe], qe
         for _ in range(CANDIDATES):
             leg = self._cut_leg(rng, r)
             if isinstance(leg, str):
@@ -304,8 +329,20 @@ class TrussPlanner:
                 continue
             return self._assemble(rng, to_pre, slide, miss_leg, rest,
                                   dict(cut_u=round(u, 2), approach_blend_deg=float(beta), slide_mm=round(slide_m * 1000),
-                                       tried=tried), slide_m)
+                                       tried=tried, takeover=takeover, escape=lead is not None), slide_m,
+                                  takeover=bool(takeover), lead=lead)
         raise PlanError("; ".join(sorted(set(tried))) or "no candidate")
+
+    def _plan_after_cut(self, rng):
+        """The target is cut and in the jaw: carry it from here (the gripper frame now = the cut pose)."""
+        x = self.q_now()
+        r = self.t["r"]
+        p, R = self.ik.frame(x, r)
+        rest = self._after_cut(rng, x, p, -R[:, 2], R[:, 1], r, self._carry(x), stay_ok=True)
+        if isinstance(rest, str):
+            raise PlanError(rest)
+        return self._assemble(rng, None, None, None, rest, dict(tried=[], takeover="after_cut", escape=False), 0.0,
+                              takeover=True)
 
     def _cut_leg(self, rng, r):
         """One cut point drawn in the cut zone: its cut pose, an approach whose slide is clear, and a closing jaw
@@ -367,7 +404,8 @@ class TrussPlanner:
         W = hanging(o, R, carry[1], carry[2], truss_ik.cut_point_in_gripper(self.t["r"]))
         return np.array([w[0] for w in W[1:]])
 
-    def _after_cut(self, rng, x_cut, p_cut, f, s, r, carry):
+    def _after_cut(self, rng, x_cut, p_cut, f, s, r, carry, stay_ok=False):
+        """stay_ok: no retreat that's clear -> go to the crate straight from x_cut (a takeover mid-carry)."""
         cchk = CarryChecker(self.m, self.d, carry[0], carry[1], truss_ik.cut_point_in_gripper(r), hard=self.hard,
                             soft=self.soft)
         cchk.d.qpos[self.g_adr] = np.radians(-10.0)
@@ -387,6 +425,8 @@ class TrussPlanner:
                 continue
             ret = xs
             break
+        if ret is None and stay_ok:
+            ret = [x_cut]
         if ret is None:
             return why
         # release pose: seen from above every carried fruit inside the crate walls, the lowest just over the rim
@@ -463,7 +503,9 @@ class TrussPlanner:
                     release_pitch=round(pitch, 1), hang_mm=round(hang * 1000, 1), crate_slack_mm=round(best[0] * 1000, 1))
 
     # --- frames ---
-    def _assemble(self, rng, to_pre, slide, miss_leg, rest, meta, slide_m):
+    def _assemble(self, rng, to_pre, slide, miss_leg, rest, meta, slide_m, takeover=False, lead=None):
+        """to_pre None: the target is cut already (a takeover after the cut): only the carry. lead: an escape
+        move (joint way-points) before to_pre."""
         fm = self.fm
         speed = float(rng.uniform(*SPEED))
         rows, servo, phases = [], [], []
@@ -510,19 +552,30 @@ class TrussPlanner:
                 rows.append(np.r_[a[:5], a[5] + (g - a[5]) * si])
             servo.extend([True] * (n - 1)); phases.append((name, n - 1))
 
-        hold(rng.uniform(*expert.HOLD_START_S), "hold_start")
-        path(to_pre[1:], g_start, "to_precut", grip_to=g_open)
-        if miss_leg is not None:
-            path(miss_leg["xs"][1:], g_open, "miss_slide", sv=True, cart=slide_m - miss_leg["short"])
-            jaw_to(g_shut, rng.uniform(*CLOSE_S), "miss_close")
-            hold(rng.uniform(*MISS_PAUSE_S), "miss_pause", sv=True)
-            jaw_to(g_open, 0.5, "miss_open")
-            path(miss_leg["xs"][::-1][1:], g_open, "miss_back_off", sv=True, cart=slide_m - miss_leg["short"])
-        path(slide[1:], g_open, "slide_in", sv=True, cart=slide_m)
-        hold(rng.uniform(0.15, 0.3), "settle_at_stalk", sv=True)
-        jaw_to(g_shut, rng.uniform(*CLOSE_S), "close_cut")
-        hold(rng.uniform(*SQUEEZE_S), "squeeze", sv=True)
-        path(rest["ret"][1:], g_shut, "retreat", cart=float(np.linalg.norm(np.r_[RETREAT_M[1], RETREAT_UP_M[1]])))
+        if not takeover:
+            hold(rng.uniform(*expert.HOLD_START_S), "hold_start")
+        else:
+            hold(rng.uniform(*TAKEOVER_HOLD_S), "takeover")
+        if to_pre is not None:
+            if takeover and last()[5] < g_open - 2.0:      # jaw (half) shut, maybe round a stalk: open it in place
+                jaw_to(g_open, 0.4, "takeover_open")
+            if lead is not None:
+                path(lead[1:], g_open, "escape", grip_to=g_open)
+            path(to_pre[1:], g_start, "to_precut", grip_to=g_open)
+            if miss_leg is not None:
+                path(miss_leg["xs"][1:], g_open, "miss_slide", sv=True, cart=slide_m - miss_leg["short"])
+                jaw_to(g_shut, rng.uniform(*CLOSE_S), "miss_close")
+                hold(rng.uniform(*MISS_PAUSE_S), "miss_pause", sv=True)
+                jaw_to(g_open, 0.5, "miss_open")
+                path(miss_leg["xs"][::-1][1:], g_open, "miss_back_off", sv=True, cart=slide_m - miss_leg["short"])
+            path(slide[1:], g_open, "slide_in", sv=True, cart=slide_m)
+            hold(rng.uniform(0.15, 0.3), "settle_at_stalk", sv=True)
+            jaw_to(g_shut, rng.uniform(*CLOSE_S), "close_cut")
+            hold(rng.uniform(*SQUEEZE_S), "squeeze", sv=True)
+        else:
+            jaw_to(g_shut, 0.3, "takeover_grip")       # the policy's grip, firmed to the expert's close
+        if len(rest["ret"]) > 1:
+            path(rest["ret"][1:], g_shut, "retreat", cart=float(np.linalg.norm(np.r_[RETREAT_M[1], RETREAT_UP_M[1]])))
         path(rest["to_crate"][1:], g_shut, "to_crate", slow=CARRY_SPEED)
         if len(rest["lower"]) > 1:
             path(rest["lower"][1:], g_shut, "lower", cart=ABOVE_CRATE_M)
@@ -533,6 +586,7 @@ class TrussPlanner:
         meta.update(target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(self.t["r"] * 2000, 1),
                     miss=miss_leg is not None, miss_short_mm=None if miss_leg is None else round(miss_leg["short"] * 1000, 1),
                     speed=round(speed, 3), release_point=rest["release_point"], release_pitch=rest["release_pitch"],
-                    hang_mm=rest["hang_mm"], rrt_waypoints=[len(to_pre), len(rest["to_crate"]), len(rest["home"])],
+                    hang_mm=rest["hang_mm"],
+                    rrt_waypoints=[len(to_pre or ()), len(rest["to_crate"]), len(rest["home"])],
                     frames=len(rows), seconds=round(len(rows) / FPS, 2))
         return expert.Plan(np.array(rows), np.array(servo), phases, meta)
