@@ -39,32 +39,32 @@ def _union(boxes):
     return (int(b[:, 0].min()), int(b[:, 1].min()), int(b[:, 2].max()), int(b[:, 3].max()))
 
 
-def truss_boxes(cams, d, m, info, ids=None):
-    ids = cams.ids(d, "birdseye") if ids is None else ids
+def truss_boxes(cams, d, m, info, ids=None, cam="birdseye"):
+    ids = cams.ids(d, cam) if ids is None else ids
     out = []
     for t in info["trusses"]:
-        parts = [cams.true_box(d, "birdseye", m.geom(f["geom"]).id, ids) for f in t["fruit"]]
-        parts += [cams.true_box(d, "birdseye", m.geom(g).id, ids) for g in t["geoms"]]
+        parts = [cams.true_box(d, cam, m.geom(f["geom"]).id, ids) for f in t["fruit"]]
+        parts += [cams.true_box(d, cam, m.geom(g).id, ids) for g in t["geoms"]]
         px = sum(n for _, n in parts)
         out.append((_union([b for b, _ in parts]) if px >= MIN_PX else None, px))
     return out
 
 
-def outline_box(cams, d, m, t):
+def outline_box(cams, d, m, t, cam="birdseye"):
     """Box around a truss's fruit outlines and stalk whether or not something hides it (cf. target.py)."""
-    bs = [cams.sphere_box(d, "birdseye", d.xpos[m.body(f["tomato"]).id], f["radius"]) for f in t["fruit"]]
+    bs = [cams.sphere_box(d, cam, d.xpos[m.body(f["tomato"]).id], f["radius"]) for f in t["fruit"]]
     b = m.body(t["body"]).id
     pts = [d.xpos[b] + d.xmat[b].reshape(3, 3) @ (q - t["knuckle"]) for q in (t["knuckle"], t["peduncle_end"], t["rachis_end"])]
-    uv = cams.project(d, "birdseye", np.array(pts))
+    uv = cams.project(d, cam, np.array(pts))
     bs += [(u, v, u, v) for u, v in uv if not np.isnan(u)]
     u = _union(bs)
     return None if u is None else [max(0, u[0]), max(0, u[1]), min(W - 1, u[2]), min(H - 1, u[3])]
 
 
-def cut_pixel(cams, d, m, t):
-    """The middle of the truss's cut zone (world, where it hangs now) in birdseye pixels, or None."""
+def cut_pixel(cams, d, m, t, cam="birdseye"):
+    """The middle of the truss's cut zone (world, where it hangs now) in this camera's pixels, or None."""
     p, _ = ts.cut_target_now(t, d, m)
-    uv = cams.project(d, "birdseye", p)[0]
+    uv = cams.project(d, cam, p)[0]
     return None if np.isnan(uv).any() else (float(uv[0]), float(uv[1]))
 
 
@@ -80,6 +80,19 @@ def yolo_labels(cams, d, m, info, ids=None):
             h = CUT_BOX_PX / 2
             rows.append((CUT, (max(0, c[0] - h), max(0, c[1] - h), min(W - 1, c[0] + h), min(H - 1, c[1] + h))))
     return rows
+
+
+def view_target(cams, d, m, t, cam):
+    """The chosen target truss as another camera sees it (rig "base": the target is picked on the birdseye, the
+    policy's camera gets its box + cut point from the sim's truth): (visible box or the outline box when hidden,
+    cut pixel or None). Both None when the truss is out of that camera's view."""
+    ids = cams.ids(d, cam)
+    parts = [cams.true_box(d, cam, m.geom(f["geom"]).id, ids) for f in t["fruit"]]
+    parts += [cams.true_box(d, cam, m.geom(g).id, ids) for g in t["geoms"]]
+    box = _union([b for b, _ in parts]) if sum(n for _, n in parts) >= MIN_PX else None
+    if box is None:
+        box = outline_box(cams, d, m, t, cam)
+    return (None if box is None else [int(v) for v in box]), cut_pixel(cams, d, m, t, cam)
 
 
 def env_vector(box, cut):

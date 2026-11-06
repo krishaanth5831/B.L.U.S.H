@@ -45,7 +45,7 @@ import tomato as tm  # noqa: E402
 import truss as tr  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_target as ttg  # noqa: E402
-from cameras import CAMERAS, SimCameras  # noqa: E402
+from cameras import RIG_CAMERAS, SimCameras  # noqa: E402
 from harvest import yolo_overlay as ov  # noqa: E402  (target.py put the repo root on sys.path)
 
 logger = logging.getLogger(__name__)
@@ -68,8 +68,13 @@ class SO101Mujoco(Robot):
             raise ValueError(f"overlay={config.overlay!r}: one of {OVERLAYS}")
         if config.task not in ("fruit", "truss"):
             raise ValueError(f"task={config.task!r}: 'fruit' or 'truss'")
+        if config.rig not in RIG_CAMERAS:
+            raise ValueError(f"rig={config.rig!r}: one of {tuple(RIG_CAMERAS)}")
+        if config.rig == "base" and config.task != "truss":
+            raise ValueError("rig='base' is built for task='truss' (the box goes onto the base camera from truss truth)")
         self.config = config
-        self.cameras = dict.fromkeys(CAMERAS)   # names only; lerobot-rollout counts them
+        self.cam_names = RIG_CAMERAS[config.rig]  # what the policy sees, in order; [0] carries the target box
+        self.cameras = dict.fromkeys(self.cam_names)   # names only; lerobot-rollout counts them
         self._lock = threading.RLock()
         self._thread = None
         self._stop = threading.Event()
@@ -87,7 +92,7 @@ class SO101Mujoco(Robot):
     @property
     def observation_features(self) -> dict:
         ft = {f"{j}.pos": float for j in arm_map.JOINTS}
-        ft.update({c: (scene.CAM_H, scene.CAM_W, 3) for c in CAMERAS})
+        ft.update({c: (scene.CAM_H, scene.CAM_W, 3) for c in self.cam_names})
         return ft
 
     @property
@@ -113,10 +118,17 @@ class SO101Mujoco(Robot):
     def truss(self):
         return self.config.task == "truss"
 
-    def _build(self, seed):
-        self.m, self.d, self.info = (ts.build if self.truss else scene.build)(seed)
+    def _build(self, seed, hold=False):
+        self.m, self.d, self.info = (ts.build(seed, hold=hold, base_mount=self.config.rig == "base") if self.truss
+                                     else scene.build(seed))
         self.info["dr"] = randomize.apply(self.m, seed, self.info["fruit"]) if self.config.domain_rand else None
         self.qidx, self.uidx = scene.arm_ids(self.m)
+        if self.config.start_jitter_deg > 0:      # own stream: the scene's other draws stay as they were
+            import mujoco
+            j = np.random.default_rng([seed, 0x517]).uniform(-1, 1, 5) * np.radians(self.config.start_jitter_deg)
+            self.d.qpos[self.qidx[:5]] += j
+            mujoco.mj_forward(self.m, self.d)
+            self.info["start_jitter_deg"] = np.round(np.degrees(j), 2).tolist()
         self.det = tm.Detacher(self.m, self.d, self.info["fruit"])
         # One cutter per truss: a cut on the wrong truss shows up as that truss's cut.
         self.cutters = [tr.TrussCutter(self.m, self.d, t) for t in self.info["trusses"]] if self.truss else []
@@ -127,6 +139,7 @@ class SO101Mujoco(Robot):
         self._snap = self.config.snap_to_first_action
         self._box = None
         self._box_info = None
+        self._view = (None, None)            # rig="base": the target's box + cut point on the base camera
         self._tgt_k = None                   # the target fruit, picked on the scene's first frame
         self._tgt_body = None
         self._dropped = False
@@ -229,13 +242,14 @@ class SO101Mujoco(Robot):
             if not quiet:
                 print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
 
-    def new_scene(self, seed, log=True):
-        """realtime=False: next scene with this seed, now. log=False drops its state log (a dry run)."""
+    def new_scene(self, seed, log=True, hold=False):
+        """realtime=False: next scene with this seed, now. log=False drops its state log (a dry run).
+        hold: task="truss", nothing ready to pick (truss_scene.build hold), for stay-home episodes."""
         with self._lock:
             self._save_log()
             if self._viewer is not None:
                 self._close_viewer(self._viewer)
-            self._build(seed)
+            self._build(seed, hold=hold)
             self._log_on = log
             if self.config.viewer:
                 self._viewer = self._launch_viewer()
@@ -358,11 +372,13 @@ class SO101Mujoco(Robot):
               flush=True)
 
     def get_observation(self):
+        if self.config.rig == "base":
+            return self._observation_base()
         with self._lock:
             state = self._present_norm()
             obs = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, state)}
             cams = self._cameras()
-            for c in CAMERAS:
+            for c in self.cam_names:
                 obs[c] = cams.rgb(self.d, c)
             # The start frame: the first one after the arm reached the leader's pose (the snap).
             need_target = self.config.overlay != "none" and self._box_info is None and not self._snap
@@ -371,8 +387,9 @@ class SO101Mujoco(Robot):
             # ⚠️ The sim state of THIS frame (YOLO below takes ~11 ms, the physics keeps running).
             row = (self.d.time, time.time(), self.d.qpos.copy(), self.d.eq_active.copy(), state)
         # YOLO runs outside the lock: it must not stall the physics. ~11 ms for both cameras.
-        dets = self._yolo.many([obs[c] for c in CAMERAS]) if self._yolo is not None else [[] for _ in CAMERAS]
-        dets = dict(zip(CAMERAS, dets))
+        names_ = self.cam_names
+        dets = self._yolo.many([obs[c] for c in names_]) if self._yolo is not None else [[] for _ in names_]
+        dets = dict(zip(names_, dets))
         if need_target:
             self._pick_target(dets["birdseye"], ids, gen)
         if self.config.overlay == "yolo":
@@ -391,9 +408,50 @@ class SO101Mujoco(Robot):
                 self._log.append(row + (json.dumps(dets) if self._yolo is not None else "",))
         return obs
 
+    def _observation_base(self):
+        """rig="base": base + claw frames. On the scene's first frame the birdseye is rendered once more (not returned)
+        and the target picked there exactly as in the birdseye rig (truss YOLO, true-box fallback). The chosen truss's
+        box + cut point as the BASE camera sees them (sim truth, truss_target.view_target) are fixed then and drawn on
+        every base frame. The claw frame stays clean."""
+        with self._lock:
+            state = self._present_norm()
+            obs = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, state)}
+            cams = self._cameras()
+            for c in self.cam_names:
+                obs[c] = cams.rgb(self.d, c)
+            need_target = self.config.overlay != "none" and self._box_info is None and not self._snap
+            bird = cams.rgb(self.d, "birdseye") if need_target else None
+            ids = cams.ids(self.d, "birdseye") if need_target else None
+            gen = self._gen
+            row = (self.d.time, time.time(), self.d.qpos.copy(), self.d.eq_active.copy(), state)
+        dets = []
+        if need_target:
+            dets = self._yolo.many([bird])[0] if self._yolo is not None else []
+            self._pick_target(dets, ids, gen)
+            with self._lock:
+                if gen == self._gen:
+                    k = self._tgt_k
+                    self._view = ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], self.cam_names[0]) \
+                        if k is not None else (None, None)
+        box, cut = getattr(self, "_view", (None, None)) if self._box_info is not None else (None, None)
+        if self.config.overlay != "none" and box is not None:
+            import cv2
+            c0 = self.cam_names[0]
+            obs[c0] = ov.draw_overlay(obs[c0], [], {}, target=box)
+            if cut is not None:
+                u, v = (int(round(c)) for c in cut)
+                cv2.drawMarker(obs[c0], (u, v), ov.TARGET_COLOUR, cv2.MARKER_CROSS, 10, 2)
+        with self._lock:
+            if self.config.state_log_dir and gen == self._gen and self._log_on:
+                self._log.append(row + (json.dumps({"birdseye": dets}) if need_target else "",))
+        return obs
+
     def env_state(self):
         """task="truss": the target truss's box + cut point as numbers (truss_target.ENV_NAMES); zeros before
         the start frame. What the generator records as observation.environment_state."""
+        if self.config.rig == "base":
+            box, cut = getattr(self, "_view", (None, None)) if self._box_info is not None else (None, None)
+            return ttg.env_vector(box, cut)
         info = self._box_info or {}
         return ttg.env_vector(info.get("box"), info.get("cut"))
 

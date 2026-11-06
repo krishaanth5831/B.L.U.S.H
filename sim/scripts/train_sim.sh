@@ -6,6 +6,7 @@
 #   sim/scripts/train_sim.sh smolvla-truss [ds] SmolVLA + LoRA on the truss episodes, laptop GPU (20k steps)
 #   sim/scripts/train_sim.sh smolvla-truss-expert [ds] SmolVLA, whole action expert trained, 60k steps (laptop)
 #   sim/scripts/train_sim.sh smolvla-truss-expert-v2 [ds] the same on the 300 episodes (200 scripted + 100 DAgger)
+#   sim/scripts/train_sim.sh smolvla-truss-v3 [ds]  rig "base": vision encoder + action expert, 100k steps (-smoke: 20)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -74,6 +75,29 @@ case "${1:-}" in
       --rename_map='{"observation.images.birdseye": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}' \
       --batch_size=${BATCH:-8} --steps=60000 --save_freq=5000 --log_freq=100 --num_workers=8 \
       --output_dir=$OUT/smolvla_truss_expert_v2${RUN_SUFFIX:-} --job_name=smolvla_truss_expert_v2 --wandb.enable=false ;;
+  smolvla-truss-v3 | smolvla-truss-v3-smoke)
+    # Rig "base" (K7 2026-11-06): base + claw cameras, and SmolVLA's VISION ENCODER trained together with the action
+    # expert (Dream Machines: full fine-tune >> partial), the language layers frozen; 100k steps, a checkpoint every
+    # 10k, picked by graded rollouts, not by loss (Dream Machines saw success plateau ~30k and swing after).
+    # ⚠️ Needs the local lerobot patch in smolvlm_with_expert.py (S.H.E.A.R, 2026-11-06): stock train_expert_only
+    # froze the vision encoder too, so freeze_vision_encoder=false did nothing.
+    # Batch 2 x 4 accumulation = the effective batch 8 of the v1/v2 runs (the 6 GB GPU doesn't fit 8 with the vision
+    # encoder training; BATCH= / ACCUM= override).
+    DS=${2:-$HF_USER/blush_sim_truss_v2}
+    V3=(--policy.path=lerobot/smolvla_base --dataset.repo_id="$DS" --policy.device=cuda --policy.push_to_hub=false
+        --policy.freeze_vision_encoder=false
+        --rename_map='{"observation.images.base": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}'
+        --batch_size=${BATCH:-2} --accelerator.gradient_accumulation.steps=${ACCUM:-4} --wandb.enable=false)
+    if [ "$1" = smolvla-truss-v3-smoke ]; then
+      lerobot-train "${V3[@]}" --steps=20 --save_freq=1000 --log_freq=5 --num_workers=4 \
+        --output_dir=$OUT/smolvla_truss_v3_smoke --job_name=smolvla_truss_v3_smoke
+    else
+      # ⚠️ lerobot's --steps counts micro-batches, but the LR scheduler steps once per optimizer update (every ACCUM
+      # micro-batches, lerobot_train.py): decay over steps / ACCUM or the LR never comes down (2026-11-06)
+      lerobot-train "${V3[@]}" --policy.scheduler_decay_steps=$(( ${STEPS:-100000} / ${ACCUM:-4} )) \
+        --steps=${STEPS:-100000} --save_freq=10000 \
+        --log_freq=100 --num_workers=8 --output_dir=$OUT/smolvla_truss_v3${RUN_SUFFIX:-} --job_name=smolvla_truss_v3
+    fi ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \

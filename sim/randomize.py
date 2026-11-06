@@ -36,6 +36,8 @@ FRUIT_HSV = {"ripe": (0.015, (0.85, 1.10), (0.80, 1.15)),
              "green": (0.025, (0.80, 1.15), (0.80, 1.20))}
 BIRDSEYE_POS_M, BIRDSEYE_ROT_DEG = 0.010, 2.0   # mast placement by hand: +-1 cm, +-2 deg
 CLAW_POS_M, CLAW_ROT_DEG = 0.002, 1.5           # printed wrist mount
+BASE_POS_M, BASE_ROT_DEG = 0.005, 2.0           # base-camera bracket (rig "base"): printed, screwed to the base plate
+                                                # (guess, unverified)
 FINGER_FRICTION = (0.9, 1.4)      # sliding; nominal 1.2 (scene.FINGER_FRICTION, a guess)
 FINGER_STIFFNESS = (0.7, 1.4)     # x the fin-ray hinge springs; nominal = 2 N/mm at mid-finger (a guess)
 TRUSS_STIFFNESS = (0.6, 1.6)      # x rachis + pedicel ball-joint springs (guesses in tomato.py)
@@ -121,4 +123,13 @@ def apply(m, seed, fruit=None):
         elif n.endswith(("_rachis_ball", "_ped_ball")):
             m.jnt_stiffness[j] *= kt
     p.update(finger_friction=round(mu, 3), finger_stiffness_x=round(kf, 3), truss_stiffness_x=round(kt, 3))
+    # The base camera (rig "base", 2026-11-06) on its own stream, after everything else: adding it changed no other draw,
+    # so older datasets' scenes randomise exactly as before
+    c = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "base")
+    if c >= 0:
+        rb = np.random.default_rng([int(seed), 0xBA5E])
+        off = rb.uniform(-BASE_POS_M, BASE_POS_M, 3)
+        m.cam_pos[c] += off
+        m.cam_quat[c] = _qmul(m.cam_quat[c], _rot(rb, BASE_ROT_DEG))
+        p["cam_base"] = {"pos_offset_mm": np.round(off * 1000, 1).tolist()}
     return p
