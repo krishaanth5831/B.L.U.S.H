@@ -48,13 +48,27 @@ PLY_RGBA = "0.82 0.70 0.52 1"    # birch ply, guess (unverified; Tier 1 swaps in
 # Shoulder at (370, +-200, 117) mm in the generator. The base sits on the table at (0.37, 0.2, 0);
 # the 117 mm is the URDF shoulder_lift height above the base (checked: upper_arm body at z 0.117).
 ARM_BASE = (0.370, 0.200, 0.0)
-# ⚠️ unverified: which way the real base faces. Yaw 0 = shoulder_pan 0 points down the aisle (+x),
-# away from the birdseye mast, so pan +-90 deg faces the two rows.
-ARM_YAW_DEG = 0.0
-TARGET_ROW = 0.400               # ⚠️ unverified: R1. The aisle at y = 0.2 serves rows 0.4 and 0.
+# K7 (2026-10-20): the base faces the vine row, i.e. turned 90 deg left from facing down the aisle
+# (+x, away from the mast), so shoulder_pan 0 points at R1 (+y). Facing down the aisle the arm
+# reached a third of the tomatoes (sampled IK, seed 3); facing the row, every ripe one (IK_REACH_TOL_M).
+ARM_YAW_DEG = 90.0
+TARGET_ROW = 0.400               # R1, the row the base faces (K7, 2026-10-20). The aisle at y = 0.2 serves rows 0.4 and 0.
 SHOULDER_IN_BASE = np.array([0.069, -0.018, 0.117])   # upper_arm body origin at q = 0 (MJCF, checked)
-REACH_M = 0.30                   # comfortable reach from the shoulder for a picking target (guess, unverified;
-                                 # the generator's 0.40 is full stretch to the jaw tip)
+REACH_M = 0.30                   # quick prefilter: within this of the shoulder (guess; the generator's 0.40
+                                 # is full stretch to the jaw tip). Ripe fruit must also pass the IK check.
+# A ripe fruit must be reachable for real: IK on the bare arm (follower joint limits) gets the grasp
+# point (between the fingers, mid-length, centred on a 25 mm fruit) to the fruit centre within this.
+# The 30 cm sphere alone let 6 of 100 layouts hold a ripe fruit 1-35 mm out of reach (2026-10-20).
+IK_REACH_TOL_M = 0.003
+# Where every scene starts, until the first leader command snaps the sim arm to the leader's pose
+# (and where rollouts start). Normalised units: arm tucked low, turned to the robot's LEFT (toward the
+# mast end; pan -90 turns that way on this arm). >= 19 mm from every fruit, post, rail and the crate
+# in 30 layouts, and no ripe fruit hidden from the birdseye (2026-10-20). ⚠️ Not:
+# - the joint zero: the arm straight out reaches into the vines now that the base faces the row
+# - the old folded pose: it leans back into row 0's floor rail
+# - the same pose turned right: the hand lands in the crate or on the table
+# - elbow 100 (fully folded): the lower arm presses into the shoulder and the servo can't hold it
+START_NORM = (-90.0, -40.0, 90.0, -40.0, 0.0, 50.0)
 # lerobot so_follower configure(): gripper Max_Torque_Limit 500 = 50 % of max. MJCF max is 3.35 N.m.
 # ⚠️ The servo also drops to Overload_Torque 25 % once it's stalled long enough (squeezing a
 # fruit), so check_scene.py tests the grip at 25 % too.
@@ -107,14 +121,67 @@ FINGER_PRIORITY = 1
 # slides back through the palm and is lost (check_scene.py caught it). x/y extent = between the finger
 # flanks at their base, guess (unverified).
 PALM_BOX_MM = ((-13.0, -10.0, -40.0), (8.0, 10.0, -37.0))
+# --- cut-and-hold fingertips (truss harvesting, K7 2026-11-03: "blade on the fingertips") ---
+# ⚠️ Design guesses until K7 picks and mounts real parts. Closed empty, the finger tips stay ~3 mm apart at
+# the -10 deg stop and 16 mm at 0 deg (probe, 2026-11-03): a 3-5 mm stalk slips through bare fingers. So each
+# tip cap carries a rigid insert: a blade on its stem-side face (gripper -y), and a spring-loaded clamp pad on
+# the rest of its width. The pads stand proud of the blades, so they touch the stalk first; the blades bypass
+# each other like secateurs (they don't collide with each other) and cut where the stalk leaves the stem side;
+# the pads keep the truss side squeezed after the cut. Sizes below are in the tip cap's own frame (x across
+# the jaw, y = gripper y, z along the finger, tip at -z).
+# ⚠️ Rigid fingers. On the soft TPU fin-ray tips (2 N/mm) the inserts didn't cut: the finger curls around the
+# stalk (the fin-ray effect), twisting the blades ~30 deg off it, and the stalk slid out (blade edge 5.5-12 mm
+# out: 4-20 N peaks, never held 50 ms; check_truss_cut.py renders, 2026-11-03). The same finger shape 20x
+# stiffer cut 3-5 mm stalks in 0.45 s and held them through the shake. K7 (2026-11-03): print the fingers
+# in PLA for truss harvesting. The sim keeps the fin-ray ladder with near-rigid hinges for that.
+RIGID_FINGER_K_N_PER_MM = 40.0
+# Blade edge past the cap face: 4 mm squeezed a 3-5 mm stalk with 25-29 N against a 6.4-10.7 N cut force on
+# the rigid fingers (check_truss_cut.py, 2026-11-03); 6 mm cut too, with no gain.
+BLADE_PROTRUDE = 0.004
+BLADE_T_COL = 0.002              # collision thickness (SHEAR scene.BLADE_T_COL: a thinner box tunnels at 2 ms)
+BLADE_Y = {"fixed": (-0.009, -0.007), "moving": (-0.007, -0.005)}   # bypass: side by side in y, stem side
+# Blade + pad extent along the finger (cap is -2..+2 mm). ⚠️ The closing tips aren't parallel, and an 8 mm
+# tall insert (-6..+2) let the squeezed stalk ride out over its palm end (3 mm stalk) or past its tip end
+# (5 mm) before the cut (check_truss_cut.py, 2026-11-03). Taller, with lips at both ends (PAD_LIP), it can't.
+TIP_Z = (-0.008, 0.008)
+PAD_LIP = (0.0015, 0.0015)       # lip height past the pad face, lip length along the finger: a channel
+PAD_Y = (-0.0045, 0.009)         # pad across the rest of the finger width (18 mm)
+PAD_T = 0.003                    # pad thickness
+PAD_PROUD = 0.001                # pad face this much past the blade edge at rest (touches the stalk first)
+PAD_TRAVEL = None                 # a pad can be pushed back flush with the cap face (BLADE_PROTRUDE + PAD_PROUD)
+PAD_K = 1000.0                   # N/m: ~6 N squeeze on a 4 mm stalk at the -10 deg stop (guess, unverified)
+PAD_PRELOAD = 0.001              # m: the spring rests this far past the pad's stop (1 N preload)
+PAD_ARMATURE = 0.01              # kg: keeps the 1000 N/m slide stable at the 2 ms step (design choice)
+# Rubber on stalk, guess (unverified). Torsional 0.002 m = the contact patch's radius on a 3-5 mm stalk:
+# ⚠️ at 0.02 the pads held a 6-8 fruit truss stiffly sticking out 10-17 cm from the jaw (its weight's
+# ~0.07 N.m stayed under 0.02 m x 6 N), so it never hung down and hardly fit any crate (2026-11-03). Real pads
+# on a round stalk let it swing down to hang below the grip, as a truss does in cut-and-hold shears.
+PAD_FRICTION = (1.5, 0.002, 0.0001)
+BLADE_BITS = (8, 1)              # touches the stalk, fruit and scenery (contype 1); not the fingers or the other blade
+PAD_BITS = (16, 1)               # same, and not the other pad
+STEEL_RGBA, PAD_RGBA = (0.78, 0.80, 0.84, 1), (0.85, 0.45, 0.15, 1)
+# ⚠️ Stiff blade contacts. With the finger contacts' solimp (0.95-0.99 over 1 mm) the blades sank 5 mm into a
+# stalk held by the stiffened cut weld and the jaw reached its -10 deg stop with 7-8.5 N on the blades instead of
+# stalling on the stalk (check_truss_cut.py, 2026-11-03; 25-29 N while the truss still swung on a soft knuckle).
+BLADE_SOLIMP = (0.99, 0.999, 0.0002, 0.5, 2)
 PLA_RGBA = (0.92, 0.92, 0.90, 1)   # ⚠️ unverified: real filament colours. The claw camera sees these.
 TPU_RGBA = (0.15, 0.15, 0.15, 1)
 
 # --- cameras ---
-# Birdseye: the printed mast's default pose (greenhouse generator LENS / LENS_TILT_DEG). The mast
-# isn't printed yet, so this is the design pose (unverified).
-BIRDSEYE_POS = (-0.120, 0.200, 0.423)
-BIRDSEYE_TILT_DEG = 20.0
+# Birdseye (K7 2026-10-28, same setup as S.H.E.A.R sim/layout.py): on a mast behind the empty row R0,
+# level, looking straight at the vine row R1 through the gap between R0's crop rail and anchor rail.
+# Centred on the row, ~0.55 m from it: the 72 x 52 deg frame (lens.py) covers ~0.8 m of row and z ~0.08-0.60.
+# It no longer looks over the arm's shoulder down the aisle (the old pose: (-0.120, 0.200, 0.423), 20 deg down,
+# from the printed-mast design). Design pose, unverified until the new mast stands in the greenhouse.
+BIRDSEYE_POS = (0.370, -0.150, 0.340)
+BIRDSEYE_TILT_DEG = 0.0          # + = looking down
+# The mast (S.H.E.A.R layout.py, design guesses): base plate, pole behind the lens, bracket, camera housing.
+# ⚠️ The housing starts MAST_LENS_GAP behind the lens point: randomize.py moves the camera up to +-1 cm, and
+# a camera inside its own housing renders black.
+MAST_POLE_R, MAST_BACK, MAST_LENS_GAP = 0.012, 0.055, 0.012
+MAST_BASE_XYT = (0.11, 0.11, 0.008)
+CAM_BOARD = (0.032, 0.032, 0.020)   # InnoMaker 32 x 32 mm board in its housing: width, height, depth
+LENS_R, LENS_LEN = 0.008, 0.012
 # Lens: both cameras render a wider pinhole image that lens.py bends into the 640x480 frame
 # (⚠️ guessed from the InnoMaker spec until calibrated; sim/cameras.json overrides it).
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
@@ -128,10 +195,10 @@ CLAW_POS_IN_BODY = (0.0, 0.0, 0.03)   # just outside the housing mesh (its z rea
 CLAW_XYAXES = (1, 0, 0, 0, -1, 0)
 
 # --- crate (harvest.env TASK: "...place it in the crate") ---
-# ⚠️ unverified: where the real crate stands. Here: on the table down the aisle, on the row-0 side of
-# the arm, inside reach (centre 0.13 m from the shoulder) and clear of the row-0 anchor rail.
-# Size of a cherry-tomato punnet tray, guess.
-CRATE_CENTRE = (0.50, 0.09)
+# K7 (2026-10-20): on the robot's right. With the base facing R1 that's down the aisle (+x): centred
+# on the aisle, 18 cm from the base; IK puts the grasp point 10 cm above its centre exactly.
+# ⚠️ unverified: the exact spot and size (a cherry-tomato punnet tray, guess).
+CRATE_CENTRE = (0.55, 0.20)
 CRATE_SIZE = (0.12, 0.10, 0.05)    # outer x, y, height
 CRATE_WALL = 0.003
 CRATE_RGBA = "0.20 0.35 0.65 1"
@@ -144,6 +211,12 @@ TRUSS_Z = (0.16, 0.34)           # generator PICK_ZONE z 0.10-0.35, trimmed so f
 TRUSS_GAP_Z = 0.09
 TRUSSES_PER_STEM = (1, 2)
 TRUSS_LEN = (0.06, 0.10)
+# Truss direction from its stem: toward the aisle (1), plus a sideways spread along the row and a
+# droop, as (x, z) components before normalising. Was x +-0.3, z -0.3 fixed; K7 (2026-10-27) asked for
+# fruit in different orientations, so trusses now range from nearly level to hanging steeply
+# (guess from photos, unverified).
+TRUSS_SPREAD_X = (-0.5, 0.5)
+TRUSS_DROOP_Z = (-0.8, -0.1)
 FRUITS_PER_TRUSS = (4, 8)
 # K7 (2026-10-20): 2-3 ripe fruits per scene, all within reach, so the policy has to follow the box
 # instead of going for "the red one". The rest stay green or turning.
@@ -152,6 +225,11 @@ N_RIPE = (2, 3)
 # (harvest/yolo_overlay.py) and a 25 mm fruit is ~23 px here, so a ripe neighbour closer than this
 # could sit inside the box and blur which fruit is meant.
 RIPE_GAP_M = 0.04
+# K7 (2026-10-27): 35 % of scenes have at least two of their ripe fruits on the SAME truss (one vine,
+# several ripe), so the box has to pick between neighbours. The rest put every ripe fruit on its own
+# truss. Before this, 22 % came out same-truss by chance (100 seeds). info["same_truss"] says which a
+# scene really got: a draw that can't be met falls back to the other kind.
+SAME_TRUSS_P = 0.35
 
 
 def _box(name, lo, hi, rgba=PLY_RGBA, collide=True):
@@ -183,14 +261,12 @@ def greenhouse_xml():
         g.append(_box(f"anchor{j}_web", (0, r - T / 2, 0), (HOUSE_L, r + T / 2, ANCHOR_WEB_H)))
         g.append(_box(f"anchor{j}_flange", (0, r - FLANGE_W / 2, ANCHOR_WEB_H), (HOUSE_L, r + FLANGE_W / 2, ANCHOR_WEB_H + T)))
     g.append(_box("ridge", (0, -0.02, apex - 0.055), (HOUSE_L, 0.02, apex - 0.015)))
-    # Camera mast (printed, MAST_BASE x -120 y 151): pole + base plate, cosmetic only.
-    g.append('<geom name="mast_pole" type="cylinder" pos="-0.120 0.151 0.21" size="0.012 0.21" rgba="0.6 0.6 0.6 1" contype="0" conaffinity="0"/>')
-    g.append(_box("mast_base", (-0.175, 0.096, 0), (-0.065, 0.206, 0.008), "0.6 0.6 0.6 1", collide=False))
+    g.append(mast_xml())                             # the birdseye's mast, behind row R0
     return "\n".join(g)
 
 
-def crate_xml():
-    (cx, cy), (sx, sy, h), w = CRATE_CENTRE, CRATE_SIZE, CRATE_WALL
+def crate_xml(centre=CRATE_CENTRE, size=CRATE_SIZE):
+    (cx, cy), (sx, sy, h), w = centre, size, CRATE_WALL
     g = [_box("crate_floor", (cx - sx/2, cy - sy/2, 0), (cx + sx/2, cy + sy/2, w), CRATE_RGBA)]
     g.append(_box("crate_wx0", (cx - sx/2, cy - sy/2, 0), (cx - sx/2 + w, cy + sy/2, h), CRATE_RGBA))
     g.append(_box("crate_wx1", (cx + sx/2 - w, cy - sy/2, 0), (cx + sx/2, cy + sy/2, h), CRATE_RGBA))
@@ -199,16 +275,35 @@ def crate_xml():
     return "\n".join(g)
 
 
-def in_crate(pos):
+def in_crate(pos, centre=CRATE_CENTRE, size=CRATE_SIZE):
     """True when a point (a fruit centre) is inside the crate walls, below the rim."""
-    (cx, cy), (sx, sy, h) = CRATE_CENTRE, CRATE_SIZE
+    (cx, cy), (sx, sy, h) = centre, size
     return abs(pos[0] - cx) < sx / 2 and abs(pos[1] - cy) < sy / 2 and pos[2] < h
 
 
 def _birdseye_xyaxes():
     s, c = np.sin(np.radians(BIRDSEYE_TILT_DEG)), np.cos(np.radians(BIRDSEYE_TILT_DEG))
-    # Looking +x, tilted down: image right = -y, image up = (sin, 0, cos).
-    return f"0 -1 0 {s:.5f} 0 {c:.5f}"
+    # Looking +y (at the row), tilted down by the tilt: image right = +x, image up = (0, sin, cos).
+    return f"1 0 0 0 {s:.5f} {c:.5f}"
+
+
+def mast_xml():
+    """The birdseye's mast: base plate, pole, bracket, camera housing and lens, all behind the lens point."""
+    x, y, z = BIRDSEYE_POS
+    yl = y - MAST_LENS_GAP                       # lens barrel front
+    yb = yl - LENS_LEN - CAM_BOARD[2] / 2        # housing centre
+    yp = y - MAST_BACK                           # pole axis
+    grey, black = "0.6 0.6 0.62 1", "0.12 0.12 0.12 1"
+    bw, bh, bd = CAM_BOARD
+    return "\n".join([
+        _box("mast_base", (x - MAST_BASE_XYT[0] / 2, yp - MAST_BASE_XYT[1] / 2, 0),
+             (x + MAST_BASE_XYT[0] / 2, yp + MAST_BASE_XYT[1] / 2, MAST_BASE_XYT[2]), grey),
+        f'<geom name="mast_pole" type="cylinder" fromto="{x} {yp} {MAST_BASE_XYT[2]} {x} {yp} {z}" '
+        f'size="{MAST_POLE_R}" rgba="{grey}"/>',
+        _box("mast_bracket", (x - 0.010, yp, z - 0.006), (x + 0.010, yb - bd / 2, z + 0.006), grey),
+        _box("mast_cam", (x - bw / 2, yb - bd / 2, z - bh / 2), (x + bw / 2, yb + bd / 2, z + bh / 2), black),
+        f'<geom name="mast_lens" type="cylinder" fromto="{x} {yl - LENS_LEN} {z} {x} {yl} {z}" size="{LENS_R}" '
+        f'rgba="{black}"/>'])
 
 
 def vines_xml(rng):
@@ -237,7 +332,7 @@ def vines_xml(rng):
                     zs.append(z)
                     break
         for k, z in enumerate(zs):
-            d = np.array([rng.uniform(-0.3, 0.3), toward_aisle, -0.3])
+            d = np.array([rng.uniform(*TRUSS_SPREAD_X), toward_aisle, rng.uniform(*TRUSS_DROOP_Z)])
             d = d / np.linalg.norm(d) * rng.uniform(*TRUSS_LEN)
             a = np.array([x, y_stem, z])
             nf = int(rng.integers(FRUITS_PER_TRUSS[0], FRUITS_PER_TRUSS[1] + 1))
@@ -254,7 +349,8 @@ def shoulder_world():
     return np.asarray(ARM_BASE) + R @ SHOULDER_IN_BASE
 
 
-def world_xml(static, tomatoes, eqs):
+def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
+    """scenery=False: just the table (check_grasp.py tests the gripper in free space)."""
     return f"""<mujoco model="blush_greenhouse">
   <compiler angle="radian"/>
   <option timestep="{TIMESTEP}" integrator="implicitfast" cone="{CONE}" impratio="{IMPRATIO}"/>
@@ -263,17 +359,26 @@ def world_xml(static, tomatoes, eqs):
     <headlight diffuse="0.5 0.5 0.5" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <quality shadowsize="2048"/>
   </visual>
+  <asset>
+    <!-- A pale sky behind the greenhouse: the level birdseye sees past the frame, and an empty black
+         background left the YOLO nothing like its training photos (2026-10-28). Colours as S.H.E.A.R (unverified). -->
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.85 0.90 0.95" rgb2="0.55 0.65 0.75" width="256" height="1536"/>
+  </asset>
   <worldbody>
     <light name="top" pos="0.37 0 1.6" dir="0 0 -1" directional="true" diffuse="0.6 0.6 0.6"/>
-    <light name="side" pos="-0.4 0.6 0.9" dir="0.7 -0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
+    <!-- ⚠️ The side light was at (-0.4, 0.6, 0.9) aiming back toward -y. With the birdseye behind row R0
+         facing +y (2026-10-28) that lit the fruit from behind, and the ripeness YOLO picked 0 of 100 layouts.
+         Mirrored to the camera's side of the row. -->
+    <light name="side" pos="-0.4 -0.6 0.9" dir="0.7 0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
-    {greenhouse_xml()}
-    {crate_xml()}
+    {greenhouse_xml() if scenery else ''}
+    {crate_xml(*(crate or ())) if scenery else ''}
     {static}
     {tomatoes}
   </worldbody>
   <equality>{eqs}</equality>
+  <contact>{excludes}</contact>
 </mujoco>"""
 
 
@@ -374,6 +479,46 @@ def _cap(body, part, ch, bits, origin):
     return 8 * np.prod(c["half"]) * ch["ladder"]["density"]
 
 
+def add_cut_hold(s, chain):
+    """Blade + spring pad on each fin-ray tip cap (BLADE_* / PAD_*). Geoms arm/blade_{part}, arm/pad_{part}."""
+    for part in ("fixed", "moving"):
+        c, Fc = chain[part]["ladder"]["cap"], np.array(chain[part]["ladder"]["F_cap"])
+        R = np.array(c["R"], float)
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, R.reshape(-1))
+        o = np.array(c["centre"]) - Fc                  # the cap plate's centre in the cap body
+        s_in = 1.0 if part == "fixed" else -1.0         # cap plate x points at the other finger (fixed) or away
+        face = s_in * c["half"][0]
+        cap = s.body(f"finray_{part}_cap")
+        zc, hz = np.mean(TIP_Z), (TIP_Z[1] - TIP_Z[0]) / 2
+        yb = BLADE_Y[part]
+        g = cap.add_geom(name=f"blade_{part}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                         pos=o + R @ [face + s_in * BLADE_PROTRUDE / 2, np.mean(yb), zc], quat=quat,
+                         size=[BLADE_PROTRUDE / 2, (yb[1] - yb[0]) / 2, hz], rgba=STEEL_RGBA)
+        g.contype, g.conaffinity, g.group = BLADE_BITS[0], BLADE_BITS[1], 2
+        _finger_contact(g)
+        g.friction = (0.3, 0.005, 0.0001)              # steel, guess (unverified)
+        g.solimp = BLADE_SOLIMP
+        rest = BLADE_PROTRUDE + PAD_PROUD              # pad face past the cap face at rest
+        pad = cap.add_body(name=f"pad_{part}_slide", pos=o + R @ [face, np.mean(PAD_Y), zc], quat=quat)
+        j = pad.add_joint(name=f"pad_{part}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[s_in, 0, 0])
+        j.stiffness, j.springref = [PAD_K, 0, 0], PAD_PRELOAD
+        j.damping = [2 * 0.7 * np.sqrt(PAD_K * PAD_ARMATURE), 0, 0]
+        j.armature, j.limited, j.range = PAD_ARMATURE, True, (-(PAD_TRAVEL or rest), 0.0)
+        pg = pad.add_geom(name=f"pad_{part}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=[s_in * (rest - PAD_T / 2), 0, 0],
+                          size=[PAD_T / 2, (PAD_Y[1] - PAD_Y[0]) / 2, hz], mass=0.001, rgba=PAD_RGBA)
+        pg.contype, pg.conaffinity, pg.group = PAD_BITS[0], PAD_BITS[1], 2
+        _finger_contact(pg)
+        pg.friction = PAD_FRICTION
+        for end, zl in (("lo", -hz + PAD_LIP[1] / 2), ("hi", hz - PAD_LIP[1] / 2)):   # the channel's two lips
+            lg = pad.add_geom(name=f"pad_{part}_lip_{end}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                              pos=[s_in * (rest + PAD_LIP[0] / 2), 0, zl],
+                              size=[PAD_LIP[0] / 2, (PAD_Y[1] - PAD_Y[0]) / 2, PAD_LIP[1] / 2], mass=0.0002, rgba=PAD_RGBA)
+            lg.contype, lg.conaffinity, lg.group = PAD_BITS[0], PAD_BITS[1], 2
+            _finger_contact(lg)
+            lg.friction = PAD_FRICTION
+
+
 def _connect(s, body1, body2, anchor):
     e = s.add_equality(name=f"{body1}_pin", type=mujoco.mjtEq.mjEQ_CONNECT, name1=body1, name2=body2,
                        objtype=mujoco.mjtObj.mjOBJ_BODY)
@@ -430,7 +575,7 @@ def _push_test(part, ch, k_flank, F_test, seconds=1.0):
     return F_test / max((p_now - p_mid) @ inward, 1e-9)
 
 
-def arm_spec(gripper_torque=GRIPPER_TORQUE):
+def arm_spec(gripper_torque=GRIPPER_TORQUE, cut_hold=False):
     if not SO101_XML.exists():
         raise FileNotFoundError(f"{SO101_XML} missing: run ./fetch_so101.sh in sim/ first")
     s = mujoco.MjSpec.from_file(str(SO101_XML))
@@ -453,7 +598,12 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE):
             g.contype, g.conaffinity, g.group = 1, 1, 2
             _finger_contact(g)
         else:
-            _finray_ladder(s, b, part, chain[part], finray_stiffness(part, chain[part]))
+            _finray_ladder(s, b, part, chain[part],
+                           finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
+    if cut_hold:
+        if chain is None:
+            raise ValueError("cut_hold needs the bending fin-ray fingers (FINRAY_BENDING)")
+        add_cut_hold(s, chain)
     lo, hi = (np.array(v) / 1000 for v in PALM_BOX_MM)
     palm = s.body("gripper").add_geom(name="palm", type=mujoco.mjtGeom.mjGEOM_BOX, pos=(lo + hi) / 2,
                                       size=(hi - lo) / 2, rgba=(1, 0, 0, 0.3))
@@ -478,12 +628,13 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE):
     return s
 
 
-def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE):
-    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs))
+def compose(static, tomatoes, eqs, arm=True, gripper_torque=GRIPPER_TORQUE, scenery=True, cut_hold=False,
+            excludes="", crate=None):
+    world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery, excludes, crate))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
-        world.attach(arm_spec(gripper_torque), frame=fr, prefix="arm/")
+        world.attach(arm_spec(gripper_torque, cut_hold), frame=fr, prefix="arm/")
     m = world.compile()
     return m, mujoco.MjData(m)
 
@@ -496,22 +647,122 @@ def build(seed=0, arm=True, gripper_torque=GRIPPER_TORQUE):
     rng = np.random.default_rng(seed)
     static, tomatoes, eqs, fruit = vines_xml(rng)
     m, d = compose(static, tomatoes, eqs, arm, gripper_torque)
-    # 2-3 ripe fruits among the reachable ones, kept apart. Colour is set on the model, not in the
-    # XML, the same way re-renders will recolour fruit later.
+    # 2-3 ripe fruits among the reachable ones (the 30 cm sphere, then IK), kept apart. Colour is set
+    # on the model, not in the XML, the same way re-renders will recolour fruit later.
     sh = shoulder_world()
     reach = [k for k, f in enumerate(fruit) if np.linalg.norm(f["pos"] - sh) < REACH_M]
     n_ripe = int(rng.integers(N_RIPE[0], N_RIPE[1] + 1))
-    ripe = []
-    for k in rng.permutation(reach):
-        if len(ripe) == n_ripe:
-            break
-        if all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in ripe):
-            ripe.append(int(k))
+    want_same = bool(rng.random() < SAME_TRUSS_P)
+    order = [int(k) for k in rng.permutation(reach)]
+    ik_ok = {}
+
+    def fits(k, chosen):
+        if not all(np.linalg.norm(fruit[k]["pos"] - fruit[j]["pos"]) >= RIPE_GAP_M for j in chosen):
+            return False
+        if k not in ik_ok:
+            ik_ok[k] = ik_gap(fruit[k]["pos"]) < IK_REACH_TOL_M
+        return ik_ok[k]
+
+    def pick(same):
+        ripe = []
+        if same:                       # a pair on one truss first, trusses in random order
+            trusses = list(dict.fromkeys(fruit[k]["truss"] for k in order))
+            for t in [trusses[i] for i in rng.permutation(len(trusses))]:
+                pair = []
+                for k in (k for k in order if fruit[k]["truss"] == t):
+                    if fits(k, pair):
+                        pair.append(k)
+                    if len(pair) == 2:
+                        break
+                if len(pair) == 2:
+                    ripe = pair
+                    break
+            if not ripe:
+                return None
+        for k in order:
+            if len(ripe) == n_ripe:
+                break
+            if k in ripe or (not same and fruit[k]["truss"] in {fruit[j]["truss"] for j in ripe}):
+                continue
+            if fits(k, ripe):
+                ripe.append(k)
+        return ripe if len(ripe) >= N_RIPE[0] else None
+
+    ripe = pick(want_same) or pick(not want_same) or []
     for k in ripe:
         fruit[k]["ripeness"] = "ripe"
         m.geom_rgba[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, fruit[k]["geom"])] = tm.RIPENESS_RGBA["ripe"]
+    if arm:
+        import arm_map
+        q, u = arm_ids(m)
+        d.qpos[q] = arm_map.FollowerMap().norm_to_rad(START_NORM)
+        d.ctrl[u] = d.qpos[q]
     mujoco.mj_forward(m, d)
-    return m, d, dict(seed=seed, fruit=fruit, ripe=sorted(ripe), reachable=reach)
+    trusses = [fruit[k]["truss"] for k in ripe]
+    return m, d, dict(seed=seed, fruit=fruit, ripe=sorted(ripe), reachable=reach,
+                      same_truss=len(set(trusses)) < len(trusses))
+
+
+class _ArmReach:
+    """IK on the bare arm (no greenhouse), arm base at the origin: how close can the grasp point get?"""
+
+    def __init__(self, n_samples=6000):
+        import arm_map
+        spec = mujoco.MjSpec()
+        spec.attach(arm_spec(), frame=spec.worldbody.add_frame(), prefix="arm/")
+        self.m = spec.compile()
+        self.d = mujoco.MjData(self.m)
+        self.q, _ = arm_ids(self.m)
+        self.dof = [self.m.jnt_dofadr[mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, f"arm/{j}")]
+                    for j in arm_map.JOINTS[:5]]
+        self.G = self.m.body("arm/gripper").id
+        lo, hi = arm_map.FollowerMap().rad_limits()      # the real follower's range, as in the sim
+        self.lo, self.hi = lo[:5], hi[:5]
+        # The grasp point: centred on a 25 mm fruit held at mid-finger (72 mm down), gripper frame.
+        ch = json.loads((FINRAY / "chain.json").read_text())["fixed"]
+        (x0, z0), (x1, z1) = ch["front_line_gripper_mm"]
+        self.point = np.array([(x0 + (x1 - x0) * (-72.0 - z0) / (z1 - z0)) / 1000 + 0.0125,
+                               ch["y_mid_mm"] / 1000, -0.072])
+        rng = np.random.default_rng(0)                   # fixed samples: the same scene for the same seed
+        self.Q = rng.uniform(self.lo, self.hi, (n_samples, 5))
+        self.P = np.array([self._fk(x) for x in self.Q])
+
+    def _fk(self, x):
+        self.d.qpos[self.q[:5]] = x
+        mujoco.mj_kinematics(self.m, self.d)
+        return self.d.xpos[self.G] + self.d.xmat[self.G].reshape(3, 3) @ self.point
+
+    def gap(self, p, starts=4, iters=40):
+        """Distance (m) the grasp point stays from p (arm base frame) at best: damped least squares
+        from the nearest sampled poses, within the joint limits."""
+        best = np.inf
+        for i in np.argsort(np.linalg.norm(self.P - p, axis=1))[:starts]:
+            x = self.Q[i].copy()
+            for _ in range(iters):
+                g = self._fk(x)
+                e = p - g
+                if np.linalg.norm(e) < 1e-4:
+                    break
+                mujoco.mj_comPos(self.m, self.d)
+                jac = np.zeros((3, self.m.nv))
+                mujoco.mj_jac(self.m, self.d, jac, None, g, self.G)
+                J = jac[:, self.dof]
+                x = np.clip(x + J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), e), self.lo, self.hi)
+            best = min(best, float(np.linalg.norm(p - self._fk(x))))
+        return best
+
+
+_ARM_REACH = None
+
+
+def ik_gap(p_world):
+    """How close (m) the arm's grasp point can get to a world point, with the base at ARM_BASE / ARM_YAW_DEG."""
+    global _ARM_REACH
+    if _ARM_REACH is None:
+        _ARM_REACH = _ArmReach()
+    yaw = np.radians(ARM_YAW_DEG)
+    R = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    return _ARM_REACH.gap(R.T @ (np.asarray(p_world, float) - np.asarray(ARM_BASE)))
 
 
 def arm_ids(m):

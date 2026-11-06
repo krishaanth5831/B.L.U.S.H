@@ -133,8 +133,14 @@ def grasp_case(q, height, off_y, radius, threshold, hold_torque, shake=True, off
     z_g = HEIGHTS[height]
     p_g = np.array([flank_x(z_g) + radius + off_x, CHAIN["fixed"]["y_mid_mm"] / 1000 + off_y, z_g])
     centre = d0.xpos[G] + d0.xmat[G].reshape(3, 3) @ p_g
-    anchor, body, eq, info = tm.single_xml("gt", centre, radius, threshold)
-    m, d = scene.compose(anchor, body, eq, arm=True)
+    # The stand-in truss pivots away from the arm, beyond the fingertips: the scene's trusses run from
+    # the row out toward the aisle, and the base faces the row. (Pivoting across the jaw instead, a
+    # geometry no scene truss has, let a 20 mm fruit gripped at the base slide out on the pull.)
+    yaw = np.radians(scene.ARM_YAW_DEG)
+    anchor, body, eq, info = tm.single_xml("gt", centre, radius, threshold, lever_dir=(np.cos(yaw), np.sin(yaw), 0.0))
+    # Free space (no greenhouse, no crate): these cases test the gripper, not the layout. Since the
+    # base faces the row (2026-10-20) the test poses would otherwise reach into R1's rails and posts.
+    m, d = scene.compose(anchor, body, eq, arm=True, scenery=False)
     qidx, uidx = scene.arm_ids(m)
     d.qpos[qidx] = q
     d.ctrl[uidx] = q
@@ -290,7 +296,7 @@ def main():
             d.ctrl[uidx] += np.clip(target - d.ctrl[uidx], -1.5 * scene.TIMESTEP, 1.5 * scene.TIMESTEP)
             mujoco.mj_step(m, d)
             bend = max(bend, float(np.abs(d.qpos[hinges]).max()))
-        d.ctrl[uidx] = fm.norm_to_rad((0, -100, 100, 60, 0, 60))   # folded up, jaw open, clear of everything
+        d.ctrl[uidx] = fm.norm_to_rad(scene.START_NORM[:5] + (60.0,))   # the start pose, jaw open: clear of everything
         for _ in range(int(3 / scene.TIMESTEP)):
             mujoco.mj_step(m, d)
         bad = sum(d.warning[w].number for w in (mujoco.mjtWarning.mjWARN_BADQACC, mujoco.mjtWarning.mjWARN_BADQPOS,

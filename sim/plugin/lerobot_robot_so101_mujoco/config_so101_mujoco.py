@@ -28,3 +28,21 @@ class SO101MujocoConfig(RobotConfig):
     overlay: str = "none"
     # Full sim state per frame for offline re-renders (step 6). None = don't log.
     state_log_dir: str | None = "~/.cache/blush_sim/states"
+    # True (teleop, rollouts): physics runs in its own thread at wall-clock speed, like a real arm.
+    # False (scripted episodes, sim/generate_scripted.py): no thread; every send_action advances the
+    # sim exactly 1/fps, so an episode is deterministic and never time-compressed by a slow frame.
+    realtime: bool = True
+    fps: int = 30                    # realtime=False only: sim time per send_action = 1/fps
+    # Randomise lighting, colours (within ripeness class), camera poses and the physics guesses per
+    # scene, drawn from the scene seed (sim/randomize.py). Off = the nominal scene.
+    domain_rand: bool = False
+    # Sim seconds to let the vines settle (arm held at the start pose) before a scene's first frame.
+    settle_s: float = 0.0
+    # What gets harvested (K7 2026-11-03):
+    #   "fruit"  single cherry tomatoes (sim/scene.py), the stock fin-ray fingers. Everything before 2026-11-03.
+    #   "truss"  whole trusses (sim/truss_scene.py): crowded scenes, rigid fingers with a tip blade + clamp pads;
+    #            the target is a ready truss, its box and cut point (sim/truss_target.py); it's done when the
+    #            whole truss is in the crate.
+    task: str = "fruit"
+    # task="truss" + overlay="yolo": the truss YOLO's weights (sim/yolo_truss/). None = the single-fruit default.
+    yolo_weights: str | None = None

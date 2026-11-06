@@ -107,8 +107,10 @@ def main():
 
     try:
         with mujoco.viewer.launch_passive(m, d) as v:
-            v.cam.lookat[:] = (0.38, 0.28, 0.25)
-            v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.9, 215, -22
+            # From behind the robot, looking at the vines over its shoulder: its left and right are yours
+            # (crate on the right). Through the gap between row 0's rails.
+            v.cam.lookat[:] = (0.42, 0.30, 0.18)
+            v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.75, 90, -35
             t0_wall, t0_sim = time.time(), d.time
             while v.is_running():
                 if leader:

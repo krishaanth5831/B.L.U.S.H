@@ -5,7 +5,7 @@
   python eval_yolo_recall.py --show           + a window per layout: the recorded YOLO view + reach mask
   python eval_yolo_recall.py --n 200 --t 0.4  more layouts, another selection threshold
 
-For each layout it renders the start frame (arm folded out of the way, like the real rest pose),
+For each layout it renders the start frame (arm in scene.START_NORM, tucked out of the way),
 runs the YOLO through the same rule the plugin uses (sim/target.py) and scores it against the
 sim's true boxes of the 2-3 ripe fruits:
   picked right     the rule selects one of the ripe fruits (the plugin then draws YOLO's box)
@@ -23,7 +23,7 @@ import os
 import numpy as np
 
 SIZE_BUCKETS = ((0, 10), (10, 20), (20, 40), (40, 999))   # width of the most visible ripe fruit, px at 640x480
-REST_NORM = (0, -100, 100, 60, 0, 0)   # folded arm (normalised units): out of the birdseye's way
+
 
 
 def main():
@@ -37,7 +37,6 @@ def main():
 
     import mujoco
 
-    import arm_map
     import scene
     import target as tg
     from cameras import SimCameras
@@ -51,7 +50,6 @@ def main():
     names = yolo.ready()
     print(f"weights {yolo.weights.name}, t_ripe {t_ripe} (⚠️ unverified), match: IoU >= {tg.MATCH_IOU} or centre inside")
     print(f"birdseye lens: {LENSES['birdseye'].describe()}")
-    fm = arm_map.FollowerMap()
     rows, show, n_ripe = [], a.show, []
     for seed in range(a.n):
         m, d, info = scene.build(seed)
@@ -59,8 +57,7 @@ def main():
             continue
         n_ripe.append(len(info["ripe"]))
         q, _ = scene.arm_ids(m)
-        d.qpos[q] = fm.norm_to_rad(REST_NORM)
-        mujoco.mj_forward(m, d)
+        mujoco.mj_forward(m, d)                  # scene.build put the arm in scene.START_NORM
         cams = SimCameras(m)
         rgb = cams.rgb(d, "birdseye")
         ids = cams.ids(d, "birdseye")
