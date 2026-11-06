@@ -81,20 +81,22 @@ case "${1:-}" in
     # 10k, picked by graded rollouts, not by loss (Dream Machines saw success plateau ~30k and swing after).
     # ⚠️ Needs the local lerobot patch in smolvlm_with_expert.py (S.H.E.A.R, 2026-11-06): stock train_expert_only
     # froze the vision encoder too, so freeze_vision_encoder=false did nothing.
-    # Batch 2 x 4 accumulation = the effective batch 8 of the v1/v2 runs (the 6 GB GPU doesn't fit 8 with the vision
-    # encoder training; BATCH= / ACCUM= override).
+    # Batch 1 x 8 accumulation = the effective batch 8 of the v1/v2 runs. ⚠️ Measured on the 6 GB laptop GPU (2026-11-06):
+    # batch 2 runs out of memory at the FIRST optimizer update (Adam's state for 186M fp32 weights; it shows up as an
+    # NVML assert in the CUDA allocator, at micro-step ACCUM, with accumulation 4 and 8 alike). Batch 1 fits, ~3.3
+    # micro-steps/s. A 16 GB GPU (Colab T4, S.H.E.A.R) takes BATCH=8. BATCH= / ACCUM= override.
     DS=${2:-$HF_USER/blush_sim_truss_v2}
     V3=(--policy.path=lerobot/smolvla_base --dataset.repo_id="$DS" --policy.device=cuda --policy.push_to_hub=false
         --policy.freeze_vision_encoder=false
         --rename_map='{"observation.images.base": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}'
-        --batch_size=${BATCH:-2} --accelerator.gradient_accumulation.steps=${ACCUM:-4} --wandb.enable=false)
+        --batch_size=${BATCH:-1} --accelerator.gradient_accumulation.steps=${ACCUM:-8} --wandb.enable=false)
     if [ "$1" = smolvla-truss-v3-smoke ]; then
       lerobot-train "${V3[@]}" --steps=20 --save_freq=1000 --log_freq=5 --num_workers=4 \
         --output_dir=$OUT/smolvla_truss_v3_smoke --job_name=smolvla_truss_v3_smoke
     else
       # ⚠️ lerobot's --steps counts micro-batches, but the LR scheduler steps once per optimizer update (every ACCUM
       # micro-batches, lerobot_train.py): decay over steps / ACCUM or the LR never comes down (2026-11-06)
-      lerobot-train "${V3[@]}" --policy.scheduler_decay_steps=$(( ${STEPS:-100000} / ${ACCUM:-4} )) \
+      lerobot-train "${V3[@]}" --policy.scheduler_decay_steps=$(( ${STEPS:-100000} / ${ACCUM:-8} )) \
         --steps=${STEPS:-100000} --save_freq=10000 \
         --log_freq=100 --num_workers=8 --output_dir=$OUT/smolvla_truss_v3${RUN_SUFFIX:-} --job_name=smolvla_truss_v3
     fi ;;
