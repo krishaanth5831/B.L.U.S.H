@@ -5,6 +5,7 @@
 #   sim/scripts/train_sim.sh act-box [ds]    act-laptop + the box as numbers + temporal ensembling (v1_box)
 #   sim/scripts/train_sim.sh smolvla-truss [ds] SmolVLA + LoRA on the truss episodes, laptop GPU (20k steps)
 #   sim/scripts/train_sim.sh smolvla-truss-expert [ds] SmolVLA, whole action expert trained, 60k steps (laptop)
+#   sim/scripts/train_sim.sh smolvla-truss-expert-v2 [ds] the same on the 300 episodes (200 scripted + 100 DAgger)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -63,6 +64,16 @@ case "${1:-}" in
       --rename_map='{"observation.images.birdseye": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}' \
       --batch_size=${BATCH:-8} --steps=60000 --save_freq=5000 --log_freq=100 --num_workers=8 \
       --output_dir=$OUT/smolvla_truss_expert_v1${RUN_SUFFIX:-} --job_name=smolvla_truss_expert_v1 --wandb.enable=false ;;
+  smolvla-truss-expert-v2)
+    # The same recipe on the dataset after DAgger: the 200 scripted episodes + 100 where smolvla_truss_expert_v1
+    # drove until it veered off and the scripted expert took over (sim/dagger_truss.py, 2026-11-05/06; K7: "retrain
+    # smolvla on all 300 episodes with 60k steps"). Trained from smolvla_base again, not from v1 (one clean run).
+    DS=${2:-$HF_USER/blush_sim_truss_v1}
+    lerobot-train --policy.path=lerobot/smolvla_base --dataset.repo_id="$DS" --policy.device=cuda \
+      --policy.push_to_hub=false --policy.scheduler_decay_steps=60000 \
+      --rename_map='{"observation.images.birdseye": "observation.images.camera1", "observation.images.claw": "observation.images.camera2"}' \
+      --batch_size=${BATCH:-8} --steps=60000 --save_freq=5000 --log_freq=100 --num_workers=8 \
+      --output_dir=$OUT/smolvla_truss_expert_v2${RUN_SUFFIX:-} --job_name=smolvla_truss_expert_v2 --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \
