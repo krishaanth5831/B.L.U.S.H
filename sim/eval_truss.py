@@ -45,14 +45,17 @@ AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a lat
 CAMERAS = ("birdseye", "claw")
 
 
-def load_policy(path, device, ds_meta):
-    """Plain checkpoints and PEFT ones (LoRA adapter on a base policy, e.g. SmolVLA) alike, via make_policy."""
+def load_policy(path, device, ds_meta, n_action_steps=None):
+    """Plain checkpoints and PEFT ones (LoRA adapter on a base policy, e.g. SmolVLA) alike, via make_policy.
+    n_action_steps: how many actions of each predicted chunk to play before predicting again (None = as trained)."""
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies import make_pre_post_processors
     from lerobot.policies.factory import make_policy
     cfg = PreTrainedConfig.from_pretrained(path)
     cfg.pretrained_path = str(path)
     cfg.device = str(device)
+    if n_action_steps is not None:
+        cfg.n_action_steps = n_action_steps
     rename = None
     train_cfg = path / "train_config.json"
     if train_cfg.exists():
@@ -80,6 +83,10 @@ def main():
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame, no YOLO overlay")
     ap.add_argument("--headless", action="store_true", help="no windows (implies --fast): just the graded results")
+    # ⚠️ SmolVLA trains with chunk_size = n_action_steps = 50: it plays 50 actions (1.7 s) blind before looking again.
+    # Fewer here re-plans more often without retraining (K7 2026-11-06, v2 fumbled at the stalk).
+    ap.add_argument("--n-action-steps", type=int, default=None,
+                    help="actions played per predicted chunk before predicting again (default: as trained)")
     a = ap.parse_args()
     a.fast = a.fast or a.headless
     policy_path = a.policy.resolve()
@@ -101,10 +108,22 @@ def main():
     obs_feats = {k: v for k, v in features.items() if k != OBS_ENV_STATE}
     _, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy, pre, post, pcfg = load_policy(policy_path, device, meta)
+    policy, pre, post, pcfg = load_policy(policy_path, device, meta, a.n_action_steps)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
+    # Count the policy's real predictions per scene, so an ignored n_action_steps override shows up (frames/50 vs /10)
+    # ⚠️ SmolVLA's select_action refills its queue through _get_action_chunk, not predict_action_chunk
+    calls = {"n": 0}
+    refill = next((m for m in ("_get_action_chunk", "predict_action_chunk") if hasattr(policy, m)), None)
+    if refill is not None:
+        _chunk = getattr(policy, refill)
+
+        def counted(*args, **kw):
+            calls["n"] += 1
+            return _chunk(*args, **kw)
+        setattr(policy, refill, counted)
+    n_steps = getattr(policy.config, "n_action_steps", None)
     print(f"policy {policy_path} ({pcfg.type}{', LoRA' if getattr(pcfg, 'use_peft', False) else ''}) on {device}; "
-          f"task {gt.TASK!r}; box + cut point as numbers: {wants_env}", flush=True)
+          f"task {gt.TASK!r}; box + cut point as numbers: {wants_env}; n_action_steps {n_steps}", flush=True)
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
@@ -116,7 +135,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     name = policy_path.parent.name if policy_path.name == "pretrained_model" else policy_path.name
     run = policy_path.parents[2].name if policy_path.name == "pretrained_model" else ""
-    log_path = out_dir / f"{run}_{name}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+    steps_tag = "" if a.n_action_steps is None else f"_nas{a.n_action_steps}"
+    log_path = out_dir / f"{run}_{name}{steps_tag}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
     results, seed, quit_ = [], a.seed_start - 1, False
     try:
@@ -134,6 +154,7 @@ def main():
                   f"stalk {t_info['r'] * 2000:.1f} mm), box from {robot._box_info['source']}", flush=True)
             env = robot.env_state()
             policy.reset()
+            calls["n"], frames = 0, 0
             watch = gt.Watch(robot)
             t0, t_crate, gave_up = robot.d.time, None, False
             while robot.d.time - t0 < EPISODE_S:
@@ -145,6 +166,7 @@ def main():
                     x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
                     act = post(policy.select_action(pre(x)))
                 robot.send_action(make_robot_action(act, features))
+                frames += 1
                 obs = robot.get_observation()
                 watch.step()
                 t = robot.d.time - t0
@@ -172,7 +194,7 @@ def main():
                        in_crate=in_crate, wrong_cut=wrong, fruit_off=off,
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
-                       gave_up=gave_up)
+                       gave_up=gave_up, n_action_steps=n_steps, frames=frames, predictions=calls["n"])
             results.append(rec)
             log.write(json.dumps(rec) + "\n"); log.flush()
             verdict = ("✅ success" if ok else
@@ -180,14 +202,15 @@ def main():
                        "❌ never cut the target" if not cut else
                        "❌ cut, but not (all) in the crate" if not in_crate else
                        f"❌ in the crate, but {len(off)} fruit came off")
-            print(f"  {verdict}  (neighbours moved {watch.max * 1000:.0f} mm)   "
+            print(f"  {verdict}  (neighbours moved {watch.max * 1000:.0f} mm, {calls['n']} predictions in {frames} "
+                  f"frames)   "
                   f"[{sum(r['success'] for r in results)}/{len(results)} so far]", flush=True)
     finally:
         robot.disconnect()
         cv2.destroyAllWindows()
         if results:
             s = sum(r["success"] for r in results)
-            summary = dict(summary=True, policy=str(policy_path), scenes=len(results), success=s,
+            summary = dict(summary=True, policy=str(policy_path), n_action_steps=n_steps, scenes=len(results), success=s,
                            cut=sum(r["cut"] for r in results), in_crate=sum(r["in_crate"] for r in results),
                            seed_start=a.seed_start)
             log.write(json.dumps(summary) + "\n")
