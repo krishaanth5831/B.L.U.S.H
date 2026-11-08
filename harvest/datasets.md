@@ -14,15 +14,17 @@ Scripted by the sim's expert, not teleoperated. Same robot_type (`so_follower`),
 
 | Repo | Date | Episodes | Cameras | Made with | Notes |
 |---|---|---|---|---|---|
-| `krish5831/blush_sim_truss_v1` | 2026-11-03, DAgger 11-05/06 | 300 | birdseye + claw | `generate_truss.py --episodes 200 --seed-start 210000`, then `dagger_truss.py` (100, seeds 7000000+) | Whole-truss harvesting. `observation.environment_state` = target box + cut point. Kept 200 of 513 scripted attempts (`run_v1.log`) |
-| `krish5831/blush_sim_truss_v2` | 2026-11-06 | 200 | base + claw | `generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 --hold-share 0.10 --balance --seed-start 7600000` | Rig "base". 20 stay-home episodes, 25 % miss + recovery. Private on the Hub. What `train_sim.sh act-truss` trains on |
+| `krish5831/blush_sim_truss_v2` | 2026-11-06 | 200 | base + claw | `generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 --hold-share 0.10 --balance --seed-start 7600000` | Whole-truss harvesting, rig "base". 135,834 frames. `observation.environment_state` = target box + cut point. 20 stay-home episodes, 25 % miss + recovery. Private on the Hub. What `train_sim.sh act-truss` trains on |
 
 Watch an episode (a window per camera): `lerobot-dataset-viz --repo-id krish5831/blush_sim_truss_v2 --episode-index 0`
 
-Deleted (single-fruit picking, replaced by trusses): `blush_sim_scripted_v0` (2026-10-28),
-`blush_sim_scripted_v1` (200 episodes, local + Hub, 2026-11-03); its copy
-`blush_sim_scripted_v1_box` is gone from the local cache too.
-`train_sim.sh act-laptop` / `act-box` still default to those names.
+The next dataset: `generate_truss.py` with no `--repo-id` writes `krish5831/blush_sim_truss_v3` (rig "base").
+
+Deleted:
+- 2026-11-08: `blush_sim_truss_v1` (birdseye + claw, 200 scripted + 100 DAgger, local + Hub), its backup,
+  `blush_sim_truss_v1_pilot`, `blush_sim_truss_v2_pilot`.
+- Single-fruit picking, replaced by trusses: `blush_sim_scripted_v0` (2026-10-28), `blush_sim_scripted_v1`
+  (200 episodes, local + Hub, 2026-11-03) and its local copy `blush_sim_scripted_v1_box`.
 
 ## Real demonstration datasets
 
@@ -37,6 +39,10 @@ Deleted (single-fruit picking, replaced by trusses): `blush_sim_scripted_v0` (20
 
 Sim policies train into `outputs/train/<run>/` (local, gitignored; `sim/scripts/train_sim.sh`
 names the run). Add a row here when one is pushed or evaluated with `sim/eval_truss.py`.
+
+None right now. Every earlier B.L.U.S.H policy (single-fruit ACT runs, SmolVLA LoRA / expert v1 / v2, and
+`act_truss_v1`, stopped before its first checkpoint) was deleted locally and on the Hub on 2026-11-08. Next:
+`sim/scripts/train_sim.sh act-truss` on `blush_sim_truss_v2`.
 
 | Hub repo | Type | Trained on | Steps | Where trained | Eval result (`plan/eval_trials.csv`) |
 |---|---|---|---|---|---|
