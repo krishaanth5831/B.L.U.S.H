@@ -1,4 +1,4 @@
-"""The sim's birdseye + claw cameras, rendered through the lens model (lens.py).
+"""The sim's cameras (birdseye, base, claw), rendered through the lens model (lens.py).
 
     cams = SimCameras(m)                      # ⚠️ one per model AND per thread: a MuJoCo renderer is
     rgb = cams.rgb(d, "birdseye")             #    bound to the model and to the GL context's thread
@@ -10,7 +10,6 @@ import numpy as np
 
 from lens import LENSES
 
-CAMERAS = ("birdseye", "claw")                         # ⚠️ same names + order as harvest/scripts/common.sh
 CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw", "base": "base"}
 # What the policy sees, per rig (SO101MujocoConfig.rig). "birdseye": the mast behind row R0, every dataset up to
 # blush_sim_truss_v1. "base" (K7 2026-11-06): a camera on a bracket off the arm's base, low and to its left, looking

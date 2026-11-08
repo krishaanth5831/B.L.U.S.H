@@ -7,6 +7,7 @@
 #   sim/scripts/train_sim.sh smolvla-truss-expert [ds] SmolVLA, whole action expert trained, 60k steps (laptop)
 #   sim/scripts/train_sim.sh smolvla-truss-expert-v2 [ds] the same on the 300 episodes (200 scripted + 100 DAgger)
 #   sim/scripts/train_sim.sh smolvla-truss-v3 [ds]  rig "base": vision encoder + action expert, 100k steps (-smoke: 20)
+#   sim/scripts/train_sim.sh act-truss [ds]   ACT + box numbers + temporal ensembling on the rig "base" truss episodes (100k)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -100,6 +101,16 @@ case "${1:-}" in
         --steps=${STEPS:-100000} --save_freq=10000 \
         --log_freq=100 --num_workers=8 --output_dir=$OUT/smolvla_truss_v3${RUN_SUFFIX:-} --job_name=smolvla_truss_v3
     fi ;;
+  act-truss)
+    # ACT on the rig "base" truss episodes (K7 2026-11-08: "train this with act policy... we will not be using smolvla
+    # this time"). Same recipe as act-box, the best ACT so far: base + claw cameras, the target box + cut point as
+    # numbers (observation.environment_state, read by ACT automatically) and temporal ensembling 0.01. Batch 8,
+    # 100k steps, a checkpoint every 10k (pick by graded rollouts, not loss).
+    DS=${2:-$HF_USER/blush_sim_truss_v2}
+    lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
+      --policy.push_to_hub=false --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1 \
+      --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=10000 --log_freq=50 --num_workers=8 \
+      --output_dir=$OUT/act_truss_v1${RUN_SUFFIX:-} --job_name=act_truss_v1 --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \

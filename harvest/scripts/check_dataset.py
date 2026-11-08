@@ -27,6 +27,7 @@ ok = True
 if d.num_episodes < MIN_EPISODES:
     print(f"⚠️ only {d.num_episodes} episodes (< {MIN_EPISODES})"); ok = False
 if (lo < -NORM_LIMIT).any() or (hi > NORM_LIMIT).any():
-    print("⚠️ state outside +-100: this looks like DEGREES. Recorded with use_degrees=true? Don't train on it."); ok = False
+    print("⚠️ state outside +-100: this looks like DEGREES. Recorded with use_degrees=true? Don't train on it.")
+    ok = False
 print("OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

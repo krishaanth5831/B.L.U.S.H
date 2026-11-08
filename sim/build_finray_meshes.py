@@ -98,7 +98,6 @@ def ladder_geometry(name):
 
 
 def main():
-    import trimesh
     OUT.mkdir(parents=True, exist_ok=True)
     parts = fg.build()
     to_jaw = np.linalg.inv(fg.JOINT)          # gripper_link (q = 0) -> moving jaw link
@@ -116,7 +115,8 @@ def main():
     chain = {}
     for side, T in (("fixed", np.eye(4)), ("moving", to_jaw)):
         R, t = T[:3, :3], T[:3, 3]
-        to_body = lambda p: (R @ np.asarray(p, float) + t) / 1000.0   # noqa: E731  mm gripper frame -> m jaw frame
+        # mm gripper frame -> m jaw frame. Defaults bind the loop variables (B023); it's only called in this iteration
+        to_body = lambda p, R=R, t=t: (R @ np.asarray(p, float) + t) / 1000.0   # noqa: E731
         f = fg.FINGERS[side]
         z0 = f["z_cut"] - fg.BLOCK
         base, fin = split(to_manifold(parts[side]["finger"]), np.array([0.0, 0.0, z0]), np.array([0.0, 0.0, 1.0]))
@@ -126,7 +126,8 @@ def main():
         m.apply_scale(0.001)
         m.export(OUT / f"finger_{side}_base.stl")
         lad = ladder_geometry(side)
-        p3 = lambda p: to_body([p[0], lad["y_mid"], p[1]]).tolist()   # noqa: E731
+        # (x, z) in the finger plane -> 3D jaw frame; defaults as above
+        p3 = lambda p, to_body=to_body, lad=lad: to_body([p[0], lad["y_mid"], p[1]]).tolist()   # noqa: E731
         lo = np.array([lad["cap_lo"][0], lad["y_mid"] - fg.W / 2, lad["cap_lo"][1]])
         hi = np.array([lad["cap_hi"][0], lad["y_mid"] + fg.W / 2, lad["cap_hi"][1]])
         ladder = dict(F=[p3(p) for p in lad["F"]], B=[p3(p) for p in lad["B"]], F_cap=p3(lad["F_cap"]),
@@ -135,7 +136,8 @@ def main():
                       flank_t=fg.FLANK / 1000, rib_t=fg.RIB / 1000, width=fg.W / 1000, density=TPU_DENSITY)
         chain[side] = dict(base=f"finger_{side}_base.stl", axis=(R @ np.array([0.0, 1.0, 0.0])).tolist(), ladder=ladder,
                            front_line_gripper_mm=[[f["front_base"], z0], list(f["front_tip"])], y_mid_mm=f["y_mid"])
-        print(f"ladder {side}: {lad['n']} ribs, block {base.volume() / 1000:.2f} cm3, fin ray {fin.volume() / 1000:.2f} cm3")
+        print(f"ladder {side}: {lad['n']} ribs, block {base.volume() / 1000:.2f} cm3, "
+              f"fin ray {fin.volume() / 1000:.2f} cm3")
     (OUT / "chain.json").write_text(json.dumps(chain, indent=1))
     print("chain.json written")
 

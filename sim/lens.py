@@ -20,7 +20,8 @@ import pathlib
 import numpy as np
 
 HERE = pathlib.Path(__file__).resolve().parent
-MEASURED = HERE / "cameras.json"   # {"birdseye": {"K": 3x3, "D": [k1..k4], "size": [w, h], "source": "..."}, "claw": ...}
+# {"birdseye": {"K": 3x3, "D": [k1..k4], "size": [w, h], "source": "..."}, "claw": ..., "base": ... (optional)}
+MEASURED = HERE / "cameras.json"
 W, H = 640, 480                    # config/hardware.env CAM_W x CAM_H
 
 # --- the guess, until a checkerboard calibration replaces it ---
@@ -71,7 +72,8 @@ class Lens:
         self.map_x = (self.f_pin * x + self.pin_w / 2 - 0.5).astype(np.float32)
         self.map_y = (self.f_pin * y + self.pin_h / 2 - 0.5).astype(np.float32)
         self.fov_deg = {k: float(np.degrees(2 * self.theta(r))) for k, r in
-                        (("h", self.w / 2 / fx), ("v", self.h / 2 / fy), ("d", np.hypot(self.w / 2 / fx, self.h / 2 / fy)))}
+                        (("h", self.w / 2 / fx), ("v", self.h / 2 / fy),
+                         ("d", np.hypot(self.w / 2 / fx, self.h / 2 / fy)))}
 
     def _poly(self, th):
         t2 = th * th

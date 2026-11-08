@@ -1,8 +1,8 @@
 """The scripted picker: plans one pick-and-place for the scene's target fruit, then plays it frame by frame.
 
-    plan = Planner(robot).plan(rng, twist=False, near_miss=False)   # after the scene's first frame
+    plan = Planner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng)   # after the scene's first frame
     while not plan.done:
-        robot.send_action(plan.act(robot))
+        robot.send_action(plan.act(robot._present_norm()))
 
 Replaces the person on the leader arm for scripted episodes (K7, 2026-10-27). The motion, start to end:
 hold at the start pose → swing to a pre-grasp point in front of the fruit (jaw opening on the way) →
@@ -18,6 +18,10 @@ no clean approach makes the plan fail, and the generator logs and skips that sce
 Actions are what a leader would send: the commanded joint targets in use_degrees=false units. During the
 approach and the grasp the picker corrects the servo sag the way a person does by eye: an integral term
 on the joint error (SAG_KI), so the fingers end up where IK put them and not a few mm low.
+
+Single-fruit task (task="fruit", generate_scripted.py). The whole-truss expert (truss_expert.py, truss_ik.py)
+builds on this file's ArmIK / arm_ik, Plan, min_jerk, FPS and timing constants (CLOSE_NORM, JOINT_PEAK_NORM_S,
+CART_PEAK_M_S, SPEED, HOLD_START_S, HOLD_END_S): change those and the truss episodes change too.
 """
 import copy
 import json
@@ -51,7 +55,8 @@ APPROACH_STEPS = 12                # IK points along the straight approach / pul
 # (+10..+70). So each target's reachable pitches are scanned first (PITCH_SCAN_DEG, jaw level) and the
 # pitch is drawn among them. Fingers pointing up more than 25 deg is left out (reaching under the fruit).
 PITCH_SCAN_DEG = (-25.0, 70.0, 5.0)
-JAW_TILT_DEG = 25.0                # +- wrist roll from jaw-level (advisor, 2026-10-27: more rams a finger into the stem)
+# +- wrist roll from jaw-level (advisor, 2026-10-27: more rams a finger into the stem)
+JAW_TILT_DEG = 25.0
 CANDIDATES = 40                    # approach (pitch, tilt, depth, open) draws tried per scene, random order
 FEASIBLE_ENOUGH = 6                # stop drawing once this many full plans work, then pick among them
 # Jaw opening while approaching, normalised 0..100 (START_NORM has 50). Smallest one that clears the fruit.
@@ -451,12 +456,14 @@ class Planner:
             q_pre = self.q6(leg["xp"], leg["open"])
             p_so = self.c - (leg["pre"] + STANDOFF_M) * leg["v"] + np.array([0, 0, 0.02])
             xs = self.ik.solve(p_so, leg["pitch"], leg["tilt"], leg["point"], x0=leg["xp"])
-            via = self.route(q_start, q_pre, last=None if xs is None else self.q6(xs, leg["open"]))  # start -> pre-grasp
+            # start -> pre-grasp
+            via = self.route(q_start, q_pre, last=None if xs is None else self.q6(xs, leg["open"]))
             if via is None:
                 tried.append("start -> pre-grasp blocked")
                 continue
             # the closing jaw sweeps the moving finger through the neighbours too
-            closing = [self.q6(leg["xg"], leg["open"] + (CLOSE_NORM[0] - leg["open"]) * u) for u in np.linspace(0, 1, 8)]
+            closing = [self.q6(leg["xg"], leg["open"] + (CLOSE_NORM[0] - leg["open"]) * u)
+                       for u in np.linspace(0, 1, 8)]
             h, press = self.sweep.path_press(closing, allow={self.tgeom})
             if h or press > CLOSE_PRESS_M * strict:
                 tried.append("closing jaw pushes a neighbour")
@@ -655,7 +662,8 @@ class Planner:
                     approach_pitch_deg=round(leg["pitch"], 1), jaw_tilt_deg=round(leg["tilt"], 1),
                     grasp_depth_mm=round(leg["depth"] * 1000, 1), pregrasp_mm=round(leg["pre"] * 1000, 1),
                     approach_blend_deg=leg["blend"],
-                    open_norm=g_open, close_norm=round(close, 2), tucks=[len(via), len(rest["to_crate"]), len(rest["back"])],
+                    open_norm=g_open, close_norm=round(close, 2),
+                    tucks=[len(via), len(rest["to_crate"]), len(rest["back"])],
                     detach="twist+pull" if twist else "pull", twist_deg=round(rest["roll"], 1),
                     pull_mm=round(rest["pull"] * 1000, 1), near_miss=miss is not None,
                     near_miss_off_mm=None if miss is None else round(miss["off"] * 1000, 1),

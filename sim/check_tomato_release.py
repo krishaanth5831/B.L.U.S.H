@@ -7,6 +7,8 @@
   python check_tomato_release.py              headless checks, PASS/FAIL per check, exit 1 on a FAIL
 
 Writes nothing. Run in the lerobot env (it has mujoco).
+Still tests what the truss task runs on (tomato.Detacher), but on tomato.truss_xml's single-fruit trusses,
+not truss.truss_xml's cuttable ones.
 """
 import argparse
 import os
@@ -17,7 +19,7 @@ import numpy as np
 
 import tomato as tm
 
-TIMESTEP = 0.002   # 500 Hz, same as the Vinea FR5 sim (unverified for the SO-101 scene yet)
+TIMESTEP = 0.002   # 500 Hz, = scene.TIMESTEP (same as the Vinea FR5 sim); the module's scene() shadows `scene`
 G = 9.81
 
 
@@ -124,7 +126,8 @@ def run_checks():
         d.xfrc_applied[b, :3] = (3.0, 0, 0) if k < spike_steps else (0, 0, 0)
         mujoco.mj_step(m, d); det.step()
     report(np.isnan(det.detached_at[0]),
-           f"a {spike_steps*TIMESTEP*1000:.0f} ms 3 N spike (hold {det.hold_steps*TIMESTEP*1000:.0f} ms) does not pluck")
+           f"a {spike_steps*TIMESTEP*1000:.0f} ms 3 N spike (hold {det.hold_steps*TIMESTEP*1000:.0f} ms) "
+           "does not pluck")
 
     # 4. Neighbours: plucking one tomato off a truss (asked for 6) leaves the others on.
     m, d, fruit = scene(n=6, seed=1, thresholds=[1.0] * 6)

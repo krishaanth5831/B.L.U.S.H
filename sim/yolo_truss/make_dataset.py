@@ -42,8 +42,8 @@ from cameras import SimCameras  # noqa: E402
 OUT = pathlib.Path.home() / ".cache" / "blush_sim" / "yolo_truss"
 # Disjoint seed ranges per split (and far from the episode seeds, which start at 0 and 1.5e9 for tests).
 SEED_BASE = {"train": 3_000_000, "val": 3_100_000, "test": 3_200_000}
-FRAMES_PER_SCENE = 2
-SETTLE_S = 1.0
+FRAMES_PER_SCENE = 2             # frames per scene, arm posed differently (design choice)
+SETTLE_S = 1.0                   # as the episodes' settle_s
 JITTER_NORM = 12.0               # +- start-pose jitter per arm joint, normalised units (design choice)
 REACH_P = 0.5                    # share of frames with the arm at a truss's cut pose instead
 
@@ -88,7 +88,7 @@ def main():
             seed = SEED_BASE[split] + i
             m, d, info = ts.build(seed)
             randomize.apply(m, seed, info["fruit"])
-            qidx, uidx = scene.arm_ids(m)
+            qidx, _ = scene.arm_ids(m)
             for _ in range(int(SETTLE_S / m.opt.timestep)):
                 mujoco.mj_step(m, d)
             cams = SimCameras(m)

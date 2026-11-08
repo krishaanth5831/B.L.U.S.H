@@ -30,7 +30,7 @@ import numpy as np
 
 import arm_map
 import scene
-import target  # noqa: F401  (puts the repo root on sys.path for harvest/)
+import target  # also puts the repo root on sys.path for harvest/ (keep it before that import)
 import tomato as tm
 from cameras import SimCameras
 from harvest import yolo_overlay as ov
@@ -82,7 +82,8 @@ def main():
     d.ctrl[uidx] = d.qpos[qidx]
     tgt, picked, by_yolo = None, False, False   # picked on the first camera frame, like the plugin does
     print(f"seed {a.seed}: {len(info['fruit'])} tomatoes, ripe: " +
-          ", ".join(f"{info['fruit'][k]['tomato']} (breaks at {info['fruit'][k]['threshold']:.2f} N)" for k in info["ripe"]))
+          ", ".join(f"{info['fruit'][k]['tomato']} (breaks at {info['fruit'][k]['threshold']:.2f} N)"
+                    for k in info["ripe"]))
     print(f"follower calibration {fm.path.name} sha256 {fm.sha256[:12]}")
 
     leader = connect_leader() if a.leader else None

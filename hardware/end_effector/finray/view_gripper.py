@@ -53,7 +53,8 @@ def main():
         for m, c, al in items:
             mm = m.copy(); mm.apply_transform(Tq)
             moving.append(ax.add_collection3d(collection(mm, c, al)))
-        ax.set_title(f"SO-101 fin-ray gripper, jaw q = {q:.0f} deg  (closed limit {fg.Q_LIMITS_DEG[0]:.0f}, open {fg.Q_LIMITS_DEG[1]:.0f})")
+        ax.set_title(f"SO-101 fin-ray gripper, jaw q = {q:.0f} deg  "
+                     f"(closed limit {fg.Q_LIMITS_DEG[0]:.0f}, open {fg.Q_LIMITS_DEG[1]:.0f})")
         fig.canvas.draw_idle()
 
     s = Slider(fig.add_axes([0.15, 0.03, 0.7, 0.03]), "jaw q (deg)", *fg.Q_LIMITS_DEG, valinit=0.0)

@@ -14,6 +14,8 @@ off-centre across the 18 mm finger x 20 / 25 / 30 mm fruit. K7 saw fruit slip ou
 (2026-10-20), which the old single mid-finger check never caught.
 
 Writes nothing. Run in the lerobot env.
+Single-fruit (stock fin-ray fingers, tomato.single_xml). check_truss_cut.py reuses find_pose, open_viewer,
+close_viewer, JOINT_IDX and SHAKE / SHAKE_S from here.
 """
 import argparse
 import itertools
@@ -38,7 +40,8 @@ SHAKE_S = 2.0                      # per joint
 # 25 mm fruit. (Set at 6 mm first, a guess; the only cases above it are a 30 mm fruit gripped hard
 # against the palm, which settles 6.1-6.4 mm out toward mid-finger and stays. A fruit that slips out moves 100+ mm.)
 DRIFT_OK_M = 0.008
-JOINT_IDX = {j: k for k, j in enumerate(("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"))}
+JOINT_IDX = {j: k for k, j in enumerate(("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll",
+                                         "gripper"))}
 CASES = [(pose, h, oy, r) for pose in ("side", "down") for h in ("base", "mid", "tip")
          for oy in (0.0, 0.005) for r in (0.010, 0.0125, 0.015)]
 
@@ -224,7 +227,8 @@ def row_text(case, r):
     pose, h, oy, rad = case
     head = f"{pose:4s} {h:4s} off {oy * 1000:3.0f} mm  fruit {2 * rad * 1000:2.0f} mm: "
     pull = ("plucked while closing" if r["plucked_on_close"] else
-            f"pull {'released' if r['released'] else 'NO RELEASE'} at {r['force_at']:.2f} N  slip {r['slip_pull'] * 1000:4.1f} mm")
+            f"pull {'released' if r['released'] else 'NO RELEASE'} at {r['force_at']:.2f} N  "
+            f"slip {r['slip_pull'] * 1000:4.1f} mm")
     return (head + f"jaw {r['jaw_deg']:5.1f} deg  both {int(r['both_fingers'])}  {pull}  "
             f"shake drift {r['drift'] * 1000:5.1f} mm  held {int(r['held'])}  sinks {r['pen'] * 1000:.1f} mm")
 
@@ -243,7 +247,8 @@ def main():
         # "down" can't be exactly vertical with the pan at 0 and the hand clear of the table; 0.25 is
         # fingers within ~25 deg of straight down, which is how a teleoperator reaches down onto a truss.
         poses[kind], score = find_pose(kind)
-        report(score < tol, f"{kind} grasp pose found (residual {score:.3f}), q = {np.round(np.degrees(poses[kind]), 1)} deg")
+        report(score < tol,
+               f"{kind} grasp pose found (residual {score:.3f}), q = {np.round(np.degrees(poses[kind]), 1)} deg")
     lo_thr, hi_thr = tm.DETACH_FORCE_N
 
     if a.windowed:
@@ -254,8 +259,10 @@ def main():
         try:
             for case in cases:
                 pose, h, oy, rad = case
-                print(f"{pose} {h}, {oy * 1000:.0f} mm off-centre, {2 * rad * 1000:.0f} mm fruit (close the window to stop)")
-                print("    " + row_text(case, grasp_case(poses[pose], h, oy, rad, hi_thr, 0.25 * 3.35, watch=True, slow=a.slow)))
+                print(f"{pose} {h}, {oy * 1000:.0f} mm off-centre, {2 * rad * 1000:.0f} mm fruit "
+                      "(close the window to stop)")
+                r = grasp_case(poses[pose], h, oy, rad, hi_thr, 0.25 * 3.35, watch=True, slow=a.slow)
+                print("    " + row_text(case, r))
         except KeyboardInterrupt:
             pass
         return
@@ -312,12 +319,15 @@ def main():
     #    ~0.7 N on the tether, so the weakest ~5 % of fruit now come off as the jaw closes on them.)
     for off in (0.003, 0.008):
         r = grasp_case(poses["side"], "mid", 0.0, 0.0125, lo_thr, scene.GRIPPER_TORQUE, off_x=off)
-        report(r["start_contacts"] == 0, f"side mid, {off * 1000:.0f} mm off the fixed finger: jaw opens clear of the fruit")
+        report(r["start_contacts"] == 0,
+               f"side mid, {off * 1000:.0f} mm off the fixed finger: jaw opens clear of the fruit")
         report(not r["plucked_on_close"] or r["held"],
                f"side mid, {off * 1000:.0f} mm off, break {lo_thr:.2f} N: " +
                (f"comes off while closing (peak tether {r['closed_peak']:.2f} N) and stays in the grip"
-                if r["plucked_on_close"] else f"stays on the truss while closing (peak tether {r['closed_peak']:.2f} N)"))
-        report(r["both_fingers"], f"side mid, {off * 1000:.0f} mm off: both fingers on the fruit, jaw at {r['jaw_deg']:.1f} deg")
+                if r["plucked_on_close"] else
+                f"stays on the truss while closing (peak tether {r['closed_peak']:.2f} N)"))
+        report(r["both_fingers"],
+               f"side mid, {off * 1000:.0f} mm off: both fingers on the fruit, jaw at {r['jaw_deg']:.1f} deg")
     # 2. Every teleop-like case: pluck at the strongest break force, then hold through the shake.
     rows = []
     for case in CASES:

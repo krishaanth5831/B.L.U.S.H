@@ -9,7 +9,8 @@ confident `truss_ready` box inside the reach mask is the target if it sits on a 
 otherwise the most visible ready truss's true box is drawn (source "true_box", reason yolo_missed / yolo_wrong),
 so no episode is lost. The cut point is the truss YOLO's `cut_point` box inside the target box (source "yolo"),
 else the true cut point projected into the image. Box and cut point are held for the whole episode and go to
-the policy as numbers (observation.environment_state, ENV_NAMES).
+the policy as numbers (observation.environment_state, ENV_NAMES). Rig "base": the target is still picked on the
+birdseye, but the numbers (and the drawn box) are where the BASE camera sees that truss (view_target, sim truth).
 
 The true boxes come from the segmentation render: a truss's box is the union of its fruit's and its stalk's
 visible pixels, the cut point box a square around the projected middle of its cut zone.
@@ -28,7 +29,7 @@ CUT_BOX_PX = 14
 MIN_PX = 40
 T_READY_BIRDSEYE = 0.25          # ⚠️ unverified, like target.T_RIPE_BIRDSEYE: set from a measured test split
 ENV_NAMES = ["box_cx", "box_cy", "box_w", "box_h", "cut_u", "cut_v"]
-W, H = 640, 480                  # birdseye frame
+W, H = 640, 480                  # every sim camera's frame (lens.W, H): birdseye, and base for rig "base" (view_target)
 
 
 def _union(boxes):
@@ -54,7 +55,8 @@ def outline_box(cams, d, m, t, cam="birdseye"):
     """Box around a truss's fruit outlines and stalk whether or not something hides it (cf. target.py)."""
     bs = [cams.sphere_box(d, cam, d.xpos[m.body(f["tomato"]).id], f["radius"]) for f in t["fruit"]]
     b = m.body(t["body"]).id
-    pts = [d.xpos[b] + d.xmat[b].reshape(3, 3) @ (q - t["knuckle"]) for q in (t["knuckle"], t["peduncle_end"], t["rachis_end"])]
+    pts = [d.xpos[b] + d.xmat[b].reshape(3, 3) @ (q - t["knuckle"])
+           for q in (t["knuckle"], t["peduncle_end"], t["rachis_end"])]
     uv = cams.project(d, cam, np.array(pts))
     bs += [(u, v, u, v) for u, v in uv if not np.isnan(u)]
     u = _union(bs)

@@ -41,3 +41,8 @@ sim/assets/so101/
 
 # pip install -e sim/plugin build artefacts
 sim/plugin/*.egg-info/
+
+# Local tool files: Claude Code settings + MCP config, MuJoCo's error log (written to the cwd)
+.claude/
+.mcp.json
+MUJOCO_LOG.TXT

@@ -4,7 +4,7 @@
 #   sim/scripts/rollout_sim.sh run  <policy>          one 40 s run, nothing saved
 #   sim/scripts/rollout_sim.sh pi05 <policy>          π0.5 through async inference on the rented GPU
 #                                                     (policy_server + ssh tunnel first, see the vault note)
-# ⚠️ The overlay flag must match what the policy was trained with (none until step 4 exists).
+# ⚠️ The overlay must match what the policy was trained with (default OVERLAY=yolo; OVERLAY=none for raw frames).
 # The terminal prints "✅ target in the crate" per scene: that's the sim success signal.
 set -euo pipefail
 source "$(dirname "$0")/common_sim.sh"

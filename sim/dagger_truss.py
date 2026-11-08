@@ -5,6 +5,9 @@
     python dagger_truss.py --dry --watch --episodes 1    # watch one takeover in the MuJoCo window
     python dagger_truss.py                               # 100 episodes appended to krish5831/blush_sim_truss_v1
 
+⚠️ Birdseye rig only, as written for blush_sim_truss_v1 + smolvla_truss_expert_v1 (2026-11-05): the sim is built
+without `rig=`, so a rig "base" policy / dataset (blush_sim_truss_v2, act_truss_v1) needs changes first.
+
 Per scene seed (fresh range DEFAULT_SEED, never trained or evaluated on):
   1. policy pass (nothing recorded): the scene as in eval_truss.py; the policy drives, every action it sends is
      kept, and every frame is checked by Trigger (the signs of veering off, well before the judge's limits).
@@ -15,7 +18,8 @@ Per scene seed (fresh range DEFAULT_SEED, never trained or evaluated on):
      with generate_truss.judge (the same rules as the 200 scripted episodes, over the WHOLE episode from frame 0).
      PLAN_TRIES plans, each from a fresh rebuild + replay.
      ⚠️ Rebuild + replay instead of mj_getState/mj_setState: the cutters and the detacher keep their state in
-     Python. And the stored actions, not the policy again: SmolVLA samples noise, a second run differs.
+     Python. And the stored actions, not the policy again: SmolVLA samples noise, so a second run differs (ACT
+     doesn't, but replaying is cheaper than inference either way).
   3. recording pass: rebuild, replay the policy's actions and then the expert's plan, recording every frame like
      generate_truss.py; judged again, a mismatch is discarded.
 The episode holds the policy's own actions up to the takeover (so it starts at the scene's first frame like the
@@ -50,7 +54,9 @@ import truss_ik  # noqa: E402
 import truss_scene as ts  # noqa: E402
 
 DEFAULT_POLICY = HERE.parent / "outputs/train/smolvla_truss_expert_v1/checkpoints/060000/pretrained_model"
-DEFAULT_SEED = 7_000_000          # training 210000-210512, pilot 200000-200008, eval 5000000-5000019 + ~1.6e9
+# v1 training 210000-210512, pilot 200000-200008, eval 5000000-5000019 + ~1.6e9; ⚠️ blush_sim_truss_v2 was
+# recorded from 7600000 (7600000-7600533), so a run past ~600k attempts would reach it
+DEFAULT_SEED = 7_000_000
 EPISODE_S = ev.EPISODE_S          # the policy's time per scene (45 s)
 PLAN_TRIES = 3                    # takeover plans per seed (generate_truss.PLAN_TRIES)
 REWIND_S = (0.5, 1.0)             # takeover this long before the trigger (design choice: before the damage)
@@ -228,7 +234,7 @@ def main():
             rec = dict(seed=seed)
             t_try = time.time()
 
-            def done(ok, why, **kw):
+            def done(ok, why, rec=rec, t_try=t_try, seed=seed, **kw):   # bound now (B023); called this iteration
                 rec.update(kept=ok, reason=why, wall_s=round(time.time() - t_try, 1), **kw)
                 log.write(json.dumps(rec) + "\n"); log.flush()
                 key = why.split(":")[0] if not ok else "kept"
@@ -294,7 +300,7 @@ def main():
 
             # --- 2. takeover test: rebuild, replay to the takeover, plan, dry run, judge ---
             fails, ok, plan, fresh = [], False, None, False
-            for n_try in range(PLAN_TRIES):
+            for n_try in range(PLAN_TRIES):  # noqa: B007  n_try is read after the loop (plan_tries)
                 if not fresh:                            # planning doesn't touch the sim: rebuild only after a play
                     start(seed, viewer=a.watch and a.dry)
                     if robot._box_info["target_name"] != target:
@@ -341,7 +347,7 @@ def main():
             env = robot.env_state()
             cur = {"obs": obs}
 
-            def frame(sent):
+            def frame(sent, cur=cur, env=env):   # bound now (B023); replay() / play() call it right away
                 t_f = time.time()
                 o = cur["obs"]
                 fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),

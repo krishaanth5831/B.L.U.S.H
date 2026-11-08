@@ -1,7 +1,8 @@
 """The sim follower. It behaves like the real so101_follower towards lerobot.
 
-- Same features: shoulder_pan.pos ... gripper.pos in use_degrees=false units, plus the cameras
-  `birdseye` and `claw` at 640x480 (config/hardware.env names and size).
+- Same features: shoulder_pan.pos ... gripper.pos in use_degrees=false units, plus the cameras at 640x480
+  (config/hardware.env size): `birdseye` and `claw` (rig="birdseye", the real rig's names), or `base` and `claw`
+  (rig="base", truss task only).
 - send_action takes the leader's normalised values and converts them through follower_white.json,
   as the real follower does (sim/arm_map.py).
 - Physics runs in its own thread at wall-clock speed, like a real arm moving between calls.
@@ -10,6 +11,9 @@
   on both cameras every frame and draws its view into the frames (harvest/yolo_overlay.py): red
   boxes + class + confidence on every detection, and on the birdseye a green box on the target, which
   is picked among the scene's 2-3 ripe fruits on its first frame and then held (sim/target.py).
+- task="truss" (sim/truss_scene.py): the target is a ready truss (sim/truss_target.py), with a cut-point cross
+  next to its box; TrussCutter cuts a stalk the blades press hard enough. rig="base" draws the box + cross on the
+  base camera from the sim's truth (the target is still picked on a birdseye frame that isn't returned).
 
 MuJoCo window keys: N = new vine layout (next seed). Press it during lerobot-record's reset period.
 Ctrl + right-drag pulls a tomato by hand. Plucks and crate drops are printed in the terminal.
@@ -71,7 +75,8 @@ class SO101Mujoco(Robot):
         if config.rig not in RIG_CAMERAS:
             raise ValueError(f"rig={config.rig!r}: one of {tuple(RIG_CAMERAS)}")
         if config.rig == "base" and config.task != "truss":
-            raise ValueError("rig='base' is built for task='truss' (the box goes onto the base camera from truss truth)")
+            raise ValueError("rig='base' is built for task='truss' "
+                             "(the box goes onto the base camera from truss truth)")
         self.config = config
         self.cam_names = RIG_CAMERAS[config.rig]  # what the policy sees, in order; [0] carries the target box
         self.cameras = dict.fromkeys(self.cam_names)   # names only; lerobot-rollout counts them

@@ -10,10 +10,9 @@ threshold is read off this table for a precision target picked BEFORE looking at
 import pathlib
 import sys
 
-import numpy as np
 from ultralytics import YOLO
 
-IOU_MATCH = 0.5
+IOU_MATCH = 0.5                  # a detection matches a truth box at this IoU (the mAP50 convention)
 
 
 def iou(a, b):

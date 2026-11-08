@@ -1,4 +1,4 @@
-"""The sim scene: mini greenhouse + SO-101 with fin-ray fingers + cherry-tomato vines + 2 cameras.
+"""The sim scene: mini greenhouse + SO-101 with fin-ray fingers + cherry-tomato vines + cameras.
 
     m, d, info = build(seed)          full scene
     m, d, info = build(seed, arm=False)  vines + greenhouse only (fast, for layout checks)
@@ -6,7 +6,9 @@
 Layout comes from hardware/greenhouse/lasercut/greenhouse_lasercut.py (mm there, metres here):
 3 vine rows at y = +0.4 / 0 / -0.4, end frames at x = 0 and 0.74, crop rails at z = 0.52, arm
 shoulder at x = 0.37 mid-aisle. Every scene has 2-3 ripe fruits within reach (N_RIPE); the rest are
-green or turning. The birdseye box says which ripe fruit to pick.
+green or turning. The birdseye box says which ripe fruit to pick. Cameras: "birdseye" on its mast behind row R0,
+"base" low off the arm's base (always in the model; its bracket only in rig "base" scenes), "arm/claw" on the wrist.
+These are the single-fruit scenes; truss_scene.py builds the whole-truss ones from the same pieces.
 
 ⚠️ The arm model needs the SO-ARM100 files: run ./fetch_so101.sh once (sim/assets/so101 is gitignored).
 """
@@ -27,7 +29,7 @@ FINRAY = HERE / "assets" / "finray"
 TIMESTEP = 0.002                # 500 Hz (same as the Vinea FR5 sim); camera frames are taken every 15th step = 30 fps
 # ⚠️ Grasping needs elliptic friction cones + impratio > 1. With MuJoCo's default pyramidal cones a
 # squeezed 10 g fruit crept out of the fingers at 0.1 N of tangential load under 8 N of grip
-# (check_scene.py grasp test). MuJoCo's docs recommend exactly this for grasping.
+# (the grasp test, now in check_grasp.py). MuJoCo's docs recommend exactly this for grasping.
 CONE, IMPRATIO = "elliptic", 10
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30   # config/hardware.env: what the gate and the policy are trained on
 
@@ -52,7 +54,8 @@ ARM_BASE = (0.370, 0.200, 0.0)
 # (+x, away from the mast), so shoulder_pan 0 points at R1 (+y). Facing down the aisle the arm
 # reached a third of the tomatoes (sampled IK, seed 3); facing the row, every ripe one (IK_REACH_TOL_M).
 ARM_YAW_DEG = 90.0
-TARGET_ROW = 0.400               # R1, the row the base faces (K7, 2026-10-20). The aisle at y = 0.2 serves rows 0.4 and 0.
+TARGET_ROW = 0.400               # R1, the row the base faces (K7, 2026-10-20). The aisle at y = 0.2 serves rows
+                                 # 0.4 and 0.
 SHOULDER_IN_BASE = np.array([0.069, -0.018, 0.117])   # upper_arm body origin at q = 0 (MJCF, checked)
 REACH_M = 0.30                   # quick prefilter: within this of the shoulder (guess; the generator's 0.40
                                  # is full stretch to the jaw tip). Ripe fruit must also pass the IK check.
@@ -71,7 +74,7 @@ IK_REACH_TOL_M = 0.003
 START_NORM = (-90.0, -40.0, 90.0, -40.0, 0.0, 50.0)
 # lerobot so_follower configure(): gripper Max_Torque_Limit 500 = 50 % of max. MJCF max is 3.35 N.m.
 # ⚠️ The servo also drops to Overload_Torque 25 % once it's stalled long enough (squeezing a
-# fruit), so check_scene.py tests the grip at 25 % too.
+# fruit), so check_grasp.py tests the grip at 25 % too.
 GRIPPER_TORQUE = 0.5 * 3.35
 # follower_white gripper range 2030..3481 ticks = 127.5 deg of travel from the -10 deg closed stop,
 # so the real jaw opens to 117.5 deg. The MJCF limit of 100 deg would clip the top 14 %.
@@ -182,16 +185,16 @@ MAST_POLE_R, MAST_BACK, MAST_LENS_GAP = 0.012, 0.055, 0.012
 MAST_BASE_XYT = (0.11, 0.11, 0.008)
 CAM_BOARD = (0.032, 0.032, 0.020)   # InnoMaker 32 x 32 mm board in its housing: width, height, depth
 LENS_R, LENS_LEN = 0.008, 0.012
-# Lens: both cameras render a wider pinhole image that lens.py bends into the 640x480 frame
+# Lens: every camera renders a wider pinhole image that lens.py bends into the 640x480 frame
 # (⚠️ guessed from the InnoMaker spec until calibrated; sim/cameras.json overrides it).
-# Base camera (rig "base", K7 2026-11-06): the birdseye module moved onto a bracket off the arm's base plate, low and to
-# the robot's left, looking up and across at the truss band. Picked by a probe of 7 spots over 11 plannable scenes
-# (2026-11-06): at the cut it saw the target stalk AND the blades in 8 of 11 (the birdseye: 0 of 11, the arm hides them);
-# at the start frame the target truss shows and the folded arm takes ~15 % of the frame; the arm came within 3 cm of the
-# lens in 2 of 11 episodes (bounding spheres, so an overestimate) and no fruit closer than 28 mm. Closer in failed:
-# 16 cm left, 2 cm back had the folded start-pose arm filling 58 % of the frame (it rests on the robot's left), and
-# spots under the truss band had a tomato a few cm from the lens. Offset from ARM_BASE in world axes: x along the aisle
-# (- = the robot's left), y toward the row. Design pose, unverified until the bracket is printed.
+# Base camera (rig "base", K7 2026-11-06): the birdseye module moved onto a bracket off the arm's base plate, low and
+# to the robot's left, looking up and across at the truss band. Picked by a probe of 7 spots over 11 plannable scenes
+# (2026-11-06): at the cut it saw the target stalk AND the blades in 8 of 11 (the birdseye: 0 of 11, the arm hides
+# them); at the start frame the target truss shows and the folded arm takes ~15 % of the frame; the arm came within
+# 3 cm of the lens in 2 of 11 episodes (bounding spheres, so an overestimate) and no fruit closer than 28 mm. Closer
+# in failed: 16 cm left, 2 cm back had the folded start-pose arm filling 58 % of the frame (it rests on the robot's
+# left), and spots under the truss band had a tomato a few cm from the lens. Offset from ARM_BASE in world axes: x
+# along the aisle (- = the robot's left), y toward the row. Design pose, unverified until the bracket is printed.
 BASE_CAM_OFFSET = (-0.28, 0.06, 0.10)
 BASE_CAM_AIM = (0.34, 0.37, 0.22)   # middle of the truss band's cut points (truss_scene STEM_X, KNUCKLE_Z)
 BASE_POST_R = 0.008                  # bracket post from the table to the camera housing (printed, guess)
@@ -264,13 +267,15 @@ def greenhouse_xml():
         g.append(_box(f"ef{k}_king", (x0, -POST_W / 4, BAND[1]), (x1, POST_W / 4, apex)))
         for s in (1, -1):
             half = np.hypot(yo, apex - BAND[1]) / 2
-            g.append(f'<geom name="ef{k}_rafter{s:+d}" type="box" pos="{x0 + T/2:.4f} {s*yo/2:.4f} {(BAND[1]+apex)/2:.4f}" '
+            g.append(f'<geom name="ef{k}_rafter{s:+d}" type="box" '
+                     f'pos="{x0 + T/2:.4f} {s*yo/2:.4f} {(BAND[1]+apex)/2:.4f}" '
                      f'size="{T/2:.4f} {half:.4f} 0.02" euler="{-s*np.radians(ROOF_DEG):.4f} 0 0" rgba="{PLY_RGBA}"/>')
     for j, r in enumerate(ROWS):                     # crop rails (T: flange under, web on top) + anchor rails
         g.append(_box(f"crop{j}_flange", (0, r - FLANGE_W / 2, CROP_Z), (HOUSE_L, r + FLANGE_W / 2, CROP_Z + T)))
         g.append(_box(f"crop{j}_web", (0, r - T / 2, CROP_Z + T), (HOUSE_L, r + T / 2, CROP_Z + T + WEB_H)))
         g.append(_box(f"anchor{j}_web", (0, r - T / 2, 0), (HOUSE_L, r + T / 2, ANCHOR_WEB_H)))
-        g.append(_box(f"anchor{j}_flange", (0, r - FLANGE_W / 2, ANCHOR_WEB_H), (HOUSE_L, r + FLANGE_W / 2, ANCHOR_WEB_H + T)))
+        g.append(_box(f"anchor{j}_flange", (0, r - FLANGE_W / 2, ANCHOR_WEB_H),
+                      (HOUSE_L, r + FLANGE_W / 2, ANCHOR_WEB_H + T)))
     g.append(_box("ridge", (0, -0.02, apex - 0.055), (HOUSE_L, 0.02, apex - 0.015)))
     g.append(mast_xml())                             # the birdseye's mast, behind row R0
     return "\n".join(g)
@@ -411,8 +416,10 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
   </visual>
   <asset>
     <!-- A pale sky behind the greenhouse: the level birdseye sees past the frame, and an empty black
-         background left the YOLO nothing like its training photos (2026-10-28). Colours as S.H.E.A.R (unverified). -->
-    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.85 0.90 0.95" rgb2="0.55 0.65 0.75" width="256" height="1536"/>
+         background left the YOLO nothing like its training photos (2026-10-28). Colours as S.H.E.A.R
+         (unverified). -->
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.85 0.90 0.95" rgb2="0.55 0.65 0.75"
+             width="256" height="1536"/>
   </asset>
   <worldbody>
     <light name="top" pos="0.37 0 1.6" dir="0 0 -1" directional="true" diffuse="0.6 0.6 0.6"/>
@@ -421,7 +428,8 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
          Mirrored to the camera's side of the row. -->
     <light name="side" pos="-0.4 -0.6 0.9" dir="0.7 0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
-    <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
+    <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}"
+            xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {base_cam_xml()}
     {greenhouse_xml() if scenery else ''}
     {crate_xml(*(crate or ())) if scenery else ''}
@@ -499,8 +507,10 @@ def _finray_ladder(s, jaw, part, ch, k_flank):
     parent, origin = jaw, np.zeros(3)
     for i in range(n + 1):                                   # front flank, root -> tip cap
         P, Q = F[i], (F[i + 1] if i < n else Fc)
-        b = _ladder_body(parent, f"finray_{part}_f{i}", P, origin, k_flank * (FINRAY_BUILT_IN_FACTOR if i == 0 else 1), axis,
-                         lambda body, P=P, Q=Q, i=i: _plate(body, f"finray_{part}_f{i}_plate", P, Q, tf, ch, bits, P, tf / 2))
+        b = _ladder_body(parent, f"finray_{part}_f{i}", P, origin,
+                         k_flank * (FINRAY_BUILT_IN_FACTOR if i == 0 else 1), axis,
+                         lambda body, P=P, Q=Q, i=i: _plate(body, f"finray_{part}_f{i}_plate", P, Q, tf, ch, bits, P,
+                                                            tf / 2))
         front.append(b)
         parent, origin = b, P
     cap = _ladder_body(parent, f"finray_{part}_cap", Fc, origin, k_flank * FINRAY_BUILT_IN_FACTOR, axis,
@@ -508,13 +518,16 @@ def _finray_ladder(s, jaw, part, ch, k_flank):
     parent, origin = jaw, np.zeros(3)
     for i in range(n + 1):                                   # back flank, root -> tip cap
         P, Q = B[i], (B[i + 1] if i < n else Bc)
-        b = _ladder_body(parent, f"finray_{part}_b{i}", P, origin, k_flank * (FINRAY_BUILT_IN_FACTOR if i == 0 else 1), axis,
-                         lambda body, P=P, Q=Q, i=i: _plate(body, f"finray_{part}_b{i}_plate", P, Q, tf, ch, bits, P, tf / 2))
+        b = _ladder_body(parent, f"finray_{part}_b{i}", P, origin,
+                         k_flank * (FINRAY_BUILT_IN_FACTOR if i == 0 else 1), axis,
+                         lambda body, P=P, Q=Q, i=i: _plate(body, f"finray_{part}_b{i}_plate", P, Q, tf, ch, bits, P,
+                                                            tf / 2))
         back.append(b)
         parent, origin = b, P
     for i in range(1, n + 1):                                # rib i: hinged on the front flank at F[i] ...
         rib = _ladder_body(front[i - 1], f"finray_{part}_r{i}", F[i], F[i - 1], k_rib(F[i], B[i]), axis,
-                           lambda body, i=i: _plate(body, f"finray_{part}_r{i}_plate", F[i], B[i], tr, ch, bits, F[i], 0.0))
+                           lambda body, i=i: _plate(body, f"finray_{part}_r{i}_plate", F[i], B[i], tr, ch, bits,
+                                                    F[i], 0.0))
         _connect(s, rib.name, back[i - 1].name, B[i] - F[i])  # ... and pinned to the back flank at B[i]
     _connect(s, cap.name, back[n].name, Bc - Fc)              # both flanks end in the solid tip cap
 
@@ -523,8 +536,8 @@ def _cap(body, part, ch, bits, origin):
     c = ch["ladder"]["cap"]
     quat = np.zeros(4)
     mujoco.mju_mat2Quat(quat, np.array(c["R"], float).reshape(-1))
-    g = body.add_geom(name=f"finray_{part}_cap_plate", type=mujoco.mjtGeom.mjGEOM_BOX, pos=np.array(c["centre"]) - origin,
-                      quat=quat, size=c["half"], rgba=TPU_RGBA)
+    g = body.add_geom(name=f"finray_{part}_cap_plate", type=mujoco.mjtGeom.mjGEOM_BOX,
+                      pos=np.array(c["centre"]) - origin, quat=quat, size=c["half"], rgba=TPU_RGBA)
     g.contype, g.conaffinity, g.group = bits[0], bits[1], 2
     _finger_contact(g)
     return 8 * np.prod(c["half"]) * ch["ladder"]["density"]
@@ -564,7 +577,8 @@ def add_cut_hold(s, chain):
         for end, zl in (("lo", -hz + PAD_LIP[1] / 2), ("hi", hz - PAD_LIP[1] / 2)):   # the channel's two lips
             lg = pad.add_geom(name=f"pad_{part}_lip_{end}", type=mujoco.mjtGeom.mjGEOM_BOX,
                               pos=[s_in * (rest + PAD_LIP[0] / 2), 0, zl],
-                              size=[PAD_LIP[0] / 2, (PAD_Y[1] - PAD_Y[0]) / 2, PAD_LIP[1] / 2], mass=0.0002, rgba=PAD_RGBA)
+                              size=[PAD_LIP[0] / 2, (PAD_Y[1] - PAD_Y[0]) / 2, PAD_LIP[1] / 2], mass=0.0002,
+                              rgba=PAD_RGBA)
             lg.contype, lg.conaffinity, lg.group = PAD_BITS[0], PAD_BITS[1], 2
             _finger_contact(lg)
             lg.friction = PAD_FRICTION
@@ -638,7 +652,8 @@ def arm_spec(gripper_torque=GRIPPER_TORQUE, cut_hold=False):
     for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
         b = s.body(body)
         s.add_mesh(name=f"finray_stub_{part}", file=str(FINRAY / f"stub_{part}.stl"))
-        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}", rgba=PLA_RGBA)
+        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}",
+                       rgba=PLA_RGBA)
         g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only: its convex hull would swallow the jaw opening
         if chain is None:
             s.add_mesh(name=f"finray_finger_{part}", file=str(FINRAY / f"finger_{part}.stl"))

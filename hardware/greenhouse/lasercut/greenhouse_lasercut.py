@@ -20,7 +20,6 @@ Usage:
 Needs: numpy shapely trimesh manifold3d mapbox-earcut ezdxf matplotlib
 """
 import argparse
-import csv
 import math
 import pathlib
 import sys
@@ -28,7 +27,7 @@ import sys
 import numpy as np
 from shapely import affinity
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
-from shapely.ops import polylabel, unary_union
+from shapely.ops import unary_union
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -182,7 +181,8 @@ def flange(tab_xs):
             holes.append(keyhole(x, s * KEY_OFF))
             eng.append(LineString([(x, s * (FLANGE_W / 2 - 4)), (x, s * FLANGE_W / 2 - s * 0.01)]))
         if abs(round(x) % 100) < 1e-6:
-            eng += text_lines(f"{int(round(x / 10))}", x + 8.5, FLANGE_W / 2 - 5.5, 4)    # cm, outer edge between keyholes
+            # cm, outer edge between keyholes
+            eng += text_lines(f"{int(round(x / 10))}", x + 8.5, FLANGE_W / 2 - 5.5, 4)
         x += KEY_PITCH
     return p.difference(unary_union(holes)), eng
 
@@ -252,7 +252,8 @@ def cut(poly, axis, c):
         line = LineString([(minx - 1, c), (maxx + 1, c)])
     A, B = poly.intersection(lo), poly.intersection(hi)
     inter = poly.intersection(line)
-    segs = [inter] if inter.geom_type == "LineString" else [g for g in getattr(inter, "geoms", []) if g.geom_type == "LineString"]
+    segs = ([inter] if inter.geom_type == "LineString"
+            else [g for g in getattr(inter, "geoms", []) if g.geom_type == "LineString"])
     shrunk = poly.buffer(-2.0)
     for s in segs:
         coords = np.array(s.coords)
@@ -271,7 +272,9 @@ def cut(poly, axis, c):
                     vm = (a + b) / 2 + off * w
                     d = dovetail(axis, c, vm, neck, head, depth, direction)
                     probe = dovetail(axis, c, vm, neck, head, depth + 2.0, direction)
-                    if shrunk.buffer(2.0).contains(probe) and poly.contains(d.buffer(3.0).intersection(hi if direction > 0 else lo)):   # >= 3 mm wood round the head, holes included
+                    # >= 3 mm wood round the head, holes included
+                    if (shrunk.buffer(2.0).contains(probe)
+                            and poly.contains(d.buffer(3.0).intersection(hi if direction > 0 else lo))):
                         if direction > 0:
                             A, B = A.union(d.intersection(poly)), B.difference(d)
                         else:
@@ -474,8 +477,6 @@ def mast_check(all_meshes):
     """Line of sight from the printed mast's default lens pose to the pick zone, through the end frame."""
     import trimesh
     scene = trimesh.util.concatenate([m for n, m in all_meshes if not n.startswith("WG")] )
-    tilt = math.radians(LENS_TILT_DEG)
-    axis = np.array([math.cos(tilt), 0, -math.sin(tilt)])
     results = []
     blocked = 0
     for row in (ROWS[0], ROWS[1]):          # rows served by the +Y aisle

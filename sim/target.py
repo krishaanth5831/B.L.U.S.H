@@ -10,6 +10,9 @@ to pick. The sim knows every fruit's true box, so:
 - every ripe fruit is hidden at the start frame -> box around one's outline     (source "true_box_hidden")
 How often the first case happens is the recall score (eval_yolo_recall.py): per render tier, it
 says how real the sim looks to the gate.
+start_frame / fruit_boxes / matched_fruit are the single-fruit task's. The truss task (truss_target.py) reuses
+iou, matches and reach_mask; the plugin logs T_RIPE_BIRDSEYE in both tasks; importing this module puts the repo
+root on sys.path (view_scene.py relies on that).
 """
 import pathlib
 import sys

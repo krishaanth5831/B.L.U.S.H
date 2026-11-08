@@ -5,8 +5,20 @@ For **every cherry tomato in the claw camera's view**, find it and call it `unri
 citrus, …) get `not_tomato`. The arm only picks fruits called `ripe` with enough confidence.
 
 The birdseye camera only steers the arm. At 640×480 through a 130° lens a cherry
-tomato is a few pixels wide there, which is too small to judge ripeness. The claw
+tomato is small there (the vault's estimate was a few pixels; the sim's lens model, a
+spec guess, gives 19–36 px, `sim/README.md`), too small to trust for ripeness. The claw
 camera, close to the vine, makes the call.
+
+Watch it on a live camera (a window with every box, class and confidence):
+
+```bash
+conda activate ripeness
+python ripeness/scripts/live_view.py 2 ripeness/models/pretrain_v4.pt 0.25   # camera index, weights, min confidence
+```
+
+⚠️ This is the **single-fruit** gate. Since 2026-11-03 the module harvests whole trusses; in the sim a
+separate truss YOLO (`truss_ready` / `truss_not_ready` / `cut_point`, sim-only weights) picks the
+target: `sim/yolo_truss/`. No real truss photos are labelled yet.
 
 ## The error that matters: precision on `ripe`
 
@@ -30,7 +42,7 @@ ripeness/
 │   ├── splits.yaml             which sessions are val / FROZEN test                 (committed)
 │   ├── public/                 Laboro, Open Images negatives, …: download notes only (gitignored)
 │   └── yolo/                   image lists + dataset yamls, built by build_split.py  (gitignored)
-├── scripts/                capture → convert → remap → split → train → eval
+├── scripts/                capture → prepare public sets → split → train → eval, live_view.py
 ├── gate/pick_target.py     the runtime gate: frame in, pick target (or None) out
 ├── gate/birdseye.py        the birdseye selection rule (no ultralytics; the sim uses it too)
 └── models/                 released weights, gate.yaml (threshold), results.csv
@@ -63,4 +75,8 @@ All in the `ripeness` env (`conda env create -f envs/ripeness.yml`). Run from th
   sensible fruit on 10 different vine setups.
 - The "how does the policy know which fruit" decision is written in `harvest/README.md`.
 
-⚠️ Every script here was seeded from the vault notes and **has not been run yet**.
+What has run (see `models/README.md`): steps 6–8 on public data only (`prepare_laboro.py`,
+`prepare_negatives.py`, `build_split.py`, `train.sh pretrain` → `pretrain_laboro_v1`, `v2`, `v4`),
+`eval_negatives.py`, `eval_threshold.py` on Laboro val, and `live_view.py`. ⚠️ Not run yet: own
+claw-camera capture and labelling (`data/own/` is empty), `train.sh finetune`, the release (`gate.yaml`
+is still null) and `gate/pick_target.py` live.

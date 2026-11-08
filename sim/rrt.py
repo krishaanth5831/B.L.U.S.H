@@ -10,24 +10,24 @@ arm move with RRT, so it always steers around what it shouldn't damage).
     path = plan(chk, q_start, q_goal, rng)             joint configs (5 arm joints, rad) from start to goal, or None
     chk.hits(q), chk.path_ok(path)                     what the arm touches at q / along a path
 
-What RRT does and what IK does: IK (cutpose.py) finds the joint angles that put the blades on the leaf stalk, the
-goal. RRT finds a route there through joint space that keeps the arm clear of everything on the list: it grows two
-trees of collision-free arm poses, one from the start and one from the goal, until they meet, then the route is
-shortened by cutting corners wherever the straight joint-space line between two of its points is clear too.
+What RRT does and what IK does: IK (truss_ik.py here, cutpose.py in S.H.E.A.R) finds the joint angles that put the
+blades on the stalk, the goal. RRT finds a route there through joint space that keeps the arm clear of everything
+on the list: it grows two trees of collision-free arm poses, one from the start and one from the goal, until they
+meet, then the route is shortened by cutting corners wherever the straight joint-space line between two of its points
+is clear too.
 
-Two kinds of obstacle:
-- **hard**: never touched, never closer than the clearance (stems, truss stalks, fruit, pots, the greenhouse frame,
-  the floor). Damage there costs a plant or a truss.
-- **firm**: fruit and truss stalks. Always avoided on routes (SOFT_CLEARANCE); a finger pad may rest on them only
-  where a caller asks for firm=False (SHEAR's short slide onto the petiole). ⚠️ When the fallback route could brush
-  them too, it pushed a truss stalk with 8 N on the way to a leaf (2026-11-03).
-- **soft**: the stiff parts of the leaves the rule keeps. Avoided when a route exists that clears them; when none
-  does, plan() can be asked again with soft=False and the route may brush them (a hand reaching into a canopy does).
-- **blade_guard**: things the BLADES never come near, even with soft=False (truss stalks: a blade on one can cut
-  the truss off; a finger pad resting on it doesn't).
+The obstacle sets, as S.H.E.A.R defined them (leaves, petioles) and as B.L.U.S.H's truss_expert.py fills them:
+- **hard**: never touched, never closer than the clearance. B.L.U.S.H: the greenhouse, crate, table, every stem.
+- **firm**: always avoided on routes (firm_clearance); a finger pad may rest on them only where a caller asks for
+  firm=False. B.L.U.S.H: the target truss's own stalk + fruit (firm=False on the way home, once it's dropped).
+  ⚠️ S.H.E.A.R: when its fallback route could brush them too, it pushed a truss stalk with 8 N (2026-11-03).
+- **soft**: avoided by soft_clearance. B.L.U.S.H: every OTHER truss; truss_expert retries with a negative
+  soft_clearance (brushing by 2 mm) rather than S.H.E.A.R's soft=False.
+- **blade_guard**: things the BLADES never come near, even with soft=False (S.H.E.A.R: truss stalks). Unused in
+  B.L.U.S.H (no caller passes it).
 
 The checker moves only the arm: the plant stands where it was when the Checker was made (settled), kinematically.
-Leaves pushed in the physics move afterwards; that's the dry run's job to judge.
+Whatever the arm pushes in the physics moves afterwards; that's the dry run's job to judge.
 """
 import copy
 
@@ -38,12 +38,12 @@ import arm_map
 
 CLEARANCE = 0.004        # m kept from hard obstacles on a route (B.L.U.S.H expert.CLEARANCE_M)
 BLADE_CLEARANCE = 0.002  # m the blades keep from blade_guard things (guess, unverified)
-SOFT_CLEARANCE = 0.002   # m kept from kept leaves (guess, unverified)
+SOFT_CLEARANCE = 0.002   # m kept from soft / firm things by default (SHEAR's kept leaves; guess, unverified)
 STEP = np.radians(3.0)   # joint-space resolution of collision checks along a segment (largest joint)
 EXTEND = np.radians(12.0)    # RRT step: how far a tree grows toward a sample (design choice)
 MAX_ITERS = 4000         # per plan() call
 GOAL_BIAS = 0.15         # share of samples aimed at the other tree's newest node (RRT-Connect does this anyway)
-SHORTCUT_TRIES = 150
+SHORTCUT_TRIES = 150     # random corner cuts per path (copied from S.H.E.A.R, unverified)
 
 
 class Checker:
@@ -132,7 +132,7 @@ def _trace(tree, parents, i):
 
 def plan(chk, q_start, q_goal, rng, lo=None, hi=None, iters=MAX_ITERS, **kw):
     """RRT-Connect from q_start to q_goal (5 joints, rad) inside [lo, hi]. Returns the shortcut path, or None.
-    kw goes to Checker.hits (soft=False lets the route brush kept leaves)."""
+    kw goes to Checker.hits (soft/firm clearances, ignore, soft=False / firm=False)."""
     q_start, q_goal = np.asarray(q_start, float), np.asarray(q_goal, float)
     lim = arm_map.FollowerMap().rad_limits()
     lo = np.asarray(lim[0][:5]) if lo is None else lo
@@ -142,7 +142,7 @@ def plan(chk, q_start, q_goal, rng, lo=None, hi=None, iters=MAX_ITERS, **kw):
     if chk.segment_free(q_start, q_goal, **kw):
         return [q_start, q_goal]
     A, pa, B, pb = [q_start], [None], [q_goal], [None]
-    for k in range(iters):
+    for _ in range(iters):
         q_rand = rng.uniform(lo, hi)
         i = int(np.argmin(np.abs(np.array(A) - q_rand).max(1)))
         q_new = _steer(A[i], q_rand)

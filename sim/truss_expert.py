@@ -43,22 +43,22 @@ SLIDE_FALLBACK_M = (0.035, 0.025)   # shorter slides when that pre-cut pose is o
 # The stalk may enter the jaw along the fingers, or sliding along itself at the same time (it lies along gripper
 # y, so a y component keeps it between the open tips). Blend toward +-y, tried in random order (design choice).
 APPROACH_BLEND_DEG = (0.0, 30.0, -30.0, 50.0, -50.0)
-SLIDE_STEPS = 10
+SLIDE_STEPS = 10                 # IK way-points along the slide (unverified: no record of a test)
 JAW_OPEN_DEG = 25.0              # open while approaching: tips ~30 mm apart past the pads (check_truss_cut)
 CLOSE_S = (0.5, 0.8)             # closing time, like expert's
 SQUEEZE_S = (0.6, 0.9)           # held shut before moving off (cut lands ~0.45 s into the close)
 RETREAT_M = (0.03, 0.05)         # back along the approach after the cut (5-7 cm ran out of reach, 2026-11-03)...
 RETREAT_UP_M = (0.02, 0.04)      # ...and up, so the truss clears its neighbours before any swing
-# Retreat directions tried in order: back along the approach, toward the aisle, straight up (design choice).
-CRATE_JITTER_M = 0.03            # release point around the crate centre
+# Retreat directions tried in order (_after_cut): back along the approach + up, toward the aisle + up, straight up,
+# further toward the aisle, a mix of back and aisle + up (design choice).
 # Release: the truss held with its lowest fruit this far above the crate RIM and its outline (seen from above)
 # inside the walls, then dropped in. ⚠️ Lowering it to just above the floor needed a rigid ~17 cm truss to fit
 # 20 x 18 cm without touching a wall at its held angle, which almost never worked (2026-11-03). It falls 5-8 cm.
 RELEASE_ABOVE_M = (0.01, 0.03)
 ABOVE_CRATE_M = 0.08             # way-point this far above the release pose (lowered straight from there)
-RELEASE_PITCH_DEG = (10.0, 85.0)  # fingers pointing down over the crate (wide: the IK scan reached the crate's
-                                  # far half at 10-85, 2026-11-03)
-RELEASE_SAMPLES = 120            # release poses tried; the one leaving the most room to the walls is kept
+# A quarter of this many fitting release poses are collision-checked, most room to the walls first; the first clear
+# one is kept (design choice)
+RELEASE_SAMPLES = 120
 # No carried fruit (or stalk end) higher than this over the rim at release. ⚠️ A truss held pointing up, its outline
 # inside the walls seen from above, landed on its low end and toppled over the near wall (seed 200002, 2026-11-03):
 # so the fit is checked on where it will LIE (laid_flat), not where it's held. 0.07 m alone (held flat) left no
@@ -66,9 +66,9 @@ RELEASE_SAMPLES = 120            # release poses tried; the one leaving the most
 ABOVE_RIM_MAX_M = 0.20
 RELEASE_SLACK_M = 0.005          # every fruit's outline at least this far inside the walls, seen from above
 LEAN_M = 0.03                    # laid flat it may reach this far past a wall: the wall stops it, it leans there
-DROP_S = (0.5, 0.8)
+DROP_S = (0.5, 0.8)              # wait after opening while the truss falls in (unverified)
 MISS_SHORT_M = (0.015, 0.025)    # miss: the tips stop this far short of the stalk, close on nothing
-MISS_PAUSE_S = (0.3, 0.5)
+MISS_PAUSE_S = (0.3, 0.5)        # shut on nothing this long before opening again (expert's is 0.3-0.6)
 SPEED = expert.SPEED
 JOINT_PEAK_NORM_S = expert.JOINT_PEAK_NORM_S
 CART_PEAK_M_S = expert.CART_PEAK_M_S
@@ -160,7 +160,8 @@ _CRATE_POSES = None
 def crate_poses(ikf, point):
     """Arm poses (Q, gripper o, R) with the grip point above the crate area, from CRATE_POSE_SAMPLES random ones.
     ⚠️ Shifting a sampled pose to the crate and re-solving IK failed for 40 of 40 (a 5-joint arm can't keep an
-    orientation at another spot, 2026-11-03); poses already over the crate need no shift."""
+    orientation at another spot, 2026-11-03); poses already over the crate need no shift. (An IK scan reached the
+    crate's far half with the fingers pitched 10-85 deg down, 2026-11-03: a wide range, hence sampling.)"""
     global _CRATE_POSES
     if _CRATE_POSES is None:
         (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
@@ -170,7 +171,8 @@ def crate_poses(ikf, point):
         for q in Q:
             o, R = ikf.fk(q)
             g = o + R @ point
-            if abs(g[0] - cx) < sx / 2 + 0.05 and abs(g[1] - cy) < sy / 2 + 0.05 and 0.06 < g[2] < 0.40 and R[2, 2] > 0.1:
+            if (abs(g[0] - cx) < sx / 2 + 0.05 and abs(g[1] - cy) < sy / 2 + 0.05 and 0.06 < g[2] < 0.40
+                    and R[2, 2] > 0.1):
                 keep.append((q, o, R))
         _CRATE_POSES = ([k[0] for k in keep], np.array([k[1] for k in keep]), np.array([k[2] for k in keep]))
     return _CRATE_POSES
@@ -260,11 +262,6 @@ class TrussPlanner:
                 return p
         return None
 
-    def hang_m(self):
-        """How far the target's lowest fruit hangs below the cut point once it dangles from the grip."""
-        p, _ = ts.cut_target_now(self.t, self.d, self.m)
-        return max(np.linalg.norm(self.d.xpos[self.m.body(f["tomato"]).id] - p) + f["radius"] for f in self.t["fruit"])
-
     # --- the plan ---
     def plan(self, rng, miss=False, takeover=None):
         """Strict first, then letting the arm brush neighbours by 2 mm (NEIGHBOUR_CLEAR).
@@ -328,8 +325,9 @@ class TrussPlanner:
                 tried.append(rest)
                 continue
             return self._assemble(rng, to_pre, slide, miss_leg, rest,
-                                  dict(cut_u=round(u, 2), approach_blend_deg=float(beta), slide_mm=round(slide_m * 1000),
-                                       tried=tried, takeover=takeover, escape=lead is not None), slide_m,
+                                  dict(cut_u=round(u, 2), approach_blend_deg=float(beta),
+                                       slide_mm=round(slide_m * 1000), tried=tried, takeover=takeover,
+                                       escape=lead is not None), slide_m,
                                   takeover=bool(takeover), lead=lead)
         raise PlanError("; ".join(sorted(set(tried))) or "no candidate")
 
@@ -470,7 +468,8 @@ class TrussPlanner:
                 n_hit += 1
                 hit_names |= hits
                 continue
-            low = [ikf.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr) for v in np.linspace(0, 1, 6)]
+            low = [ikf.solve(p + [0, 0, ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
+                   for v in np.linspace(0, 1, 6)]
             if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=CARRY_CLEAR_M):
                 # ⚠️ the 5-joint arm often can't keep the release orientation along a straight 8 cm drop (22 of 22
                 # fitting poses for seed 200000, 2026-11-03): then RRT goes straight to the release pose
@@ -500,7 +499,8 @@ class TrussPlanner:
         if home is None:
             return "crate -> start: no RRT route"
         return dict(ret=ret, to_crate=to_crate, lower=lower, home=home, release_point=p.tolist(),
-                    release_pitch=round(pitch, 1), hang_mm=round(hang * 1000, 1), crate_slack_mm=round(best[0] * 1000, 1))
+                    release_pitch=round(pitch, 1), hang_mm=round(hang * 1000, 1),
+                    crate_slack_mm=round(best[0] * 1000, 1))
 
     # --- frames ---
     def _assemble(self, rng, to_pre, slide, miss_leg, rest, meta, slide_m, takeover=False, lead=None):
@@ -539,7 +539,7 @@ class TrussPlanner:
             P = np.array(pts)
             g0 = a[5]
             g1 = grip if grip_to is None else grip_to
-            for k, si in enumerate(sgrid):
+            for si in sgrid:
                 arm = np.array([np.interp(si, cum, P[:, j]) for j in range(5)])
                 g = grip if grip_to is None else g0 + (g1 - g0) * min(1.0, si / L)
                 rows.append(np.r_[arm, g])
@@ -584,7 +584,8 @@ class TrussPlanner:
         path(rest["home"][1:], g_open, "return", grip_to=g_start)
         hold(rng.uniform(*expert.HOLD_END_S), "hold_end")
         meta.update(target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(self.t["r"] * 2000, 1),
-                    miss=miss_leg is not None, miss_short_mm=None if miss_leg is None else round(miss_leg["short"] * 1000, 1),
+                    miss=miss_leg is not None,
+                    miss_short_mm=None if miss_leg is None else round(miss_leg["short"] * 1000, 1),
                     speed=round(speed, 3), release_point=rest["release_point"], release_pitch=rest["release_pitch"],
                     hang_mm=rest["hang_mm"],
                     rrt_waypoints=[len(to_pre or ()), len(rest["to_crate"]), len(rest["home"])],

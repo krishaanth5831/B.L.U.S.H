@@ -21,6 +21,8 @@ Graded like generate_scripted.py's judge, at the end of each scene: success = ta
 other fruit came off. Also logged: target picked at all, which others came off, time to the crate.
 Results: ../outputs/eval/<policy name>_<stamp>.jsonl. Nothing is recorded or pushed.
 Run in the lerobot env, outside the Claude sandbox (it hides the GPU and the display).
+⚠️ Single-fruit task only, and it can't run as is: it reads its features from TRAIN_DATASET, deleted locally and
+on the Hub 2026-11-03 (K7). Whole trusses: eval_truss.py.
 """
 import argparse
 import json
@@ -43,6 +45,8 @@ import scene  # noqa: E402
 from add_box_feature import box_vector  # noqa: E402
 from generate_scripted import task_string  # noqa: E402
 
+# ⚠️ Deleted locally and on the Hub 2026-11-03 (K7): main() reads the features from it, so it would fail. train_targets()
+# still runs off its cache file (present 2026-11-08); the TRAIN_SESSION rebuild needs no dataset either.
 TRAIN_DATASET = "krish5831/blush_sim_scripted_v1"
 # The recording session of that dataset (its session.json names each kept episode's seed + target).
 TRAIN_SESSION = pathlib.Path.home() / ".cache" / "blush_sim" / "states" / "20261029_173515"
@@ -105,7 +109,8 @@ def main():
     ap.add_argument("--seed-start", type=int, default=None,
                     help="first scene seed; default: a random one per run (replay a scene with its printed seed)")
     ap.add_argument("--min-novel-mm", type=float, default=0.0,
-                    help="skip scenes whose target is closer than this to a training target (a tomato is ~28 mm wide); 0 = run all")
+                    help="skip scenes whose target is closer than this to a training target "
+                         "(a tomato is ~28 mm wide); 0 = run all")
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     a = ap.parse_args()
     policy_path = a.policy.resolve()
@@ -116,7 +121,7 @@ def main():
     from lerobot.datasets import LeRobotDatasetMetadata
     from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
     from lerobot.processor import make_default_processors
-    from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STR, HF_LEROBOT_HOME
+    from lerobot.utils.constants import HF_LEROBOT_HOME, OBS_ENV_STATE, OBS_STR
     from lerobot.utils.feature_utils import build_dataset_frame
     from lerobot.utils.import_utils import register_third_party_plugins
     register_third_party_plugins()
