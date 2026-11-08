@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Just watch a truss-harvesting policy run in the sim: no grading, no logs (K7, 2026-11-04).
 
-    python rollout_truss.py ../outputs/train/smolvla_truss_lora_v1/checkpoints/last/pretrained_model
+    python rollout_truss.py ../outputs/train/act_truss_v1/checkpoints/last/pretrained_model
 
 The MuJoCo viewer (third person) plus a window per camera (what the policy sees). Scene after scene at real time,
 each up to EPISODE_S, new random layout every time. Keys in a camera window: N = next scene now, Q = quit.
-Same scene settings as the recorded episodes (eval_truss.py has the graded version).
+Same scene settings as the recorded episodes (eval_truss.py has the graded version); rig and policy loading as
+there (eval_truss.trained_on / load_policy: ACT or SmolVLA, --rtc SmolVLA-only).
 """
 import argparse
 import os
@@ -25,14 +26,15 @@ import eval_truss as ev  # noqa: E402
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
 
-EPISODE_S = 45.0
+EPISODE_S = ev.EPISODE_S       # 45 s, as the graded eval
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("policy", type=pathlib.Path)
     ap.add_argument("--seed", type=int, default=None, help="first scene (default: random)")
-    ap.add_argument("--rtc", type=int, default=None, metavar="REINFER", help="real-time chunking (eval_truss.RTCDriver)")
+    ap.add_argument("--rtc", type=int, default=None, metavar="REINFER",
+                    help="SmolVLA: real-time chunking (eval_truss.RTCDriver)")
     ap.add_argument("--rtc-horizon", type=int, default=20)
     ap.add_argument("--smooth", type=float, default=0.0, metavar="ALPHA", help="command smoothing (SockBot: 0.5)")
     a = ap.parse_args()
@@ -50,7 +52,8 @@ def main():
     obs_feats = {k: v for k, v in meta.features.items() if k != OBS_ENV_STATE}
     _, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy, pre, post, pcfg = ev.load_policy(a.policy.resolve(), device, meta, rtc_horizon=a.rtc_horizon if a.rtc else None)
+    policy, pre, post, pcfg = ev.load_policy(a.policy.resolve(), device, meta,
+                                             rtc_horizon=a.rtc_horizon if a.rtc else None)
     driver = ev.RTCDriver(policy, pre, post, a.rtc) if a.rtc else None
     smooth = ev.Smoother(a.smooth)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Run a trained truss-harvesting policy on the sim arm in scenes it never trained on, and watch it (K7, 2026-11-04).
 
-    python eval_truss.py ../outputs/train/smolvla_truss_lora_v1/checkpoints/last/pretrained_model
+    python eval_truss.py ../outputs/train/act_truss_v1/checkpoints/last/pretrained_model
     python eval_truss.py <policy> --scenes 5 --seed-start 1234567      # replay: the seeds are printed
 
 Windows: the MuJoCo viewer (third person, mouse to orbit) and one per camera showing exactly what the policy gets
 (truss-YOLO overlay, green target box + cut-point cross, as in the recorded episodes). Keys in a camera window:
 N = give up on this scene, Q = quit. Real time (30 fps): the sim steps 1/30 s per action, the loop sleeps the rest.
 
-Scenes: truss_scene.build at a fresh random seed per run (>= 1,000,000; the training episodes used 210000-210512,
-the pilot 200000-200008), same settings as generate_truss.py's recording pass (domain randomisation, 1 s settle,
+Scenes: truss_scene.build at a fresh random seed per run (>= 1,000,000; blush_sim_truss_v1 used 210000-210512, the
+pilot 200000-200008, blush_sim_truss_v2 7600000-7600533: a random start can land there, ~1 in 4 million per
+10-scene run), same settings as generate_truss.py's recording pass (domain randomisation, 1 s settle,
 truss YOLO picks the ready truss on the first frame, true box when it's wrong). Works for any policy: ACT gets
 observation.environment_state (box + cut point) if it was trained with it; SmolVLA sees them drawn in the image.
+The rig (cameras) and the dataset whose features are used come from the checkpoint (trained_on). --n-action-steps
+and --rtc are SmolVLA-only (ACT trained with temporal ensembling re-plans every frame anyway).
 
 Graded like generate_truss.judge, at the end of each scene: success = the target truss was cut and lies whole in
 the crate, no other truss was cut, no fruit came off anywhere. Also logged: cut at all, which fruit came off, how
@@ -46,13 +49,18 @@ AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a lat
 
 def trained_on(path):
     """(dataset repo id, rig) a checkpoint was trained on, from its train_config.json: the rig is "base" when the
-    base camera was among its inputs (rig "base", 2026-11-06), else "birdseye"."""
+    base camera was among its inputs (rig "base", 2026-11-06), else "birdseye". ⚠️ SmolVLA renames the cameras
+    (rename_map: base -> camera1), ACT keeps the dataset's names and has no rename_map: so both are looked at, else
+    an ACT checkpoint of rig "base" ran on the birdseye rig and failed at the first frame (no base image)."""
     cfg = path / "train_config.json"
     if not cfg.exists():
         return TRAIN_DATASET, "birdseye"
     c = json.loads(cfg.read_text())
-    rename = c.get("rename_map") or {}
-    return c["dataset"]["repo_id"], "base" if "observation.images.base" in rename else "birdseye"
+    names = set(c.get("rename_map") or {})
+    pcfg = path / "config.json"
+    if pcfg.exists():
+        names |= set(json.loads(pcfg.read_text()).get("input_features") or {})
+    return c["dataset"]["repo_id"], "base" if "observation.images.base" in names else "birdseye"
 
 
 class RTCDriver:
@@ -108,13 +116,18 @@ class Smoother:
 
 
 def load_policy(path, device, ds_meta, n_action_steps=None, rtc_horizon=None):
-    """Plain checkpoints and PEFT ones (LoRA adapter on a base policy, e.g. SmolVLA) alike, via make_policy.
+    """Plain checkpoints (ACT, SmolVLA) and PEFT ones (LoRA adapter on a base policy, e.g. SmolVLA) alike, via
+    make_policy. The policy type is config.json's "type".
     n_action_steps: how many actions of each predicted chunk to play before predicting again (None = as trained).
-    rtc_horizon: turn real-time chunking on (RTCDriver plays it), steering this many moves of each new chunk."""
+    rtc_horizon: turn real-time chunking on (RTCDriver plays it), steering this many moves of each new chunk.
+    Both SmolVLA-only: ⚠️ ACT's predict_action_chunk takes no RTC arguments (it failed only mid-scene), and with
+    temporal ensembling (act-box, act-truss) ACT's select_action never reads n_action_steps (silently ignored)."""
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies import make_pre_post_processors
     from lerobot.policies.factory import make_policy
     cfg = PreTrainedConfig.from_pretrained(path)
+    if cfg.type != "smolvla" and (n_action_steps is not None or rtc_horizon):
+        sys.exit(f"⚠️ --n-action-steps / --rtc are for SmolVLA checkpoints; {path} is {cfg.type!r}")
     cfg.pretrained_path = str(path)
     cfg.device = str(device)
     if n_action_steps is not None:
@@ -150,11 +163,11 @@ def main():
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame, no YOLO overlay")
     ap.add_argument("--headless", action="store_true", help="no windows (implies --fast): just the graded results")
     # ⚠️ SmolVLA trains with chunk_size = n_action_steps = 50: it plays 50 actions (1.7 s) blind before looking again.
-    # Fewer here re-plans more often without retraining (K7 2026-11-06, v2 fumbled at the stalk).
+    # Fewer here re-plans more often without retraining (K7 2026-11-06, v2 fumbled at the stalk). SmolVLA only.
     ap.add_argument("--n-action-steps", type=int, default=None,
-                    help="actions played per predicted chunk before predicting again (default: as trained)")
+                    help="SmolVLA: actions played per predicted chunk before predicting again (default: as trained)")
     ap.add_argument("--rtc", type=int, default=None, metavar="REINFER",
-                    help="real-time chunking: a new chunk every REINFER moves (S.H.E.A.R / Dream Machines: 10)")
+                    help="SmolVLA: real-time chunking, a new chunk every REINFER moves (S.H.E.A.R, Dream Machines: 10)")
     ap.add_argument("--rtc-horizon", type=int, default=20, help="old-chunk moves each new chunk is steered toward")
     ap.add_argument("--smooth", type=float, default=0.0, metavar="ALPHA",
                     help="command smoothing, ALPHA = weight of the new command (SockBot: 0.5); 0 = off")
@@ -269,7 +282,8 @@ def main():
                 if not a.fast:
                     time.sleep(max(0.0, 1 / expert.FPS - (time.time() - t_f)))
             cut = robot.cutters[k].cut_t is not None
-            wrong = [robot.info["trusses"][j]["name"] for j, c in enumerate(robot.cutters) if j != k and c.cut_t is not None]
+            wrong = [robot.info["trusses"][j]["name"] for j, c in enumerate(robot.cutters)
+                     if j != k and c.cut_t is not None]
             off = [robot.info["fruit"][j]["tomato"] for j in range(len(robot.info["fruit"]))
                    if not np.isnan(robot.det.detached_at[j])]
             in_crate = bool(ts.in_crate(robot.info, robot.d, robot.m, k))
@@ -295,8 +309,8 @@ def main():
         cv2.destroyAllWindows()
         if results:
             s = sum(r["success"] for r in results)
-            summary = dict(summary=True, policy=str(policy_path), n_action_steps=n_steps, scenes=len(results), success=s,
-                           cut=sum(r["cut"] for r in results), in_crate=sum(r["in_crate"] for r in results),
+            summary = dict(summary=True, policy=str(policy_path), n_action_steps=n_steps, scenes=len(results),
+                           success=s, cut=sum(r["cut"] for r in results), in_crate=sum(r["in_crate"] for r in results),
                            seed_start=a.seed_start)
             log.write(json.dumps(summary) + "\n")
             print(f"\n{s}/{len(results)} successes (target cut in {summary['cut']}, in the crate in "
