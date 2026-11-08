@@ -1,12 +1,16 @@
 # Harvest pipeline
 
-Teleop demonstrations → ACT baseline (data check) → π0.5 fine-tune → gated end-to-end runs. The policy
-learns **how** to pick a single cherry tomato. The ripeness gate (`../ripeness/`)
-decides **whether** to.
+The real-rig side: teleop demonstrations → ACT → gated end-to-end runs (π0.5 was the original plan
+after ACT). The policy learns **how** to harvest; the ripeness gate (`../ripeness/`) decides **whether** to.
 
-⚠️ The vault notes 03–06 were written for whole-truss cutting. The module now picks
-single fruits, so names and the task string here are placeholders (`harvest.env`).
-Lock them before the first episode.
+⚠️ This folder was written for single-fruit picking (2026-10). Since 2026-11-03 the module harvests
+**whole trusses** (cut the stalk at the fingertips, carry the truss), which so far runs only in the sim
+(`../sim/README.md`, "Truss harvesting"). The vault notes 03–06 were written for truss cutting, so they fit
+again. Names and the task string in `harvest.env` are still single-fruit placeholders: lock them for
+trusses before the first real episode. Nothing here has recorded real episodes yet.
+
+⚠️ Policy choice now (K7 2026-11-08): **ACT**, as in the sim (`sim/scripts/train_sim.sh act-truss`).
+SmolVLA was tried on the sim truss episodes and is not being used this time.
 
 ## Layout
 
@@ -20,9 +24,10 @@ harvest/
 │   ├── record.sh         one recording session (--resume for later ones)
 │   ├── check_dataset.py  episode count, camera keys, normalised-not-degrees
 │   ├── train_act.sh      smoke | full
-│   ├── train_smolvla.sh  superseded by π0.5 (π0.5 training script not written yet)
+│   ├── train_smolvla.sh  not used (SmolVLA dropped; exits until RENAME_MAP is set)
 │   └── rollout.sh        eval (episodic, saved) | run (one shot)
-├── control/              target-centring controller (hybrid approach, see below)
+├── yolo_overlay.py       draws the YOLO view (red detections + green target) into the frames; the sim uses it too
+├── control/              target-centring controller (hybrid approach, see below; not built)
 ├── harvest_loop.py       gated v1 loop: gate → rollout → log
 ├── plan/                 episode_plan.csv, eval_trials.csv, system_trials.csv
 └── logs/                 session_log.md, harvest_log.csv
@@ -82,16 +87,17 @@ slow. Fumbled the align? Press ← and re-record. Don't correct on camera.
 
 ## Steps
 
-1. `scripts/teleop.sh`: pre-flight (wrist roll OK, both streams live, cable free).
+1. `scripts/teleop.sh`: pre-flight in the rerun viewer window (wrist roll OK, both streams live,
+   cable free). No follower at hand: `sim/scripts/teleop_sim.sh` drives the MuJoCo arm from the leader.
 2. `scripts/record.sh` per session of 25. Log each one in `logs/session_log.md`.
 3. Watch every episode (`lerobot-dataset-viz`). Delete the bad ones into `$DATASET_CLEAN`
    with `lerobot-edit-dataset --operation.type delete_episodes`.
 4. `scripts/check_dataset.py $DATASET_CLEAN`. Push to the Hub, add it to `datasets.md`.
 5. `scripts/train_act.sh smoke`, then `full`. Run `scripts/rollout.sh eval` on the 40k and
    80k checkpoints, and log them in `plan/eval_trials.csv`.
-6. π0.5: fine-tune `lerobot/pi05_base` on a rented GPU (or the hosted π API) and serve it
-   with lerobot `async_inference`, which supports pi05 + so101_follower at commit
-   `5aa74557`. Same eval grid.
+6. (Original plan, not started.) π0.5: fine-tune `lerobot/pi05_base` on a rented GPU (or the
+   hosted π API) and serve it with lerobot `async_inference`, which supports pi05 +
+   so101_follower at commit `5aa74557`. Same eval grid.
 7. `harvest_loop.py` over `plan/system_trials.csv`. Metrics: harvest success, gate
    recall, end-to-end ripe yield, **false-pick rate (target: 0)**, median time per pick.
 

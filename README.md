@@ -1,11 +1,26 @@
 # B.L.U.S.H (Berry Localization Using Selective Harvesting)
 
 Vinea's harvest module, built on an SO-101 leader/follower pair in a laser-cut test
-greenhouse. The arm looks at a cherry tomato vine, decides which fruits are ripe,
-and picks **single ripe fruits** into a crate. It leaves everything else on the vine.
+greenhouse. The arm looks at a cherry tomato vine, decides what is ready, harvests it
+into a crate and leaves everything else on the vine.
+
+What it harvests changed on 2026-11-03 (K7): from **single ripe fruits** to **whole
+trusses**. One close of the jaw cuts the truss's stalk with blades at the fingertips,
+spring pads hold it, and the arm carries the whole truss to the crate. The truss work
+runs in the MuJoCo sim ([`sim/`](sim/)) so far. The ripeness gate, the real-rig scripts
+in `harvest/` and the diagram below still describe single-fruit picking.
 
 Everything for that lives here: the ripeness model and its data, the picking policy
-and its recording plan, the eval logs, and the greenhouse CAD.
+and its recording plan, the sim, the eval logs, and the greenhouse CAD.
+
+## Watch it
+
+```bash
+conda activate lerobot && cd sim
+python generate_truss.py --dry --watch --seed-start 200007 --episodes 1   # MuJoCo window: the scripted arm harvests one truss
+```
+
+More in [`sim/README.md`](sim/README.md#watch-it), including a trained policy in the sim.
 
 ## The pipeline
 
@@ -15,7 +30,7 @@ birdseye cam ──► ripeness gate SELECTS (YOLO, recall-tuned) ──► targ
                                                                    ▼
              target box drawn onto the birdseye frames (overlay, fixed for the episode)
                                                                    │
-claw + birdseye (with overlay) + joint state ──► π0.5 picking policy
+claw + birdseye (with overlay) + joint state ──► picking policy (ACT; π0.5 planned)
                                                                    │
 claw cam ──► ripeness gate CONFIRMS just before the close ─────────┤
              (precision-tuned)   not ripe → abort, log claw_veto   ▼
@@ -36,7 +51,8 @@ into picking a green fruit.
 | [`config/`](config/) | Shared hardware facts: arm ports, calibration ids, camera indices, codec. Every script reads these. |
 | [`ripeness/`](ripeness/) | **Ripeness gate.** Capture, labelling guide, own claw-camera data, split-by-session build, YOLO training, threshold eval, `pick_target()`. |
 | [`harvest/`](harvest/) | **Picking pipeline.** Episode plan, record / train / rollout scripts, dataset manifest, gated harvest loop, eval logs. |
-| [`hardware/`](hardware/) | Greenhouse STLs + FeatureScript, the picking end effector, camera mounts. |
+| [`sim/`](sim/) | **MuJoCo sim.** The SO-101 as a lerobot robot plugin, single-fruit and truss scenes, scripted experts, episode generators, DAgger, policy eval, training recipes (`sim/scripts/train_sim.sh`). |
+| [`hardware/`](hardware/) | Greenhouse laser-cut generator + STLs + FeatureScript, the fin-ray end effector, camera mounts. |
 | [`envs/`](envs/) | Conda env for the ripeness model (kept apart from `lerobot`). |
 
 ## Where the data lives
@@ -48,7 +64,8 @@ into picking a green fruit.
 | Released ripeness weights (`best.pt`, a few MB) + results | **this repo**, `ripeness/models/` | Small, and they need to be versioned with the data they came from |
 | Public pretraining sets (Laboro, Mendeley, tomatOD) | local only, gitignored, `ripeness/data/public/` | Two are non-commercial. The repo holds the download notes, not the images. |
 | LeRobot episode datasets (video) | **Hugging Face Hub**, listed in [`harvest/datasets.md`](harvest/datasets.md) | Hundreds of MB of video. GitHub rejects files over 100 MB. |
-| ACT / π0.5 checkpoints | **Hugging Face Hub**, same manifest | Same reason |
+| Sim episode datasets (`blush_sim_truss_v1`, `_v2`) | `~/.cache/huggingface/lerobot/krish5831/` + the Hub, same manifest | Same reason |
+| Policy checkpoints | `outputs/train/` (local) or the Hub, same manifest | Same reason |
 | Training runs (`runs/`, `outputs/`) | local only, gitignored | Scratch |
 
 ⚠️ Git LFS is not installed on the laptop. If the claw-camera data outgrows plain
@@ -68,8 +85,9 @@ Each step's "done when" gates the next one.
 
 1. Picking end effector + hanging-vine rig: [`hardware/end_effector/`](hardware/end_effector/), [`hardware/greenhouse/`](hardware/greenhouse/)
 2. Ripeness gate: [`ripeness/`](ripeness/)
-3. Record picking episodes: [`harvest/`](harvest/)
-4. ACT baseline, trained locally, only as a check that the data is learnable
-5. π0.5 fine-tune from `lerobot/pi05_base`. The laptop's 6 GB GPU can't run it, so it trains
-   and serves remotely: a rented GPU with lerobot `async_inference`, or the hosted π API
+3. Record picking episodes: [`harvest/`](harvest/) on the real rig; scripted truss episodes in [`sim/`](sim/)
+4. ACT, trained on the laptop. In the sim this is the current path (`sim/scripts/train_sim.sh act-truss`,
+   2026-11-08); SmolVLA was tried on the truss episodes and is not being used now
+5. The original plan's π0.5 fine-tune from `lerobot/pi05_base` (rented GPU or the hosted π API, since the
+   laptop's 6 GB GPU can't run it). Not started
 6. Gated end-to-end runs, success and false-pick rate measured
