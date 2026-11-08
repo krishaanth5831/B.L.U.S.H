@@ -119,6 +119,9 @@ def load():
     if MEASURED.exists():
         for c, v in json.loads(MEASURED.read_text()).items():
             out[c] = Lens(v["K"], v["D"], tuple(v.get("size", (W, H))), source=v.get("source", "measured"))
+    # The base camera (rig "base", K7 2026-11-06) is the same InnoMaker module the birdseye uses, moved: same lens,
+    # unless cameras.json measures it on its own
+    out.setdefault("base", out["birdseye"])
     return out
 
 

@@ -195,20 +195,25 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
                                  # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
 
 
-def build(seed=0, arm=True):
+def build(seed=0, arm=True, hold=False, base_mount=False):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model (scene.build does the same).
-    The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable."""
-    for j in range(LAYOUT_TRIES if arm else 1):
-        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]))
+    The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
+    hold: nothing is ready (every truss a decoy or unripe), for "nothing to pick, stay home" episodes (K7
+    2026-11-06, SockBot's lesson: the policy has to see what not reaching looks like).
+    base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml)."""
+    for j in range(LAYOUT_TRIES if arm and not hold else 1):
+        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, base_mount)
         if out[2]["ready"]:
             break
     out[2]["layout_try"] = j
     return out
 
 
-def _build_once(seed, arm, rng):
+def _build_once(seed, arm, rng, hold=False, base_mount=False):
     static, parts, trusses = vines_xml(rng)
+    if base_mount:
+        static = static + [scene.base_mount_xml()]
     m, d = _compose(static, parts, arm)
     if arm:
         _start_pose(m, d)
@@ -242,6 +247,8 @@ def _build_once(seed, arm, rng):
     cand = [k for k, t in enumerate(trusses) if t["cut_ik"] and t.get("approach_ok", True)]
     del t_ok
     n_ready = min(len(cand), int(rng.integers(N_READY[0], N_READY[1] + 1)))
+    if hold:
+        n_ready = 0
     ready = sorted(int(k) for k in rng.choice(cand, n_ready, replace=False)) if n_ready else []
     stages = list(STAGE_P)
     for k, t in enumerate(trusses):
@@ -260,7 +267,7 @@ def _build_once(seed, arm, rng):
     fruit = [f for t in trusses for f in t["fruit"]]
     return m, d, dict(seed=seed, kind="truss", trusses=trusses, fruit=fruit,
                       ready=[k for k in ready if trusses[k]["ready"]], crate=(CRATE_CENTRE, CRATE_SIZE),
-                      ripe=[], reachable=cand)
+                      ripe=[], reachable=cand, hold=hold)
 
 
 if __name__ == "__main__":       # layout stats over seeds

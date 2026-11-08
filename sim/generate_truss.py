@@ -52,6 +52,16 @@ TASK = "Cut the ready tomato truss in the green box at the cross and put it in t
 MISS_SHARE = 0.25                # K7 2026-11-03 (plan point 4: ~25 % recovery episodes)
 PLAN_TRIES = 3                   # plans per seed before it's skipped (retry instead of discarding, plan point 2)
 NEIGHBOUR_MOVE_M = 0.015         # any other truss's fruit may swing this far at most (plan point 2, guess)
+# Rig "base" data mix (K7 2026-11-06, SockBot lessons): "nothing to pick" episodes, no truss ready, the arm holds its
+# start pose for HOLD_S (his biggest lesson: the policy never saw what not reaching looks like). He capped them near
+# 10 % of the set; the scripted episodes start with a 0.5-1.5 s hold of their own (design choice).
+HOLD_SHARE = 0.10
+HOLD_S = (4.0, 6.0)
+# Targets spread along the row: blush_sim_truss_v1 had 98 of 200 targets on the left-most stem and 6 on the right-most
+# (attempt log, 2026-11-06), as S.H.E.A.R's v0 had 180/34/0 cuts on its 3 plants. A seed whose target falls in a part
+# of the row (BALANCE_BINS along truss_scene.STEM_X) already holding more than BALANCE_MAX_SHARE of the kept episodes
+# is skipped before planning (cheap), once BALANCE_AFTER episodes are kept (design choice).
+BALANCE_BINS, BALANCE_MAX_SHARE, BALANCE_AFTER = 4, 0.35, 8
 START_TOL_NORM = 3.0             # generate_scripted.START_TOL_NORM
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"
 DEFAULT_REPO = "krish5831/blush_sim_truss_v1"
@@ -115,6 +125,31 @@ def judge(robot, plan, t0, watch):
     return True, "ok"
 
 
+def judge_hold(robot, watch):
+    """A stay-home episode: nothing cut, no fruit off, nothing moved past NEIGHBOUR_MOVE_M, no physics warnings."""
+    d, info = robot.d, robot.info
+    bad = sum(d.warning[w].number for w in (mujoco.mjtWarning.mjWARN_BADQACC, mujoco.mjtWarning.mjWARN_BADQPOS,
+                                            mujoco.mjtWarning.mjWARN_BADQVEL))
+    if bad:
+        return False, f"{bad} physics warnings"
+    cut = [info["trusses"][j]["name"] for j, c in enumerate(robot.cutters) if c.cut_t is not None]
+    if cut:
+        return False, f"cut {cut}"
+    if not np.all(np.isnan(robot.det.detached_at)):
+        return False, "a fruit came off"
+    if watch.max > NEIGHBOUR_MOVE_M:
+        return False, f"moved {watch.worst} {watch.max * 1000:.0f} mm"
+    return True, "ok"
+
+
+def hold_plan(robot, rng):
+    """Stay where the scene started (the start pose, jittered or not) for HOLD_S."""
+    cur = np.asarray(robot._present_norm(), float)
+    n = int(round(rng.uniform(*HOLD_S) * expert.FPS))
+    return expert.Plan(np.tile(cur, (n, 1)), np.zeros(n, bool), [("hold_home", n)],
+                       dict(hold=True, frames=n, seconds=round(n / expert.FPS, 2)))
+
+
 def play(robot, plan, on_frame=None, realtime=False):
     """Plays a plan from the scene's start frame; returns (t0, Watch). realtime: paced at FPS (a window to watch)."""
     plan.reset()
@@ -148,6 +183,12 @@ def main():
                     help="truss YOLO for the start frame + overlay (default: runs/yolo_truss/truss_v1 if trained, "
                          "else the true box, no YOLO)")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame even if the truss YOLO exists")
+    ap.add_argument("--rig", default="birdseye", choices=("birdseye", "base"),
+                    help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, or base + claw (2026-11-06)")
+    ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
+    ap.add_argument("--hold-share", type=float, default=0.0,
+                    help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
+    ap.add_argument("--balance", action="store_true", help="spread targets along the row (BALANCE_*)")
     a = ap.parse_args()
     if a.no_yolo:
         a.yolo_weights = None
@@ -161,6 +202,7 @@ def main():
     overlay = "yolo" if a.yolo_weights else "true_box"
     cfg = SO101MujocoConfig(id="sim", seed=a.seed_start, viewer=False, overlay=overlay, realtime=False,
                             fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss",
+                            rig=a.rig, start_jitter_deg=a.start_jitter_deg,
                             yolo_weights=str(a.yolo_weights) if a.yolo_weights else None)
     robot = SO101Mujoco(cfg)
 
@@ -192,7 +234,11 @@ def main():
           f"start frame: {'truss YOLO ' + str(a.yolo_weights) if a.yolo_weights else 'true box (no truss YOLO yet)'}\n"
           f"attempt log {log_path}", flush=True)
     robot.connect()
-    kept = dict(n=0, miss=0)
+    kept = dict(n=0, miss=0, hold=0)
+    n_hold = max(1, round(a.hold_share * n_eps)) if a.hold_share > 0 else 0
+    x0, x1 = ts.STEM_X
+    bins = np.zeros(BALANCE_BINS, int)
+    bin_of = lambda x: int(np.clip((x - x0) / (x1 - x0) * BALANCE_BINS, 0, BALANCE_BINS - 1))   # noqa: E731
     seed, attempts, t_start = a.seed_start - 1, 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
@@ -207,50 +253,72 @@ def main():
                 print(f"  seed {seed}: skip, {why}", flush=True)
 
             robot.config.viewer = a.watch and a.dry
-            robot.new_scene(seed, log=False)
+            rng = np.random.default_rng([seed, 0x7255])
+            left = n_eps - kept["n"]
+            hold = bool(np.random.default_rng([seed, 0x401D]).random() < max(0, n_hold - kept["hold"]) / left)
+            robot.new_scene(seed, log=False, hold=hold)
             if not np.all(np.isnan(robot.det.detached_at)):
                 skip("a fruit fell off while the vines settled"); continue
             robot.get_observation()
-            if robot._tgt_k is None:
-                skip(f"no target ({robot._box_info['reason']})"); continue
-            rng = np.random.default_rng([seed, 0x7255])
-            left = n_eps - kept["n"]
-            miss = bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
-            rec.update(target=robot._box_info["target_name"], target_source=robot._box_info["source"],
-                       cut_source=robot._box_info["cut_source"], miss=miss, env=robot.env_state().round(4).tolist())
-            fails, ok, plan = [], False, None
-            for k in range(PLAN_TRIES):
-                if k:
-                    robot.new_scene(seed, log=False)
-                    robot.get_observation()
-                try:
-                    plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
-                except tx.PlanError as e:
-                    fails.append(f"no plan: {e}")
-                    break
+            if hold:
+                rec.update(hold=True, target=None, env=robot.env_state().round(4).tolist())
+                plan = hold_plan(robot, rng)
                 t0, watch = play(robot, plan, realtime=a.watch and a.dry)
-                ok, why = judge(robot, plan, t0, watch)
-                if ok:
-                    break
-                fails.append(f"dry run: {why}")
-            rec["plan_tries"] = k + 1
-            if not ok:
-                skip(" | ".join(fails)); continue
-            rec["plan"] = plan.meta
-            if a.dry:
-                kept["n"] += 1; kept["miss"] += miss
-                rec.update(kept=True, reason="dry ok", wall_s=round(time.time() - t_try, 1))
-                log.write(json.dumps(rec) + "\n"); log.flush()
-                print(f"  seed {seed}: dry ok ({kept['n']}/{n_eps}) {plan.meta['seconds']} s"
-                      f"{', miss' if miss else ''}  [{time.time() - t_try:.0f} s wall]", flush=True)
-                continue
+                ok, why = judge_hold(robot, watch)
+                if not ok:
+                    skip(f"hold dry run: {why}"); continue
+                if a.dry:
+                    kept["n"] += 1; kept["hold"] += 1
+                    rec.update(kept=True, reason="dry ok (hold)", wall_s=round(time.time() - t_try, 1))
+                    log.write(json.dumps(rec) + "\n"); log.flush()
+                    print(f"  seed {seed}: dry ok ({kept['n']}/{n_eps}) hold {plan.meta['seconds']} s", flush=True)
+                    continue
+            elif robot._tgt_k is None:
+                skip(f"no target ({robot._box_info['reason']})"); continue
+            miss = False
+            if not hold:
+                if a.balance and kept["n"] >= BALANCE_AFTER:
+                    b = bin_of(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0][0])
+                    if (bins[b] + 1) / (kept["n"] - kept["hold"] + 1) > BALANCE_MAX_SHARE:
+                        skip(f"balance: row part {b + 1}/{BALANCE_BINS} has {bins[b]} of {kept['n'] - kept['hold']}"); continue
+                miss = bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
+                rec["cut_x"] = round(float(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0][0]), 4)
+                rec.update(target=robot._box_info["target_name"], target_source=robot._box_info["source"],
+                           cut_source=robot._box_info["cut_source"], miss=miss, env=robot.env_state().round(4).tolist())
+                fails, ok, plan = [], False, None
+                for k in range(PLAN_TRIES):
+                    if k:
+                        robot.new_scene(seed, log=False)
+                        robot.get_observation()
+                    try:
+                        plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
+                    except tx.PlanError as e:
+                        fails.append(f"no plan: {e}")
+                        break
+                    t0, watch = play(robot, plan, realtime=a.watch and a.dry)
+                    ok, why = judge(robot, plan, t0, watch)
+                    if ok:
+                        break
+                    fails.append(f"dry run: {why}")
+                rec["plan_tries"] = k + 1
+                if not ok:
+                    skip(" | ".join(fails)); continue
+                rec["plan"] = plan.meta
+                if a.dry:
+                    kept["n"] += 1; kept["miss"] += miss
+                    bins[bin_of(rec["cut_x"])] += 1
+                    rec.update(kept=True, reason="dry ok", wall_s=round(time.time() - t_try, 1))
+                    log.write(json.dumps(rec) + "\n"); log.flush()
+                    print(f"  seed {seed}: dry ok ({kept['n']}/{n_eps}) {plan.meta['seconds']} s"
+                          f"{', miss' if miss else ''}  [{time.time() - t_try:.0f} s wall]", flush=True)
+                    continue
 
             # --- recording pass: same seed, same plan ---
             robot.config.viewer = a.watch
-            robot.new_scene(seed, log=True)
+            robot.new_scene(seed, log=True, hold=hold)
             t_ep = time.time()
             obs = robot.get_observation()
-            if robot._box_info["target_name"] != rec["target"]:
+            if not hold and robot._box_info["target_name"] != rec["target"]:
                 skip(f"recording picked another truss ({robot._box_info['target_name']})"); continue
             env = robot.env_state()
             cur = {"obs": obs}
@@ -271,17 +339,23 @@ def main():
                 return cur["obs"]
 
             t0, watch = play(robot, plan, on_frame=frame)
-            ok, why = judge(robot, plan, t0, watch)
+            ok, why = judge_hold(robot, watch) if hold else judge(robot, plan, t0, watch)
             if not ok:
                 ds.clear_episode_buffer()
                 skip(f"recording differs from the dry run: {why}"); continue
             ds.save_episode()
             ep = kept["n"]
-            kept["n"] += 1; kept["miss"] += miss
+            kept["n"] += 1; kept["miss"] += miss; kept["hold"] += hold
+            if not hold:
+                bins[bin_of(rec["cut_x"])] += 1
             robot.extra = dict(episode_index=ep, dataset=repo_id, scripted=plan.meta, env_state=env.tolist())
             rec.update(kept=True, reason="ok", episode_index=ep, wall_s=round(time.time() - t_try, 1))
             log.write(json.dumps(rec) + "\n"); log.flush()
             m = plan.meta
+            if hold:
+                print(f"✅ episode {ep} ({kept['n']}/{n_eps}): seed {seed}, HOLD (nothing ready) {m['seconds']} s, "
+                      f"neighbours moved {watch.max * 1000:.0f} mm  [{time.time() - t_ep:.0f} s wall]", flush=True)
+                continue
             print(f"✅ episode {ep} ({kept['n']}/{n_eps}): seed {seed}, {m['target']} ({m['n_fruit']} fruit, "
                   f"stalk {m['stalk_mm']} mm), {m['seconds']} s{', miss + recovery' if m['miss'] else ''}, "
                   f"neighbours moved {watch.max * 1000:.0f} mm  [{time.time() - t_ep:.0f} s wall]", flush=True)
@@ -291,10 +365,12 @@ def main():
             ds.finalize()
         n = max(kept["n"], 1)
         mins = round((time.time() - t_start) / 60, 1)
-        log.write(json.dumps(dict(summary=True, kept=kept["n"], attempts=attempts, miss=kept["miss"], minutes=mins)) + "\n")
+        log.write(json.dumps(dict(summary=True, kept=kept["n"], attempts=attempts, miss=kept["miss"], hold=kept["hold"],
+                                  row_parts=bins.tolist(), minutes=mins)) + "\n")
         log.close()
         print(f"\nkept {kept['n']} of {attempts} attempts in {mins} min ({mins / n:.1f} min per kept episode), "
-              f"miss + recovery {kept['miss'] / n:.0%}\nlog {log_path}", flush=True)
+              f"miss + recovery {kept['miss'] / n:.0%}, hold {kept['hold']}, targets per row part {bins.tolist()}\n"
+              f"log {log_path}", flush=True)
 
 
 if __name__ == "__main__":

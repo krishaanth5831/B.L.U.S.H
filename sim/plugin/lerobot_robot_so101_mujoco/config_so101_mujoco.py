@@ -46,3 +46,13 @@ class SO101MujocoConfig(RobotConfig):
     task: str = "fruit"
     # task="truss" + overlay="yolo": the truss YOLO's weights (sim/yolo_truss/). None = the single-fruit default.
     yolo_weights: str | None = None
+    # Which cameras the policy gets (sim/cameras.py RIG_CAMERAS):
+    #   "birdseye"  birdseye + claw, every dataset up to blush_sim_truss_v1
+    #   "base"      base + claw (K7 2026-11-06): the camera low on a bracket left of the arm's base. The target is still
+    #               picked on the birdseye's first frame (the truss YOLO was trained on birdseye views); its box + cut
+    #               point go onto the base camera from the sim's truth. The claw camera stays clean (SockBot: a box on
+    #               the wrist camera is noise).
+    rig: str = "birdseye"
+    # Each scene starts this many degrees (uniform, per arm joint, drawn from the seed) off the start pose, so a policy
+    # learns "see the truss, then reach" rather than one fixed first move (SockBot's ghost-sock lesson). 0 = exact.
+    start_jitter_deg: float = 0.0

@@ -42,12 +42,75 @@ import truss_scene as ts  # noqa: E402
 TRAIN_DATASET = "krish5831/blush_sim_truss_v1"   # features (names, shapes) come from its metadata
 EPISODE_S = 45.0          # scripted truss episodes run 19-31 s (run_v1.log); 45 s gives the policy slack
 AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a late knock-off still counts
-CAMERAS = ("birdseye", "claw")
 
 
-def load_policy(path, device, ds_meta, n_action_steps=None):
+def trained_on(path):
+    """(dataset repo id, rig) a checkpoint was trained on, from its train_config.json: the rig is "base" when the
+    base camera was among its inputs (rig "base", 2026-11-06), else "birdseye"."""
+    cfg = path / "train_config.json"
+    if not cfg.exists():
+        return TRAIN_DATASET, "birdseye"
+    c = json.loads(cfg.read_text())
+    rename = c.get("rename_map") or {}
+    return c["dataset"]["repo_id"], "base" if "observation.images.base" in rename else "birdseye"
+
+
+class RTCDriver:
+    """Real-time chunking for SmolVLA, copied from S.H.E.A.R sim/rollout_policy.py (dev 2140393): a new 50-move chunk
+    every `reinfer` moves, steered ("guided") toward the moves of the previous chunk that weren't played yet, so chunk
+    handovers don't jump. Dream Machines' pi0.5 write-up: their biggest serving-side gain (53 -> 93 %). No latency in
+    the sim (it waits for the policy), so inference_delay is 0. ⚠️ Not under inference_mode: guided RTC takes a
+    gradient inside the denoising loop."""
+
+    def __init__(self, policy, pre, post, reinfer):
+        self.policy, self.pre, self.post, self.reinfer = policy, pre, post, reinfer
+        self.H = policy.config.rtc_config.execution_horizon
+        self.chunk = self.actions = None
+        self.k = 0
+
+    def reset(self):
+        self.policy.reset()
+        self.chunk = self.actions = None
+        self.k = 0
+
+    def __call__(self, x):
+        if self.chunk is None or self.k >= self.reinfer:
+            prev = None
+            if self.chunk is not None:
+                left = self.chunk[self.k:]
+                prev = torch.zeros((self.H, left.shape[-1]), device=left.device, dtype=left.dtype)
+                prev[:min(self.H, len(left))] = left[:self.H]
+            new = self.policy.predict_action_chunk(self.pre(x), inference_delay=0, prev_chunk_left_over=prev)
+            with torch.no_grad():
+                self.chunk = new.detach().squeeze(0)
+                self.actions = self.post(new.detach()).squeeze(0)
+            self.k = 0
+        a = self.actions[self.k]
+        self.k += 1
+        return a.unsqueeze(0)
+
+
+class Smoother:
+    """SockBot's command filter (walnut sensei part 5): a = alpha * new + (1 - alpha) * previous. He used 0.5 (jitter
+    down to 38 %); 0.3 cut more but lagged. alpha 0 = off."""
+
+    def __init__(self, alpha):
+        self.alpha, self.prev = alpha, None
+
+    def reset(self):
+        self.prev = None
+
+    def __call__(self, a):
+        if self.alpha <= 0:
+            return a
+        self.prev = a if self.prev is None else self.alpha * a + (1.0 - self.alpha) * self.prev
+        return self.prev
+
+
+def load_policy(path, device, ds_meta, n_action_steps=None, rtc_horizon=None):
     """Plain checkpoints and PEFT ones (LoRA adapter on a base policy, e.g. SmolVLA) alike, via make_policy.
-    n_action_steps: how many actions of each predicted chunk to play before predicting again (None = as trained)."""
+    n_action_steps: how many actions of each predicted chunk to play before predicting again (None = as trained).
+    rtc_horizon: turn real-time chunking on (RTCDriver plays it), steering this many moves of each new chunk."""
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies import make_pre_post_processors
     from lerobot.policies.factory import make_policy
@@ -56,6 +119,9 @@ def load_policy(path, device, ds_meta, n_action_steps=None):
     cfg.device = str(device)
     if n_action_steps is not None:
         cfg.n_action_steps = n_action_steps
+    if rtc_horizon:
+        from lerobot.policies.rtc.configuration_rtc import RTCConfig
+        cfg.rtc_config = RTCConfig(enabled=True, execution_horizon=rtc_horizon)
     rename = None
     train_cfg = path / "train_config.json"
     if train_cfg.exists():
@@ -67,7 +133,7 @@ def load_policy(path, device, ds_meta, n_action_steps=None):
 
 
 def show(obs, label):
-    for c in CAMERAS:
+    for c in [c for c in ("birdseye", "base", "claw") if c in obs]:   # whichever rig the policy uses
         img = cv2.cvtColor(obs[c], cv2.COLOR_RGB2BGR)
         cv2.putText(img, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.imshow(f"{c} camera (what the policy sees)", img)
@@ -87,6 +153,11 @@ def main():
     # Fewer here re-plans more often without retraining (K7 2026-11-06, v2 fumbled at the stalk).
     ap.add_argument("--n-action-steps", type=int, default=None,
                     help="actions played per predicted chunk before predicting again (default: as trained)")
+    ap.add_argument("--rtc", type=int, default=None, metavar="REINFER",
+                    help="real-time chunking: a new chunk every REINFER moves (S.H.E.A.R / Dream Machines: 10)")
+    ap.add_argument("--rtc-horizon", type=int, default=20, help="old-chunk moves each new chunk is steered toward")
+    ap.add_argument("--smooth", type=float, default=0.0, metavar="ALPHA",
+                    help="command smoothing, ALPHA = weight of the new command (SockBot: 0.5); 0 = off")
     a = ap.parse_args()
     a.fast = a.fast or a.headless
     policy_path = a.policy.resolve()
@@ -103,12 +174,16 @@ def main():
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
 
-    meta = LeRobotDatasetMetadata(TRAIN_DATASET, root=HF_LEROBOT_HOME / TRAIN_DATASET)
+    train_ds, rig = trained_on(policy_path)
+    meta = LeRobotDatasetMetadata(train_ds, root=HF_LEROBOT_HOME / train_ds)
     features = meta.features
     obs_feats = {k: v for k, v in features.items() if k != OBS_ENV_STATE}
     _, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy, pre, post, pcfg = load_policy(policy_path, device, meta, a.n_action_steps)
+    policy, pre, post, pcfg = load_policy(policy_path, device, meta, a.n_action_steps,
+                                          a.rtc_horizon if a.rtc else None)
+    driver = RTCDriver(policy, pre, post, a.rtc) if a.rtc else None
+    smooth = Smoother(a.smooth)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
     # Count the policy's real predictions per scene, so an ignored n_action_steps override shows up (frames/50 vs /10)
     # ⚠️ SmolVLA's select_action refills its queue through _get_action_chunk, not predict_action_chunk
@@ -123,19 +198,23 @@ def main():
         setattr(policy, refill, counted)
     n_steps = getattr(policy.config, "n_action_steps", None)
     print(f"policy {policy_path} ({pcfg.type}{', LoRA' if getattr(pcfg, 'use_peft', False) else ''}) on {device}; "
-          f"task {gt.TASK!r}; box + cut point as numbers: {wants_env}; n_action_steps {n_steps}", flush=True)
+          f"task {gt.TASK!r}; box + cut point as numbers: {wants_env}; n_action_steps {n_steps}; rig {rig} "
+          f"(trained on {train_ds}); "
+          f"{f'RTC every {a.rtc} moves, horizon {a.rtc_horizon}' if a.rtc else 'no RTC'}; smoothing {a.smooth}",
+          flush=True)
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
         fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss",
-        yolo_weights=yolo, state_log_dir=None))
+        yolo_weights=yolo, state_log_dir=None, rig=rig))
     robot.connect()
     out_dir = HERE.parent / "outputs" / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
     name = policy_path.parent.name if policy_path.name == "pretrained_model" else policy_path.name
     run = policy_path.parents[2].name if policy_path.name == "pretrained_model" else ""
-    steps_tag = "" if a.n_action_steps is None else f"_nas{a.n_action_steps}"
+    steps_tag = ("" if a.n_action_steps is None else f"_nas{a.n_action_steps}") + \
+        (f"_rtc{a.rtc}h{a.rtc_horizon}" if a.rtc else "") + (f"_sm{a.smooth}" if a.smooth else "")
     log_path = out_dir / f"{run}_{name}{steps_tag}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
     results, seed, quit_ = [], a.seed_start - 1, False
@@ -153,7 +232,8 @@ def main():
             print(f"\n▶ scene {n}/{a.scenes}: seed {seed}, target {t_info['name']} ({t_info['n']} fruit, "
                   f"stalk {t_info['r'] * 2000:.1f} mm), box from {robot._box_info['source']}", flush=True)
             env = robot.env_state()
-            policy.reset()
+            (driver or policy).reset()
+            smooth.reset()
             calls["n"], frames = 0, 0
             watch = gt.Watch(robot)
             t0, t_crate, gave_up = robot.d.time, None, False
@@ -162,9 +242,13 @@ def main():
                 frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
                 if wants_env:
                     frame[OBS_ENV_STATE] = env
-                with torch.inference_mode():
-                    x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
-                    act = post(policy.select_action(pre(x)))
+                if driver is not None:
+                    act = driver(prepare_observation_for_inference(frame, device, gt.TASK, robot.name))
+                else:
+                    with torch.inference_mode():
+                        x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
+                        act = post(policy.select_action(pre(x)))
+                act = smooth(act)
                 robot.send_action(make_robot_action(act, features))
                 frames += 1
                 obs = robot.get_observation()
@@ -194,7 +278,8 @@ def main():
                        in_crate=in_crate, wrong_cut=wrong, fruit_off=off,
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
-                       gave_up=gave_up, n_action_steps=n_steps, frames=frames, predictions=calls["n"])
+                       gave_up=gave_up, n_action_steps=n_steps, frames=frames, predictions=calls["n"],
+                       rtc=a.rtc, rtc_horizon=a.rtc_horizon if a.rtc else None, smooth=a.smooth, rig=rig)
             results.append(rec)
             log.write(json.dumps(rec) + "\n"); log.flush()
             verdict = ("✅ success" if ok else

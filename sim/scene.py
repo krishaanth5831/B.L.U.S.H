@@ -184,6 +184,17 @@ CAM_BOARD = (0.032, 0.032, 0.020)   # InnoMaker 32 x 32 mm board in its housing:
 LENS_R, LENS_LEN = 0.008, 0.012
 # Lens: both cameras render a wider pinhole image that lens.py bends into the 640x480 frame
 # (⚠️ guessed from the InnoMaker spec until calibrated; sim/cameras.json overrides it).
+# Base camera (rig "base", K7 2026-11-06): the birdseye module moved onto a bracket off the arm's base plate, low and to
+# the robot's left, looking up and across at the truss band. Picked by a probe of 7 spots over 11 plannable scenes
+# (2026-11-06): at the cut it saw the target stalk AND the blades in 8 of 11 (the birdseye: 0 of 11, the arm hides them);
+# at the start frame the target truss shows and the folded arm takes ~15 % of the frame; the arm came within 3 cm of the
+# lens in 2 of 11 episodes (bounding spheres, so an overestimate) and no fruit closer than 28 mm. Closer in failed:
+# 16 cm left, 2 cm back had the folded start-pose arm filling 58 % of the frame (it rests on the robot's left), and
+# spots under the truss band had a tomato a few cm from the lens. Offset from ARM_BASE in world axes: x along the aisle
+# (- = the robot's left), y toward the row. Design pose, unverified until the bracket is printed.
+BASE_CAM_OFFSET = (-0.28, 0.06, 0.10)
+BASE_CAM_AIM = (0.34, 0.37, 0.22)   # middle of the truss band's cut points (truss_scene STEM_X, KNUCKLE_Z)
+BASE_POST_R = 0.008                  # bracket post from the table to the camera housing (printed, guess)
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
 CLAW_FOVY = LENSES["claw"].fovy
 OFF_W, OFF_H = pinhole_size()    # offscreen buffer must fit the pinhole renders, not just 640x480
@@ -281,6 +292,45 @@ def in_crate(pos, centre=CRATE_CENTRE, size=CRATE_SIZE):
     return abs(pos[0] - cx) < sx / 2 and abs(pos[1] - cy) < sy / 2 and pos[2] < h
 
 
+def base_cam_pos():
+    return np.asarray(ARM_BASE, float) + np.asarray(BASE_CAM_OFFSET, float)
+
+
+def _look_xyaxes(pos, aim):
+    """MuJoCo xyaxes for a camera at pos looking at aim, image up as close to world up as it gets (a camera looks
+    down its own -z)."""
+    f = np.asarray(aim, float) - pos
+    f /= np.linalg.norm(f)
+    x = np.cross(f, (0.0, 0.0, 1.0))
+    x /= np.linalg.norm(x)
+    y = np.cross(x, f)
+    return x, y, f
+
+
+def base_cam_xml():
+    p = base_cam_pos()
+    x, y, _ = _look_xyaxes(p, BASE_CAM_AIM)
+    ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
+    return f'<camera name="base" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
+
+
+def base_mount_xml():
+    """The base camera's bracket: a post from the table and the camera housing behind the lens. Solid (the planner
+    avoids it like the rest of the scenery). Only in rig "base" scenes (truss_scene.build base_mount), so scenes of the
+    birdseye rig are unchanged."""
+    p = base_cam_pos()
+    x, y, f = _look_xyaxes(p, BASE_CAM_AIM)
+    c = p - f * (MAST_LENS_GAP + CAM_BOARD[2] / 2)
+    ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
+    grey = "0.25 0.25 0.27 1"
+    return "\n".join([
+        f'<geom name="base_cam_housing" type="box" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}" xyaxes="{ax}" '
+        f'size="{CAM_BOARD[0] / 2} {CAM_BOARD[1] / 2} {CAM_BOARD[2] / 2}" rgba="{grey}"/>',
+        f'<geom name="base_cam_post" type="cylinder" fromto="{c[0]:.4f} {c[1]:.4f} 0 {c[0]:.4f} {c[1]:.4f} '
+        f'{c[2] - CAM_BOARD[1] / 2:.4f}" size="{BASE_POST_R}" rgba="{grey}"/>',
+    ])
+
+
 def _birdseye_xyaxes():
     s, c = np.sin(np.radians(BIRDSEYE_TILT_DEG)), np.cos(np.radians(BIRDSEYE_TILT_DEG))
     # Looking +y (at the row), tilted down by the tilt: image right = +x, image up = (0, sin, cos).
@@ -372,6 +422,7 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
     <light name="side" pos="-0.4 -0.6 0.9" dir="0.7 0.4 -0.6" diffuse="0.3 0.3 0.3" castshadow="false"/>
     <geom name="table" type="plane" pos="0.37 0 0" size="0.8 0.8 0.01" rgba="0.75 0.75 0.72 1"/>
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}" xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
+    {base_cam_xml()}
     {greenhouse_xml() if scenery else ''}
     {crate_xml(*(crate or ())) if scenery else ''}
     {static}

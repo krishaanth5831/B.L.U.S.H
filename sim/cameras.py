@@ -11,7 +11,13 @@ import numpy as np
 from lens import LENSES
 
 CAMERAS = ("birdseye", "claw")                         # ⚠️ same names + order as harvest/scripts/common.sh
-CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw"}
+CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw", "base": "base"}
+# What the policy sees, per rig (SO101MujocoConfig.rig). "birdseye": the mast behind row R0, every dataset up to
+# blush_sim_truss_v1. "base" (K7 2026-11-06): a camera on a bracket off the arm's base, low and to its left, looking
+# up at the trusses, so the blades and the stalk are side-on at the cut (the birdseye looks along the reach and the
+# arm hides them: 0 blade pixels at the cut in 11 of 11 probe scenes). The birdseye stays in the model to pick the
+# target on the first frame, but isn't recorded.
+RIG_CAMERAS = {"birdseye": ("birdseye", "claw"), "base": ("base", "claw")}
 
 
 def pinhole_size():

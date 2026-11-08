@@ -32,6 +32,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("policy", type=pathlib.Path)
     ap.add_argument("--seed", type=int, default=None, help="first scene (default: random)")
+    ap.add_argument("--rtc", type=int, default=None, metavar="REINFER", help="real-time chunking (eval_truss.RTCDriver)")
+    ap.add_argument("--rtc-horizon", type=int, default=20)
+    ap.add_argument("--smooth", type=float, default=0.0, metavar="ALPHA", help="command smoothing (SockBot: 0.5)")
     a = ap.parse_args()
     from lerobot.datasets import LeRobotDatasetMetadata
     from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
@@ -42,17 +45,21 @@ def main():
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
 
-    meta = LeRobotDatasetMetadata(ev.TRAIN_DATASET, root=HF_LEROBOT_HOME / ev.TRAIN_DATASET)
+    train_ds, rig = ev.trained_on(a.policy.resolve())
+    meta = LeRobotDatasetMetadata(train_ds, root=HF_LEROBOT_HOME / train_ds)
     obs_feats = {k: v for k, v in meta.features.items() if k != OBS_ENV_STATE}
     _, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy, pre, post, pcfg = ev.load_policy(a.policy.resolve(), device, meta)
+    policy, pre, post, pcfg = ev.load_policy(a.policy.resolve(), device, meta, rtc_horizon=a.rtc_horizon if a.rtc else None)
+    driver = ev.RTCDriver(policy, pre, post, a.rtc) if a.rtc else None
+    smooth = ev.Smoother(a.smooth)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
     seed = a.seed if a.seed is not None else int(np.random.default_rng().integers(1_000_000, 2**31 - 100_000))
     yolo = str(gt.YOLO_TRUSS) if gt.YOLO_TRUSS.exists() else None
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=seed, viewer=True, overlay="yolo" if yolo else "true_box", realtime=False, fps=expert.FPS,
-        domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss", yolo_weights=yolo, state_log_dir=None))
+        domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss", yolo_weights=yolo, state_log_dir=None,
+        rig=rig))
     robot.connect()
     print("running: N = next scene, Q = quit (click a camera window first)", flush=True)
     first = True
@@ -68,15 +75,21 @@ def main():
                 continue
             print(f"scene seed {seed}: target {robot.info['trusses'][robot._tgt_k]['name']}", flush=True)
             env = robot.env_state()
-            policy.reset()
+            (driver or policy).reset()
+            smooth.reset()
             t0, key = robot.d.time, 0
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
                 frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
                 if wants_env:
                     frame[OBS_ENV_STATE] = env
-                with torch.inference_mode():
-                    act = post(policy.select_action(pre(prepare_observation_for_inference(frame, device, gt.TASK, robot.name))))
+                x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
+                if driver is not None:
+                    act = driver(x)
+                else:
+                    with torch.inference_mode():
+                        act = post(policy.select_action(pre(x)))
+                act = smooth(act)
                 robot.send_action(make_robot_action(act, meta.features))
                 obs = robot.get_observation()
                 key = ev.show(obs, f"seed {seed}  t {robot.d.time - t0:4.1f} s")
