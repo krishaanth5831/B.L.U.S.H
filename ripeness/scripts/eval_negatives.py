@@ -37,7 +37,8 @@ def val(model, name, images):
     # Names come from the model, so 3-class weights validate without an nc mismatch.
     (YOLO_DIR / f"{name}.txt").write_text("".join(f"{p}\n" for p in images))
     (YOLO_DIR / f"{name}.yaml").write_text(yaml.safe_dump(
-        {"path": str(YOLO_DIR), "train": f"{name}.txt", "val": f"{name}.txt", "names": dict(model.names)}, sort_keys=False))
+        {"path": str(YOLO_DIR), "train": f"{name}.txt", "val": f"{name}.txt", "names": dict(model.names)},
+        sort_keys=False))
     # ⚠️ workers=0: with dataloader workers this val hung for 20+ min at 0 % CPU (2026-10-12).
     return model.val(data=str(YOLO_DIR / f"{name}.yaml"), split="val", imgsz=640, batch=16, plots=False, workers=0,
                      verbose=False, project=str(RUNS), name=f"eval_{name}", exist_ok=True)

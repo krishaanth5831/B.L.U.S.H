@@ -1,0 +1,9 @@
+# Lint rules for the whole repo: `ruff check .` (ruff lives in the lerobot env: ~/miniforge3/envs/lerobot/bin/ruff).
+line-length = 120
+extend-exclude = ["outputs", "runs", "sim/assets", "sim/.cache"]
+
+[lint]
+select = ["E", "F", "W", "B"]
+# House style, not bugs: dense one-line statements (`a = 1; b = 2`), single-letter names from the maths
+# (l, I, O), and zip() without strict= (lengths are checked where they matter).
+ignore = ["E701", "E702", "E741", "B905"]

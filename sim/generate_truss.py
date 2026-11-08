@@ -5,6 +5,8 @@
     python generate_truss.py --dry --episodes 20        # plan + dry run + judge only: keep rate and time, no dataset
     python generate_truss.py --dry --watch --seed-start 200007 --episodes 1   # watch one in the MuJoCo window
     python generate_truss.py                            # 200 episodes into krish5831/blush_sim_truss_v1
+    python generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 \
+        --hold-share 0.10 --balance --seed-start 7600000   # how blush_sim_truss_v2 was recorded (rig "base")
 
 Per scene seed (as generate_scripted.py): build the truss scene (domain randomisation on, settle 1 s), take
 the first frame (the truss YOLO, or the true box, picks the ready truss and its cut point), plan, then
@@ -247,7 +249,7 @@ def main():
             rec = dict(seed=seed)
             t_try = time.time()
 
-            def skip(why):
+            def skip(why, rec=rec, t_try=t_try, seed=seed):   # bound now (B023); only called in this iteration anyway
                 rec.update(kept=False, reason=why, wall_s=round(time.time() - t_try, 1))
                 log.write(json.dumps(rec) + "\n"); log.flush()
                 print(f"  seed {seed}: skip, {why}", flush=True)
@@ -280,9 +282,11 @@ def main():
                 if a.balance and kept["n"] >= BALANCE_AFTER:
                     b = bin_of(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0][0])
                     if (bins[b] + 1) / (kept["n"] - kept["hold"] + 1) > BALANCE_MAX_SHARE:
-                        skip(f"balance: row part {b + 1}/{BALANCE_BINS} has {bins[b]} of {kept['n'] - kept['hold']}"); continue
+                        skip(f"balance: row part {b + 1}/{BALANCE_BINS} has {bins[b]} of "
+                             f"{kept['n'] - kept['hold']}"); continue
                 miss = bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
-                rec["cut_x"] = round(float(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0][0]), 4)
+                rec["cut_x"] = round(float(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d,
+                                                             robot.m)[0][0]), 4)
                 rec.update(target=robot._box_info["target_name"], target_source=robot._box_info["source"],
                            cut_source=robot._box_info["cut_source"], miss=miss, env=robot.env_state().round(4).tolist())
                 fails, ok, plan = [], False, None
@@ -326,7 +330,7 @@ def main():
             # them up in the robot's dict (KeyError 'box_cx', pilot 2026-11-03); they're added below instead
             obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
 
-            def frame(sent):
+            def frame(sent, cur=cur, obs_feats=obs_feats, env=env):   # bound now (B023); play() calls it right away
                 t_f = time.time()
                 o = cur["obs"]
                 fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),

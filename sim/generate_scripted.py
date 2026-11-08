@@ -5,6 +5,10 @@
     python generate_scripted.py                          # 200 episodes into krish5831/blush_sim_scripted_v0
     lerobot-dataset-viz --repo-id krish5831/blush_sim_scripted_v0_pilot --episode-index 0   # what got recorded
 
+⚠️ Single-fruit task (task="fruit", the plugin's default). Both of its datasets are gone: v0 deleted 2026-10-28,
+the 200-episode blush_sim_scripted_v1 deleted locally and on the Hub 2026-11-03 (K7). Whole trusses:
+generate_truss.py.
+
 Per scene seed: build the scene (domain randomisation on, vines settled 1 s), take the first frame (the
 birdseye YOLO picks the target, exactly as in teleop), plan the pick, then
   1. dry run: play the plan with physics only (no frames), and judge it;
@@ -163,7 +167,8 @@ def main():
         runs = [rs for rs in runs if any(r.get("reason") == "ok" for r in rs)]      # recording runs only
         ok = [r for rs in runs for r in rs if r.get("reason") == "ok"]
         if len(ok) != ds.meta.total_episodes:
-            sys.exit(f"⚠️ the logs list {len(ok)} kept episodes, the dataset has {ds.meta.total_episodes}: not resuming.")
+            sys.exit(f"⚠️ the logs list {len(ok)} kept episodes, the dataset has {ds.meta.total_episodes}: "
+                     "not resuming.")
         kept.update(n=len(ok), same=sum(r["same_truss"] for r in ok), twist=sum(r["twist"] for r in ok),
                     miss=sum(r["near_miss"] for r in ok))
         if a.seed_start == ap.get_default("seed_start"):
@@ -196,7 +201,9 @@ def main():
             attempts += 1
             rec = dict(seed=seed)
 
-            def skip(why, **kw):
+            # Defaults bind this iteration's rec/seed (ruff B023). Harmless either way: skip is only ever called
+            # in the iteration that defined it, each call followed by `continue`.
+            def skip(why, rec=rec, seed=seed, **kw):
                 rec.update(kept=False, reason=why, **kw)
                 log.write(json.dumps(rec) + "\n"); log.flush()
                 print(f"  seed {seed}: skip, {why}", flush=True)

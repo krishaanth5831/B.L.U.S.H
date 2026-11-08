@@ -35,9 +35,9 @@ HOLD_DRIFT_M = 0.015             # truss origin may move this much in the grippe
 # fruit) the 6-8 fruit truss swung hard enough on its stalk to tear a fruit off its tether (0.58-2.46 N) in 2 of 3
 # runs (2026-11-03). The scripted moves are min-jerk and far gentler; generate_truss's judge counts any fruit lost.
 SHAKE_SCALE = 0.5
-CLOSE_S, HOLD_S = 0.6, 1.0
-STEM_R = 0.004
-FAILS = 0
+CLOSE_S, HOLD_S = 0.6, 1.0       # jaw close time (inside truss_expert.CLOSE_S) and hold before shaking (guess)
+STEM_R = 0.004                   # stand-in stem radius, m: truss_scene.STEM_R (scene.vines_xml's stem capsule)
+FAILS = 0                        # FAIL count, set by report()
 
 
 def report(ok, msg):
@@ -46,7 +46,8 @@ def report(ok, msg):
     print(("PASS " if ok else "FAIL ") + msg, flush=True)
 
 
-def build(q, r, knuckle_shift=np.zeros(3), seed=0):
+def build(q, r, knuckle_shift=None, seed=0):
+    knuckle_shift = np.zeros(3) if knuckle_shift is None else knuckle_shift
     m0, d0 = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True)
     qidx0, _ = scene.arm_ids(m0)
     d0.qpos[qidx0] = q
@@ -113,8 +114,6 @@ def run(q, r, watch=False):
     v = None
     if watch:
         v = cg.open_viewer(m, d, d.xpos[G])
-    T = m.body(info["body"]).id
-
     trace = []
 
     def step(n=1):
@@ -139,7 +138,6 @@ def run(q, r, watch=False):
         step()
     step(int(HOLD_S / m.opt.timestep))
     cut_t = None if cut.cut_t is None else cut.cut_t - (d.time - HOLD_S - CLOSE_S)
-    Rg = d.xmat[G].reshape(3, 3)
     in_g0 = stalk_point_in_gripper(m, d, info, want[1])
     drift = 0.0
     q0 = d.ctrl[uidx].copy()

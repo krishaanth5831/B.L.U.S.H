@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # the names set here are read by the scripts that source this file
 # common_sim.sh: sourced by the sim scripts. Same idea as harvest/scripts/common.sh, with the real
 # follower swapped for the MuJoCo one (--robot.type=so101_mujoco, from sim/plugin). The leader is real.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -6,8 +8,10 @@ source "$HERE/../../harvest/harvest.env"     # TASK, timings: identical strings 
 
 # Sim datasets get their own names, so sim and real never mix by accident. Same robot_type
 # (so_follower) and features as real, so they can be merged on purpose for co-training.
-SIM_DATASET=$HF_USER/blush_sim_pick_v1     # placeholder, lock before the first real session
-SIM_SCRIPTED_DATASET=$HF_USER/blush_sim_scripted_v0   # generate_scripted.py (the scripted picker, K7 2026-10-27)
+# ⚠️ These wrappers run the plugin's defaults: the single-fruit scene (task="fruit", rig "birdseye").
+#    Truss harvesting (task="truss", since 2026-11-03) goes through sim/generate_truss.py, eval_truss.py
+#    and rollout_truss.py, which set task, rig and the truss YOLO themselves (sim/README.md).
+SIM_DATASET=$HF_USER/blush_sim_pick_v1     # placeholder, never recorded: single-fruit teleop demos
 COTRAIN_DATASET=$HF_USER/blush_cotrain_v1  # sim + real merged (train_sim.sh merge)
 SIM_ACT_POLICY=$HF_USER/act_blush_sim_v1
 SIM_PI05_POLICY=$HF_USER/pi05_blush_sim_v1

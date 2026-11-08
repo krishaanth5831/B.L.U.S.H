@@ -20,7 +20,8 @@ import numpy as np
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 # The ripeness env's python. Override with BLUSH_RIPENESS_PYTHON if conda lives elsewhere.
-RIPENESS_PYTHON = os.environ.get("BLUSH_RIPENESS_PYTHON", str(pathlib.Path.home() / "miniforge3/envs/ripeness/bin/python"))
+RIPENESS_PYTHON = os.environ.get("BLUSH_RIPENESS_PYTHON",
+                                 str(pathlib.Path.home() / "miniforge3/envs/ripeness/bin/python"))
 # ⚠️ unverified for the birdseye: pretrain_v4 is the current default weights (ripeness/models/README),
 # trained on claw-distance photos. gate.yaml has no released weights yet.
 WEIGHTS = ROOT / "ripeness/models/pretrain_v4.pt"
@@ -52,8 +53,8 @@ class YoloClient:
         fd, self.frames_path = tempfile.mkstemp(prefix=f"blush_yolo_{os.getpid()}_", suffix=".u8", dir=shm)
         os.close(fd)
         self.shared = np.memmap(self.frames_path, dtype=np.uint8, mode="w+", shape=(MAX_FRAMES * MAX_H * MAX_W * 3,))
-        self.p = subprocess.Popen([python, str(HERE / "yolo_worker.py"), str(self.weights), str(conf), self.frames_path],
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, cwd=str(ROOT))
+        self.p = subprocess.Popen([python, str(HERE / "yolo_worker.py"), str(self.weights), str(conf),
+                                   self.frames_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, cwd=str(ROOT))
         self.names = None
 
     def _recv(self):

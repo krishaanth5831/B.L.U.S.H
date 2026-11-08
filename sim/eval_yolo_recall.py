@@ -25,7 +25,6 @@ import numpy as np
 SIZE_BUCKETS = ((0, 10), (10, 20), (20, 40), (40, 999))   # width of the most visible ripe fruit, px at 640x480
 
 
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=100, help="layouts (seeds 0..n-1)")
@@ -56,7 +55,6 @@ def main():
         if not info["ripe"]:
             continue
         n_ripe.append(len(info["ripe"]))
-        q, _ = scene.arm_ids(m)
         mujoco.mj_forward(m, d)                  # scene.build put the arm in scene.START_NORM
         cams = SimCameras(m)
         rgb = cams.rgb(d, "birdseye")
@@ -66,7 +64,7 @@ def main():
         st = tg.start_frame(cams, d, m, info, dets, t_ripe, ids=ids, mask=mask)
         boxes = tg.fruit_boxes(cams, d, m, info, ids)
         ripe_boxes = [boxes[k][0] for k in info["ripe"] if boxes[k][0] is not None]
-        on_ripe = lambda x: any(tg.matches(x["box"], b) for b in ripe_boxes)   # noqa: E731
+        on_ripe = lambda x, rb=ripe_boxes: any(tg.matches(x["box"], b) for b in rb)   # noqa: E731  (rb: B023)
         width = max((b[2] - b[0] + 1 for b in ripe_boxes), default=0)
         rows.append(dict(seed=seed, width=width, hidden=not ripe_boxes, source=st["source"], reason=st["reason"],
                          ripe_seen=any(int(x["cls"]) == RIPE and on_ripe(x) for x in dets),
@@ -93,7 +91,8 @@ def main():
             return f"{name:>12s} {0:4d}"
         c = lambda f: sum(f(r) for r in rs)   # noqa: E731
         return (f"{name:>12s} {n:4d}  {c(lambda r: r['source'] == 'yolo') / n:6.0%}  "
-                f"{c(lambda r: r['reason'] == 'yolo_wrong') / n:6.0%}  {c(lambda r: r['reason'] == 'yolo_missed') / n:6.0%}  "
+                f"{c(lambda r: r['reason'] == 'yolo_wrong') / n:6.0%}  "
+                f"{c(lambda r: r['reason'] == 'yolo_missed') / n:6.0%}  "
                 f"{c(lambda r: r['ripe_seen']) / n:8.0%}  {c(lambda r: r['any_seen']) / n:7.0%}  "
                 f"{c(lambda r: r['in_mask']) / n:7.0%}  {c(lambda r: r['hidden']) / n:6.0%}")
 

@@ -10,7 +10,8 @@ name = "lerobot_robot_so101_mujoco"
 version = "0.1.0"
 description = "B.L.U.S.H MuJoCo sim follower for lerobot (leader arm -> sim greenhouse)"
 requires-python = ">=3.10"
-dependencies = ["mujoco>=3.3"]
+# ⚠️ >=3.8: scene.py writes joint stiffness / damping in the MuJoCo 3.8 array form (developed on 3.8.1)
+dependencies = ["mujoco>=3.8"]
 
 [tool.setuptools]
 packages = ["lerobot_robot_so101_mujoco"]

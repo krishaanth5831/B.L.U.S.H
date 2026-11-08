@@ -63,7 +63,8 @@ def check_mapping():
     print("     follower_white range vs MJCF joint range (deg):")
     for k, j in enumerate(arm_map.JOINTS):
         mlo, mhi = np.degrees(m.jnt_range[jid[k]])
-        print(f"       {j:13s} real {np.degrees(lo[k]):+7.1f} .. {np.degrees(hi[k]):+7.1f}   MJCF {mlo:+7.1f} .. {mhi:+7.1f}")
+        print(f"       {j:13s} real {np.degrees(lo[k]):+7.1f} .. {np.degrees(hi[k]):+7.1f}   "
+              f"MJCF {mlo:+7.1f} .. {mhi:+7.1f}")
     over = np.degrees(np.maximum(m.jnt_range[jid, 0] - lo, hi - m.jnt_range[jid, 1])).max()
     report(over < 5, f"real follower range exceeds the MJCF limits by at most {over:.1f} deg (sim clips there)")
     print(f"     calibration: {fm.path} sha256 {fm.sha256[:12]}")
@@ -124,8 +125,9 @@ def check_full_scene(seeds):
         # Cameras (through the lens model): the ripe fruits in the birdseye view, the fingers in the claw view.
         seen = [cams.true_box(d, "birdseye", gid(m, info["fruit"][k]["geom"])) for k in info["ripe"]]
         report(max(px for _, px in seen) >= 30,
-               f"seed {seed}: ripe fruits visible in birdseye, " + ", ".join(
-                   f"{px} px ({b and b[2] - b[0] + 1} px across)" for b, px in seen) + f" at {scene.CAM_W}x{scene.CAM_H}")
+               f"seed {seed}: ripe fruits visible in birdseye, "
+               + ", ".join(f"{px} px ({b and b[2] - b[0] + 1} px across)" for b, px in seen)
+               + f" at {scene.CAM_W}x{scene.CAM_H}")
         ids = cams.ids(d, "claw")
         fing = [i for i in range(m.ngeom) if m.geom(i).name.startswith(("arm/finger_", "arm/finray_"))]
         fpx = int(np.isin(ids, fing).sum())

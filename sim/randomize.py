@@ -1,6 +1,6 @@
 """Domain randomisation for one scene: lighting, colours, camera poses, and the physics guesses.
 
-    params = apply(m, seed)       # after scene.build(seed), before the first frame
+    params = apply(m, seed, info["fruit"])   # after scene.build(seed) / truss_scene.build(seed), before the first frame
 
 K7 (2026-10-27) asked for it with the scripted episodes, so the data isn't all one look and one feel.
 Everything is drawn from the scene seed (its own stream, so the vine layout stays the same with or
@@ -11,8 +11,9 @@ What is randomised and why:
 - Lights + table/greenhouse colours: the real room's lighting and the photo textures aren't known yet.
 - Fruit colour, jittered INSIDE its ripeness class (hue/saturation/brightness), so a ripe fruit stays
   red and a green one never drifts toward ripe: the gate's classes must keep meaning the same thing.
-- Camera poses: the birdseye mast (behind row R0, facing the row since 2026-10-28) isn't built yet and the claw
-  camera sits on a 3D-printed mount, so both get a small pose jitter.
+- Camera poses: the birdseye mast (behind row R0, facing the row since 2026-10-28) isn't built yet, the claw
+  camera sits on a 3D-printed mount and the base camera (rig "base") on a printed bracket, so all three get a
+  small pose jitter (the base camera's from its own stream, see the end of apply).
 - Physics guesses that change the grasp: finger friction and stiffness, truss and pedicel stiffness,
   fruit mass. ⚠️ Not fruit friction: the finger geoms have contact priority, so their friction is the
   one MuJoCo uses on a finger-fruit contact. Break force is already drawn per fruit (tomato.DETACH_FORCE_N).
@@ -39,7 +40,8 @@ CLAW_POS_M, CLAW_ROT_DEG = 0.002, 1.5           # printed wrist mount
 BASE_POS_M, BASE_ROT_DEG = 0.005, 2.0           # base-camera bracket (rig "base"): printed, screwed to the base plate
                                                 # (guess, unverified)
 FINGER_FRICTION = (0.9, 1.4)      # sliding; nominal 1.2 (scene.FINGER_FRICTION, a guess)
-FINGER_STIFFNESS = (0.7, 1.4)     # x the fin-ray hinge springs; nominal = 2 N/mm at mid-finger (a guess)
+FINGER_STIFFNESS = (0.7, 1.4)     # x the fin-ray hinge springs; nominal = 2 N/mm at mid-finger (a guess),
+                                  # 40 N/mm on the truss scenes' rigid fingers (scene.RIGID_FINGER_K_N_PER_MM)
 TRUSS_STIFFNESS = (0.6, 1.6)      # x rachis + pedicel ball-joint springs (guesses in tomato.py)
 FRUIT_MASS = (0.85, 1.25)         # x fruit mass (density guess in tomato.py)
 
@@ -123,8 +125,8 @@ def apply(m, seed, fruit=None):
         elif n.endswith(("_rachis_ball", "_ped_ball")):
             m.jnt_stiffness[j] *= kt
     p.update(finger_friction=round(mu, 3), finger_stiffness_x=round(kf, 3), truss_stiffness_x=round(kt, 3))
-    # The base camera (rig "base", 2026-11-06) on its own stream, after everything else: adding it changed no other draw,
-    # so older datasets' scenes randomise exactly as before
+    # The base camera (rig "base", 2026-11-06) on its own stream, after everything else: adding it changed no other
+    # draw, so older datasets' scenes randomise exactly as before
     c = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "base")
     if c >= 0:
         rb = np.random.default_rng([int(seed), 0xBA5E])

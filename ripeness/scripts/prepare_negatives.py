@@ -139,7 +139,8 @@ def not_tomato_boxes(image_ids):
     out = {}
     for r in b.itertuples():   # Open Images boxes are already normalised 0-1
         out.setdefault(r.ImageID, []).append(
-            f"{NOT_TOMATO} {(r.XMin + r.XMax) / 2:.6f} {(r.YMin + r.YMax) / 2:.6f} {r.XMax - r.XMin:.6f} {r.YMax - r.YMin:.6f}")
+            f"{NOT_TOMATO} {(r.XMin + r.XMax) / 2:.6f} {(r.YMin + r.YMax) / 2:.6f} "
+            f"{r.XMax - r.XMin:.6f} {r.YMax - r.YMin:.6f}")
     return out, grouped
 
 
@@ -156,7 +157,8 @@ def drop_conflicting(df, boxes, grouped):
 def download(row, lines):
     out = DST / "images" / row.split / f"{row.image_id}.jpg"
     if not out.exists():
-        urllib.request.urlretrieve(f"https://s3.amazonaws.com/open-images-dataset/{row.oi_split}/{row.image_id}.jpg", out)
+        url = f"https://s3.amazonaws.com/open-images-dataset/{row.oi_split}/{row.image_id}.jpg"
+        urllib.request.urlretrieve(url, out)
     (DST / "labels" / row.split / f"{row.image_id}.txt").write_text("".join(f"{l}\n" for l in lines))
     return out
 
@@ -189,10 +191,12 @@ with cf.ThreadPoolExecutor(16) as ex:
 df.to_csv(DST / "manifest.csv", index=False)
 # Test keeps its group-of images, whose piles are unlabelled, so a correct `not_tomato` box on one fruit of a
 # pile scores as a false positive there. eval_negatives.py also reports `not_tomato` on this pile-free subset.
-(DST / "test_no_piles.txt").write_text("".join(f"{i}\n" for i in sorted(df.image_id[(df.split == "test") & ~df.image_id.isin(grouped)])))
+pile_free = df.image_id[(df.split == "test") & ~df.image_id.isin(grouped)]
+(DST / "test_no_piles.txt").write_text("".join(f"{i}\n" for i in sorted(pile_free)))
 contact_sheet(paths)
 print(df.groupby(["distractor", "split"]).size().unstack(fill_value=0).to_string())
 print(df.split.value_counts().to_string())
 kept = df.image_id[df.image_id.isin(boxes.keys())]
-print(f"`not_tomato` boxes: {sum(len(boxes[i]) for i in kept)} in {len(kept)} of {len(df)} images (the rest are background)")
+print(f"`not_tomato` boxes: {sum(len(boxes[i]) for i in kept)} in {len(kept)} of {len(df)} images "
+      "(the rest are background)")
 print(f"wrote {DST.relative_to(ROOT)}/  -> look at contact.jpg, then add `negatives_oi` to splits.yaml")

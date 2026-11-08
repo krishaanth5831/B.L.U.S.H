@@ -69,8 +69,9 @@ def main():
     lag = int(np.argmin(errs))
     report(errs[lag] < 3, f"sim arm follows the actions: mean error {errs[lag]:.2f} (normalised units) "
                           f"at a lag of {lag} frames ({lag * 1000 / fps:.0f} ms)")
-    report(np.percentile(t_act, 95) < 1 / fps, f"send_action + get_observation p95 {np.percentile(t_act, 95)*1000:.1f} ms "
-                                               f"(budget {1000/fps:.1f} ms at {fps} fps)")
+    report(np.percentile(t_act, 95) < 1 / fps,
+           f"send_action + get_observation p95 {np.percentile(t_act, 95)*1000:.1f} ms "
+           f"(budget {1000/fps:.1f} ms at {fps} fps)")
     from harvest import yolo_overlay as ov
     box_px = int(np.all(o["birdseye"] == ov.TARGET_COLOUR, axis=-1).sum())
     report(box_px > 200 and robot._box_info["source"] == "true_box",
@@ -79,8 +80,11 @@ def main():
     # Record exactly like lerobot-record: default processors -> features -> frames -> AV1 episode.
     tap, rap, rop = make_default_processors()
     features = combine_feature_dicts(
-        aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(action=robot.action_features), use_videos=True),
-        aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(observation=robot.observation_features), use_videos=True))
+        aggregate_pipeline_dataset_features(
+            pipeline=tap, initial_features=create_initial_features(action=robot.action_features), use_videos=True),
+        aggregate_pipeline_dataset_features(
+            pipeline=rop, initial_features=create_initial_features(observation=robot.observation_features),
+            use_videos=True))
     ds = LeRobotDataset.create("local/so101_mujoco_check", fps, root=f"{tmp}/ds", robot_type=robot.name,
                                features=features, use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"))
     for obs, act in zip(obs_log, act_log):
@@ -98,7 +102,8 @@ def main():
     st = item["observation.state"].numpy()
     report(np.all(np.abs(st[:5]) <= 100.5) and 0 <= st[5] <= 100.5,
            "observation.state is in use_degrees=false units (arm within ±100, gripper 0..100)")
-    print("     dataset features:", {k: v["shape"] for k, v in back.meta.features.items() if k.startswith(("obs", "act"))})
+    print("     dataset features:",
+          {k: v["shape"] for k, v in back.meta.features.items() if k.startswith(("obs", "act"))})
 
     robot.disconnect()
     logs = os.listdir(f"{tmp}/states")
@@ -159,7 +164,8 @@ def main():
     sc = meta["scenes"][-1]
     z = np.load(os.path.join(ylog, [f for f in os.listdir(ylog) if f.endswith(".npz")][0]))
     report(sc["yolo"]["weights_sha256"] and sc["box"]["target_name"] and len(z["dets_json"]) == len(z["qpos"]) > n,
-           f"state log keeps the target, the weights hash ({sc['yolo']['weights']} {sc['yolo']['weights_sha256'][:12]}) "
+           f"state log keeps the target, the weights hash "
+           f"({sc['yolo']['weights']} {sc['yolo']['weights_sha256'][:12]}) "
            f"and every frame's YOLO output ({len(z['dets_json'])} frames)")
 
     import shutil

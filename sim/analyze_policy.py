@@ -12,7 +12,9 @@ target is, how far the nearest green / other ripe fruit is. Experiments:
   swap    the novel scenes with 2+ visible ripe fruits, run again with the green box moved to ANOTHER
           ripe fruit: if the policy reads the box, its close point moves to the new box
   nobox   the novel scenes again with no green box drawn: if nothing changes, the box is ignored
-Writes ../outputs/analysis/<name>_<stamp>.jsonl and the start birdseye frame of each episode (PNG).
+Writes ../outputs/analysis/<stamp>_<n or ens>/episodes.jsonl and the start birdseye frame of each episode (PNG).
+⚠️ Single-fruit task only, and it can't run as is: the features come from eval_policy.TRAIN_DATASET
+(blush_sim_scripted_v1), deleted locally and on the Hub 2026-11-03 (K7).
 """
 import argparse
 import json
@@ -167,7 +169,8 @@ def main():
     ap.add_argument("--n-action-steps", type=int, default=None,
                     help="re-plan every N steps instead of the trained 100 (no retraining needed)")
     ap.add_argument("--ensemble", type=float, default=None,
-                    help="ACT temporal ensembling coefficient (the ACT paper's 0.01): re-plan every step, average chunks")
+                    help="ACT temporal ensembling coefficient (the ACT paper's 0.01): re-plan every step, "
+                         "average chunks")
     a = ap.parse_args()
     path = a.policy.resolve()
     from lerobot.datasets import LeRobotDatasetMetadata
@@ -208,7 +211,8 @@ def main():
                   + (f"closed {r['target_mm']} mm from it, nearest {r['nearest']} ({r['nearest_ripeness']}, "
                      f"{r['nearest_mm']} mm) at {r['t_close']} s (nearest {r['target_min_mm']} mm at "
                      f"{r['t_target_min']} s); in-gripper error across {r['err_across_mm']} side {r['err_side_mm']} "
-                     f"depth {r['err_depth_mm']} mm" + (f", picked {r['picked']}, success {r['success']}" if "success" in r else "")
+                     f"depth {r['err_depth_mm']} mm"
+                     + (f", picked {r['picked']}, success {r['success']}" if "success" in r else "")
                      if r["closed"] else f"never closed (came within {r['target_min_mm']} mm)"), flush=True)
         return r
 

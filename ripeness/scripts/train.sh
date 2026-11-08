@@ -16,12 +16,12 @@ HSV_H=0.005                 # ⚠️ Ultralytics default 0.015 shifts hue, and h
 
 case "${1:-}" in
   pretrain)
-    yolo detect train model=yolo11n.pt data=$YOLO_DIR/public.yaml imgsz=$IMGSZ \
-         epochs=100 batch=$BATCH patience=25 hsv_h=$HSV_H project=$RUNS name=pretrain_${2:?version, e.g. v2} ;;
+    yolo detect train model=yolo11n.pt data="$YOLO_DIR/public.yaml" imgsz="$IMGSZ" \
+         epochs=100 batch="$BATCH" patience=25 hsv_h="$HSV_H" project="$RUNS" name="pretrain_${2:?version, e.g. v2}" ;;
   finetune)
     # Starts from the committed pretrain (ripeness/models/pretrain_v4.pt: Laboro + `not_tomato` look-alikes, 4 classes).
     # After a new pretrain run, copy its best.pt into ripeness/models/ under a new version and change this line.
-    yolo detect train model=$REPO/ripeness/models/pretrain_v4.pt data=$YOLO_DIR/ripeness.yaml imgsz=$IMGSZ \
-         epochs=150 batch=$BATCH patience=30 hsv_h=$HSV_H project=$RUNS name=finetune_${2:?version, e.g. v1} ;;
+    yolo detect train model="$REPO/ripeness/models/pretrain_v4.pt" data="$YOLO_DIR/ripeness.yaml" imgsz="$IMGSZ" \
+         epochs=150 batch="$BATCH" patience=30 hsv_h="$HSV_H" project="$RUNS" name="finetune_${2:?version, e.g. v1}" ;;
   *) echo "usage: $0 pretrain <version> | finetune <version>"; exit 1 ;;
 esac

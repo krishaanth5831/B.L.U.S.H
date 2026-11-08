@@ -11,7 +11,7 @@ import pathlib
 
 import numpy as np
 from shapely import affinity
-from shapely.geometry import LineString, MultiPolygon, Polygon, box
+from shapely.geometry import MultiPolygon, box
 from shapely.ops import polylabel
 
 BORDER = 10.0
@@ -152,11 +152,13 @@ def write_svg(path, bed, cut_geoms, eng_lines):
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">']
     for g in cut_geoms:
         for r in rings(g):
-            out.append(f'<path d="{d_of(list(r.coords)[:-1], True)}" fill="none" stroke="#ff0000" stroke-width="0.1"/>')
+            out.append(f'<path d="{d_of(list(r.coords)[:-1], True)}" '
+                       'fill="none" stroke="#ff0000" stroke-width="0.1"/>')
     for l in eng_lines:
         pts = list(l.coords)
         closed = len(pts) > 2 and np.allclose(pts[0], pts[-1])
-        out.append(f'<path d="{d_of(pts[:-1] if closed else pts, closed)}" fill="none" stroke="#0000ff" stroke-width="0.1"/>')
+        out.append(f'<path d="{d_of(pts[:-1] if closed else pts, closed)}" '
+                   'fill="none" stroke="#0000ff" stroke-width="0.1"/>')
     out.append("</svg>")
     pathlib.Path(path).write_text("\n".join(out))
 
@@ -260,7 +262,8 @@ def export(parts, bed, outdir, T):
             pts = np.array([v[:2] for v in e.get_points()])
             seg = np.linalg.norm(np.diff(np.vstack([pts, pts[:1]]), axis=0), axis=1).sum()
             total_cut += seg
-    print(f"\nwrote {len(sheet_files)} files ({sheet_no} sheets + test) to {outdir}; total cut length {total_cut/1000:.1f} m")
+    print(f"\nwrote {len(sheet_files)} files ({sheet_no} sheets + test) to {outdir}; "
+          f"total cut length {total_cut/1000:.1f} m")
     write_readme(outdir, bed, T, sheet_no, total_cut, sum(p.qty for p in main))
     return sheet_no, total_cut
 
@@ -302,4 +305,4 @@ Flat parts for a small slot-together greenhouse frame (about 0.9 x 0.75 x 0.75 m
 - Total cut length about **{cut_len / 1000:.0f} m**.
 
 Questions about the parts: please contact the person who sent this order.
-""")
+""")  # noqa: E501 -- the README's markdown table rows have to stay on one line each

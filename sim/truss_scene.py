@@ -1,9 +1,11 @@
 """Crowded truss scenes for whole-truss harvesting (K7, 2026-11-03).
 
-    m, d, info = build(seed)            the greenhouse, 3-4 stems with 1-3 trusses each, the cut-and-hold arm
+    m, d, info = build(seed)            the greenhouse, 4-5 stems with 2-3 trusses each, the cut-and-hold arm
+    build(seed, hold=True)              nothing ready ("stay home" episodes)
+    build(seed, base_mount=True)        + the base camera's bracket (rig "base")
     info["trusses"]                     truss.truss_xml infos, each with "ready", "cut_ik" (a cut pose exists)
     info["ready"]                       indices of the ready trusses the arm can cut (1-2 per scene)
-    in_crate(info, d, m)                every fruit of the target truss inside the (bigger) truss crate
+    in_crate(info, d, m, k)             every fruit of truss k inside the (bigger) truss crate
 
 Same greenhouse, cameras, arm base and start pose as scene.build (the single-fruit scenes). Changed:
 - every truss carries 6-8 fruit on a cuttable stalk (truss.py), ripening from the stem end;
@@ -89,8 +91,9 @@ def cut_target(t, rng=None):
     return a + (b - a) * u, t["dir"]
 
 
-CRATE_KEEP_OUT_M = 0.04          # no truss hangs within this of the crate's outline (seen from above). ⚠️ Trusses of
-                                 # the right-hand stems spread over it, and the arm reaching in brushed them (2026-11-03)
+# No truss hangs within this of the crate's outline (seen from above). ⚠️ Trusses of the right-hand stems spread
+# over it, and the arm reaching in brushed them (2026-11-03)
+CRATE_KEEP_OUT_M = 0.04
 
 
 def _over_crate(t):
@@ -235,7 +238,6 @@ def _build_once(seed, arm, rng, hold=False, base_mount=False):
     # ⚠️ Crowded on purpose, but a ready truss must be reachable: some cut point with a clear slide-in and a
     # closing jaw that only touches its stalk (truss_expert.approach_ok, neighbours brushed at most). Without
     # this 6 of 12 dry runs failed on a neighbour in the way of every approach (2026-11-03).
-    t_ok = []
     if arm:
         import truss_expert
         _start_pose(m, d)
@@ -245,7 +247,6 @@ def _build_once(seed, arm, rng, hold=False, base_mount=False):
         for k, t in enumerate(trusses):
             t["approach_ok"] = bool(t["cut_ik"] and truss_expert.TrussPlanner(m, d, tmp, k).approach_ok(check_rng))
     cand = [k for k, t in enumerate(trusses) if t["cut_ik"] and t.get("approach_ok", True)]
-    del t_ok
     n_ready = min(len(cand), int(rng.integers(N_READY[0], N_READY[1] + 1)))
     if hold:
         n_ready = 0

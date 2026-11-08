@@ -13,6 +13,9 @@ Values: [cx, cy, w, h] of the green box, divided by the birdseye width/height (0
 the first frame and held for the whole episode (sim/target.py), so every frame of an episode has the same
 4 numbers; they come from the recording session's session.json (scene "box", keyed by episode_index).
 The frames, videos and everything else are copied unchanged. Nothing is pushed.
+⚠️ Single-fruit task only. Its one source, blush_sim_scripted_v1 (and so v1_box), was deleted locally and on the
+Hub 2026-11-03 (K7): main() has nothing to read. box_vector() is still imported by eval_policy / analyze_policy.
+The truss datasets get their box (+ cut point) from truss_target.env_vector at record time instead.
 """
 import argparse
 import json

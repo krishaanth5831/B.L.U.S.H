@@ -13,6 +13,10 @@ turning a weld off frees the body (checked by sim/check_tomato_release.py).
     truss_xml(...)   -> one truss (rachis + n tomatoes), spaced so no two fruits overlap
     single_xml(...)  -> one tomato hanging at an exact point (grasp tests)
     Detacher(m, d)   -> call .step() after every mj_step
+
+truss_xml / single_xml and RACHIS_* build the single-fruit task's scenes (scene.vines_xml, check_grasp.py).
+The whole-truss task (truss.py) builds its own cuttable trusses but hangs each fruit with _fruit() and the
+pedicel / radius / detach constants here, and every task watches the tethers with Detacher.
 """
 import mujoco
 import numpy as np

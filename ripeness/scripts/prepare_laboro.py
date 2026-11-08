@@ -1,4 +1,5 @@
-"""prepare_laboro.py: Laboro Tomato (COCO JSON) -> YOLO layout with our tomato classes (0-2; Laboro has no `not_tomato`).
+"""prepare_laboro.py: Laboro Tomato (COCO JSON) -> YOLO layout with our tomato classes
+(0-2; Laboro has no `not_tomato`).
 
     python ripeness/scripts/prepare_laboro.py                 # cherry (l_) + regular (b_) tomatoes
     python ripeness/scripts/prepare_laboro.py --cherry-only   # l_ only, as the vault note first planned
@@ -46,7 +47,8 @@ for split_in, split_out in (("train", "train"), ("test", "val")):
         W, H = im["width"], im["height"]
         # ⚠️ Boxes are in the JSON's width/height frame. If the decoded image disagrees, EXIF rotation
         #    and the annotations don't line up, and the labels would be silently wrong.
-        assert img.shape[1] == W and img.shape[0] == H, f"{im['file_name']}: decoded {img.shape[1]}x{img.shape[0]} != json {W}x{H}"
+        assert img.shape[1] == W and img.shape[0] == H, \
+            f"{im['file_name']}: decoded {img.shape[1]}x{img.shape[0]} != json {W}x{H}"
         lines = []
         for a in anns.get(im["id"], []):
             cls = MAP[cats[a["category_id"]]]

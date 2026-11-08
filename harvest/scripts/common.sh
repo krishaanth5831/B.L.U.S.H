@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # the flag groups set here are read by the scripts that source this file
 # common.sh: sourced by the harvest scripts. Loads the rig + pipeline config and builds
 # the flag groups every lerobot command shares, so record, rollout and teleop can't drift apart.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

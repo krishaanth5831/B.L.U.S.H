@@ -26,14 +26,12 @@ Watch it: python view_gripper.py   (a window with a jaw-angle slider)
 Needs: numpy shapely trimesh manifold3d matplotlib
 """
 import argparse
-import json
 import math
 import pathlib
 import sys
 
 import numpy as np
 import trimesh
-from shapely import affinity
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 from trimesh.transformations import euler_matrix, rotation_matrix
@@ -168,8 +166,9 @@ def clevis(f, info):
     minus = xz_to_mesh(cheek2d, y - yin - CHEEK, y - yin)
     # hex nut traps from the outer face of the -y cheek
     r = NUT_AF / 2 / math.cos(math.radians(30))
-    hexes = unary_union([Polygon([(b.x + r * math.cos(math.radians(60 * k + 30)), b.y + r * math.sin(math.radians(60 * k + 30)))
-                                  for k in range(6)]) for b in info["bolts"]])
+    hexes = unary_union([Polygon([(b.x + r * math.cos(math.radians(60 * k + 30)),
+                                   b.y + r * math.sin(math.radians(60 * k + 30))) for k in range(6)])
+                         for b in info["bolts"]])
     trap = xz_to_mesh(hexes, y - yin - CHEEK - 1.0, y - yin - CHEEK + NUT_DEPTH)
     minus = trimesh.boolean.difference([minus, trap], engine="manifold")
     return trimesh.boolean.union([plus, minus], engine="manifold")
@@ -213,7 +212,6 @@ def to_print_frames(parts):
     s = parts["fixed"]["stub"].copy(); s.apply_transform(inv_fixed); out["stub_wrist_roll_follower_PLA"] = s
     s = parts["moving"]["stub"].copy(); s.apply_transform(inv_moving); out["stub_moving_jaw_PLA"] = s
     for name in ("fixed", "moving"):
-        f = FINGERS[name]
         m = extrude(parts[name]["profile"], W)   # profile in XY, width along Z
         out[f"finger_{name}_TPU"] = m
     for m in out.values():
@@ -236,26 +234,30 @@ def checks(parts):
             m = p[k]
             # count solid bodies only: the stock fork has a sealed internal void (negative-volume shell)
             nb = sum(b.volume > 0 for b in m.split(only_watertight=False))
-            report(m.is_watertight and nb == 1, f"{name} {k}: watertight={m.is_watertight}, solid bodies={nb}, "
+            report(m.is_watertight and nb == 1,
+                   f"{name} {k}: watertight={m.is_watertight}, solid bodies={nb}, "
                    f"volume {m.volume / 1000:.1f} cm3, size {np.round(m.extents, 1).tolist()}")
         # everything above the cut must still be the stock part (servo interfaces untouched)
-        keep = trimesh.creation.box(extents=[400, 400, 400]); keep.apply_translation([0, 0, FINGERS[name]["z_cut"] + 200])
+        keep = trimesh.creation.box(extents=[400, 400, 400])
+        keep.apply_translation([0, 0, FINGERS[name]["z_cut"] + 200])
         stock_top = trimesh.boolean.intersection([p["stock"], keep], engine="manifold")
         lost = trimesh.boolean.difference([stock_top, p["stub"]], engine="manifold")
         lost_v = 0.0 if lost.is_empty else lost.volume
         report(lost_v < 0.5, f"{name} stub keeps all of the stock part above z {FINGERS[name]['z_cut']:.0f} "
                f"(stock material lost: {lost_v:.3f} mm3)")
         removed = trimesh.boolean.difference([p["stock"], keep], engine="manifold")
-        report(len(removed.split(only_watertight=False)) >= 1, f"{name}: removed stock finger {removed.volume / 1000:.1f} cm3, "
+        report(len(removed.split(only_watertight=False)) >= 1,
+               f"{name}: removed stock finger {removed.volume / 1000:.1f} cm3, "
                f"z {removed.bounds[0][2]:.1f} .. {removed.bounds[1][2]:.1f}")
-        print(f"       {name} finger: {p['info']['n_ribs']} ribs, base block x {p['info']['x_lo']:.1f} .. {p['info']['x_hi']:.1f}")
+        print(f"       {name} finger: {p['info']['n_ribs']} ribs, "
+              f"base block x {p['info']['x_lo']:.1f} .. {p['info']['x_hi']:.1f}")
 
     print("Sweep q (moving jaw) against the fixed jaw and the servo")
     servo = load_stock("sts3215_03a_v1.stl", SERVO_VIS)
     fixed_new = [parts["fixed"]["finger"], parts["fixed"]["clevis"]]
     fixed_all = trimesh.util.concatenate([parts["fixed"]["stub"], parts["fixed"]["finger"]])
     report(vol(fixed_new, servo) < 1.0, f"fixed clevis + finger vs servo: {vol(fixed_new, servo):.2f} mm3")
-    stock_fixed_tip, touch_q = None, None
+    touch_q = None
     rows = []
     for q in np.arange(Q_LIMITS_DEG[0], Q_LIMITS_DEG[1] + 0.1, 2.5):
         Tq = moving_T(q) @ np.linalg.inv(moving_T(0.0))
@@ -270,7 +272,8 @@ def checks(parts):
     for q, v_fix, v_servo in rows:
         if q <= 5 or q % 20 == 0:
             print(f"       q {q:6.1f} deg: overlap with fixed jaw {v_fix:8.1f} mm3, with servo {v_servo:6.2f} mm3")
-    report(all(v < 1.0 for q, v, _ in rows if q >= 0), "no contact with the fixed jaw for q >= 0 (stock is open there too)")
+    report(all(v < 1.0 for q, v, _ in rows if q >= 0),
+           "no contact with the fixed jaw for q >= 0 (stock is open there too)")
     report(all(s < 1.0 for _, _, s in rows), "moving clevis + finger never hit the servo")
     mv = parts["moving"]["finger"].copy()
     mv.apply_transform(moving_T(Q_LIMITS_DEG[0]) @ np.linalg.inv(moving_T(0.0)))
@@ -288,7 +291,8 @@ def checks(parts):
         s2 = mv.section(plane_origin=[0, 0, zmid_f], plane_normal=[0, 0, 1])
         if s1 is None or s2 is None:
             print(f"       q {q:4d}: finger above z {zmid_f:.0f}"); continue
-        print(f"       q {q:4d} deg: gap at z {zmid_f:.0f} = {s2.vertices[:, 0].min() - s1.vertices[:, 0].max():5.1f} mm")
+        gap = s2.vertices[:, 0].min() - s1.vertices[:, 0].max()
+        print(f"       q {q:4d} deg: gap at z {zmid_f:.0f} = {gap:5.1f} mm")
     return ok
 
 def preview(parts, path):
@@ -299,11 +303,13 @@ def preview(parts, path):
     servo = load_stock("sts3215_03a_v1.stl", SERVO_VIS)
     for ax, q in zip(axs[:3], (-10, 0, 40)):
         Tq = moving_T(q) @ np.linalg.inv(moving_T(0.0))
-        items = [(servo, "0.75", 0.2), (parts["fixed"]["stub"], "tab:blue", 0.35), (parts["fixed"]["finger"], "tab:orange", 0.5)]
+        items = [(servo, "0.75", 0.2), (parts["fixed"]["stub"], "tab:blue", 0.35),
+                 (parts["fixed"]["finger"], "tab:orange", 0.5)]
         for k, c, a in (("stub", "tab:blue", 0.35), ("finger", "tab:orange", 0.5)):
             m = parts["moving"][k].copy(); m.apply_transform(Tq); items.append((m, c, a))
         for m, c, a in items:
-            ax.add_collection(matplotlib.collections.PolyCollection(m.vertices[m.faces][:, :, [0, 2]], lw=0, alpha=a, color=c))
+            ax.add_collection(matplotlib.collections.PolyCollection(m.vertices[m.faces][:, :, [0, 2]],
+                                                                    lw=0, alpha=a, color=c))
         for name in ("fixed", "moving"):
             m = parts[name]["finger"].copy()
             if name == "moving": m.apply_transform(Tq)

@@ -40,7 +40,8 @@ while True:
     # agnostic_nms: one verdict per object, not a `ripe` and a `not_tomato` box stacked on the same ball.
     # (The gate doesn't use it: it only ever looks at `ripe` boxes.)
     r = model.predict(frame, conf=CONF, agnostic_nms=True, verbose=False)[0]
-    for (x0, y0, x1, y1), c, conf in zip(r.boxes.xyxy.int().tolist(), r.boxes.cls.int().tolist(), r.boxes.conf.tolist()):
+    for (x0, y0, x1, y1), c, conf in zip(r.boxes.xyxy.int().tolist(), r.boxes.cls.int().tolist(),
+                                         r.boxes.conf.tolist()):
         cv2.rectangle(frame, (x0, y0), (x1, y1), COLOURS.get(c, (255, 255, 255)), 2)
         cv2.putText(frame, f"{model.names[c]} {conf:.2f}", (x0, max(y0 - 6, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOURS.get(c, (255, 255, 255)), 2)
