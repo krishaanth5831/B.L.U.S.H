@@ -2,12 +2,15 @@
 """Checks --robot.type=so101_mujoco the way lerobot uses it, with no arms plugged in.
 
   python check_plugin.py           PASS/FAIL per check, exit 1 on a FAIL
+  python check_plugin.py --no-yolo   skip the overlay=yolo pass (it needs the truss YOLO + the ripeness env)
 
-It builds the robot through lerobot's own factory, drives it at 30 fps, records a 3 s episode with
-lerobot-record's feature pipeline and the AV1 encoder, reads it back, and sends one frame to
-rerun. Everything it writes goes to a temp dir that is deleted afterwards. Run in the lerobot env
-after `pip install -e plugin`.
+It builds the robot through lerobot's own factory on a truss scene (SEED), drives it at 30 fps, records a 3 s
+episode with lerobot-record's feature pipeline and the AV1 encoder, reads it back, and sends one frame to rerun.
+Then rig "base" (base + claw cameras, the box on the base camera) and, if the truss YOLO is trained
+(generate_truss.YOLO_TRUSS), overlay=yolo for 15 s. Everything it writes goes to a temp dir ($TMPDIR honoured)
+that is deleted afterwards. Run in the lerobot env after `pip install -e plugin`.
 """
+import argparse
 import os
 import sys
 import tempfile
@@ -18,6 +21,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")   # headless; the commands in sim/scri
 import numpy as np  # noqa: E402
 
 FAILS = 0
+SEED = 7600000                     # a truss scene with a ready truss in view (blush_sim_truss_v2's first seed)
 
 
 def report(ok, msg):
@@ -27,6 +31,10 @@ def report(ok, msg):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--no-yolo", action="store_true", help="skip the overlay=yolo pass")
+    a = ap.parse_args()
+    from generate_truss import TASK, YOLO_TRUSS
     from lerobot.configs.video import RGBEncoderConfig
     from lerobot.datasets import LeRobotDataset, aggregate_pipeline_dataset_features, create_initial_features
     from lerobot.processor import make_default_processors
@@ -40,7 +48,8 @@ def main():
     report("so101_mujoco" in RobotConfig.get_known_choices(), "lerobot discovers --robot.type=so101_mujoco")
 
     tmp = tempfile.mkdtemp(prefix="so101_mujoco_check_")
-    cfg = RobotConfig.get_choice_class("so101_mujoco")(viewer=False, overlay="true_box", state_log_dir=f"{tmp}/states")
+    Cfg = RobotConfig.get_choice_class("so101_mujoco")
+    cfg = Cfg(seed=SEED, viewer=False, overlay="true_box", state_log_dir=f"{tmp}/states")
     robot = make_robot_from_config(cfg)
     report(robot.name == "so_follower", "robot_type matches the real follower (sim + real datasets can merge)")
     robot.connect()
@@ -74,8 +83,9 @@ def main():
            f"(budget {1000/fps:.1f} ms at {fps} fps)")
     from harvest import yolo_overlay as ov
     box_px = int(np.all(o["birdseye"] == ov.TARGET_COLOUR, axis=-1).sum())
-    report(box_px > 200 and robot._box_info["source"] == "true_box",
-           f"true_box overlay: green target box drawn on birdseye ({box_px} px, harvest/yolo_overlay.py style)")
+    report(box_px > 200 and robot._box_info["source"] == "true_box" and robot._tgt_k in robot.info["ready"],
+           f"true_box overlay: green box on the ready truss {robot._box_info['target_name']} drawn on birdseye "
+           f"({box_px} px, harvest/yolo_overlay.py style)")
 
     # Record exactly like lerobot-record: default processors -> features -> frames -> AV1 episode.
     tap, rap, rop = make_default_processors()
@@ -90,7 +100,7 @@ def main():
     for obs, act in zip(obs_log, act_log):
         frame = {**build_dataset_frame(ds.features, rop(obs), prefix=OBS_STR),
                  **build_dataset_frame(ds.features, tap((act, obs)), prefix=ACTION),
-                 "task": "Pick the ripe cherry tomato and place it in the crate"}
+                 "task": TASK}
         ds.add_frame(frame)
     ds.save_episode()
     ds.finalize()
@@ -121,9 +131,40 @@ def main():
     except Exception as e:  # noqa: BLE001
         report(False, f"rerun logging: {e}")
 
-    # overlay=yolo (what sim/scripts use): YOLO on both cameras every frame, drawn into the frames.
-    ycfg = RobotConfig.get_choice_class("so101_mujoco")(viewer=False, overlay="yolo", state_log_dir=f"{tmp}/ystates",
-                                                        snap_to_first_action=False)
+    # rig "base": base + claw cameras, the base camera's bracket in the scene, the box + cut point from the sim's
+    # truth on the base camera (the target still picked on a birdseye frame that isn't returned).
+    brobot = make_robot_from_config(Cfg(seed=SEED, viewer=False, overlay="true_box", rig="base",
+                                        state_log_dir=f"{tmp}/bstates", snap_to_first_action=False))
+    brobot.connect()
+    bobs = brobot.get_observation()
+    for _ in range(5):
+        brobot.send_action({f"{j}.pos": bobs[f"{j}.pos"] for j in js + ("gripper",)})
+        bobs = brobot.get_observation()
+    report(set(brobot.cameras) == {"base", "claw"} and "birdseye" not in bobs
+           and all(bobs[c].shape == (480, 640, 3) for c in ("base", "claw")),
+           "rig base: cameras base + claw come back as 480x640x3 uint8, no birdseye")
+    report(brobot.m.geom("base_cam_housing").id >= 0, "rig base: the base camera's bracket is in the scene")
+    bpx = int(np.all(bobs["base"] == ov.TARGET_COLOUR, axis=-1).sum())
+    env = brobot.env_state()
+    report(bpx > 200 and np.all(env[:4] > 0), f"rig base: green box on the base camera ({bpx} px), env_state "
+                                              f"{np.round(env, 3).tolist()}")
+    brobot.disconnect()
+
+    # overlay=yolo: the truss YOLO on both cameras every frame, drawn into the frames (rig birdseye).
+    if a.no_yolo or not YOLO_TRUSS.exists():
+        print(f"SKIP overlay=yolo ({'--no-yolo' if a.no_yolo else f'no truss YOLO at {YOLO_TRUSS}'})")
+    else:
+        check_yolo(Cfg, make_robot_from_config, tmp, str(YOLO_TRUSS), fps, ov)
+
+    import shutil
+    shutil.rmtree(tmp)
+    print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAIL'}")
+    sys.exit(1 if FAILS else 0)
+
+
+def check_yolo(Cfg, make_robot_from_config, tmp, weights, fps, ov):
+    ycfg = Cfg(seed=SEED, viewer=False, overlay="yolo", yolo_weights=weights, state_log_dir=f"{tmp}/ystates",
+               snap_to_first_action=False)
     yrobot = make_robot_from_config(ycfg)
     t0 = time.perf_counter()
     yrobot.connect()
@@ -131,8 +172,9 @@ def main():
     t_first = time.perf_counter() - t0
     info = yrobot._box_info
     report(info is not None and info["source"] in ("yolo", "true_box", "true_box_hidden")
-           and info["target"] in yrobot.info["ripe"],
-           f"overlay=yolo: target {info and info['target_name']} is one of the {len(yrobot.info['ripe'])} ripe fruits, "
+           and info["target"] in yrobot.info["ready"],
+           f"overlay=yolo: target {info and info['target_name']} is one of the {len(yrobot.info['ready'])} ready "
+           f"trusses, "
            f"source {info and info['source']} ({info and info['reason'] or 'YOLO matched'}), first frame "
            f"{t_first:.1f} s incl. loading the weights")
     secs_y = 15.0
@@ -156,8 +198,9 @@ def main():
     report(p95 < 20, f"overlay=yolo get_observation p95 {p95:.1f} ms over {secs_y:.0f} s (render + YOLO on both "
                      f"cameras + drawing, every frame; budget 20 of the {1000 / fps:.1f} ms frame)")
     report(green == n, f"green target box on every birdseye frame ({green}/{n})")
-    report(red["birdseye"] > 0 and red["claw"] > 0,
-           f"red detection boxes drawn in RGB: birdseye {red['birdseye']}/{n} frames, claw {red['claw']}/{n}")
+    # the truss YOLO was trained on birdseye views only (sim/yolo_truss): the claw may well show no detection
+    report(red["birdseye"] > 0,
+           f"red detection boxes drawn in RGB: birdseye {red['birdseye']}/{n} frames (claw {red['claw']}/{n})")
     import json
     ylog = os.path.join(f"{tmp}/ystates", os.listdir(f"{tmp}/ystates")[0])
     meta = json.loads(open(os.path.join(ylog, "session.json")).read())
@@ -167,11 +210,6 @@ def main():
            f"state log keeps the target, the weights hash "
            f"({sc['yolo']['weights']} {sc['yolo']['weights_sha256'][:12]}) "
            f"and every frame's YOLO output ({len(z['dets_json'])} frames)")
-
-    import shutil
-    shutil.rmtree(tmp)
-    print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAIL'}")
-    sys.exit(1 if FAILS else 0)
 
 
 if __name__ == "__main__":

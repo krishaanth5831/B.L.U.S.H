@@ -4,7 +4,7 @@
 #   sim/scripts/record_sim.sh --resume   later sessions (appends; every other flag must stay identical)
 #
 # Keys (terminal focus):  → end the episode early   ← discard + re-record it   Esc stop the session
-# MuJoCo window:          N during the reset period = the next episode gets a new vine layout
+# MuJoCo window:          N during the reset period = the next episode gets a new truss layout
 # ⚠️ Not before the gates in the vault note "(C) BLUSH Sim — Before Each Step" (step 5).
 set -euo pipefail
 source "$(dirname "$0")/common_sim.sh"
@@ -14,7 +14,7 @@ EXTRA=()
 lerobot-record "${SIM_ROBOT_FLAGS[@]}" "${TELEOP_FLAGS[@]}" \
   --dataset.repo_id="$SIM_DATASET" \
   --dataset.no_stamp=true \
-  --dataset.single_task="$TASK" \
+  --dataset.single_task="$SIM_TASK" \
   --dataset.num_episodes="$SESSION_EPISODES" \
   --dataset.episode_time_s="$EPISODE_S" \
   --dataset.reset_time_s="$RESET_S" \

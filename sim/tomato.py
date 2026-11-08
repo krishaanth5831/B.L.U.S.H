@@ -1,4 +1,4 @@
-"""Cherry-tomato trusses for the MuJoCo sim, with OrchardBench-style fruit detachment.
+"""Cherry tomatoes for the MuJoCo sim, with OrchardBench-style fruit detachment.
 
 Each tomato is a free body held to the tip of its pedicel by a soft weld (the "tether"). The
 weld's constraint force is read every step; once it stays above that tomato's break force for
@@ -10,13 +10,10 @@ Ported from OrchardBench (arXiv 2607.06337, apples on a one-sided spring tether,
 pull exceeds f_detach for a few frames). They run Newton / MuJoCo-Warp; this is CPU MuJoCo, where
 turning a weld off frees the body (checked by sim/check_tomato_release.py).
 
-    truss_xml(...)   -> one truss (rachis + n tomatoes), spaced so no two fruits overlap
-    single_xml(...)  -> one tomato hanging at an exact point (grasp tests)
+    _fruit(...)      -> one pedicel + tomato + tether (truss.truss_xml hangs every fruit of a truss with it)
     Detacher(m, d)   -> call .step() after every mj_step
 
-truss_xml / single_xml and RACHIS_* build the single-fruit task's scenes (scene.vines_xml, check_grasp.py).
-The whole-truss task (truss.py) builds its own cuttable trusses but hangs each fruit with _fruit() and the
-pedicel / radius / detach constants here, and every task watches the tethers with Detacher.
+The fruit sizes, pedicel, ripeness colours and break forces here are what truss.py's trusses draw from.
 """
 import mujoco
 import numpy as np
@@ -57,15 +54,6 @@ HANG_TILT_DEG = (0.0, 35.0)
 CALYX_SEPALS = 5
 CALYX_SPREAD_DEG = 42.0       # sepal tip, measured from the calyx centre over the fruit surface
 CALYX_RGBA = "0.22 0.38 0.12 1"
-
-# The truss stem (rachis) hangs off the vine on a sprung ball joint, so a truss sways when the
-# gripper drags a fruit. Rigid, it pushed all of a closing jaw's ~8 mm drag into the tether and
-# plucked the weakest fruit (check_scene.py). 0.3 N.m/rad = ~10 deg of sag for a 10-fruit truss on an
-# 8 cm rachis: guess, unverified (push a real truss with a scale and measure the sway).
-RACHIS_STIFFNESS = 0.3        # N.m/rad
-RACHIS_DAMPING = 0.01         # N.m.s/rad, guess: settles in ~1 s
-RACHIS_ARMATURE = 1e-4        # ⚠️ the 2 mm rachis capsule is nearly massless; without this the joint jitters
-RACHIS_LEVER_M = 0.08         # single_xml's stand-in truss length
 
 # Weld softness = the tether spring. (timeconst, dampratio) in MuJoCo solref. 20 ms is MuJoCo's
 # default: stiff enough that a hanging fruit moves < 1 mm. (unverified against a real pedicel)
@@ -123,78 +111,6 @@ def _fruit(name, local, world, tip, r, rip, threshold, hang=(0.0, 0.0, -1.0), sp
           f'solref="{TETHER_SOLREF[0]} {TETHER_SOLREF[1]}"/>')
     return ped, body, eq, dict(tomato=tn, pedicel=pn, eq=f"{tn}_tether", geom=f"{tn}_g", radius=r,
                                ripeness=rip, threshold=threshold, pos=c)
-
-
-def truss_xml(name, rachis_from, rachis_to, n, rng, ripeness=None, avoid=()):
-    """MJCF for one truss: a static rachis capsule with up to n tomatoes hanging off it.
-
-    rachis_from/to: world points (m) of the truss stem. ripeness: list of RIPENESS_RGBA keys (len
-    n), random if None. avoid: (centre, radius) of fruits already placed elsewhere. A fruit that
-    would overlap a neighbour gets a smaller radius, then is dropped, so a truss can come out
-    with fewer than n tomatoes.
-    Returns (rachis_body_xml, tomato_bodies_xml, equality_xml, fruit_info_list).
-    """
-    a, b = np.asarray(rachis_from, float), np.asarray(rachis_to, float)
-    mid, axis = (a + b) / 2, b - a
-    L = np.linalg.norm(axis)
-    out = np.cross(axis / L, [0, 0, 1])
-    out = out / np.linalg.norm(out) if np.linalg.norm(out) > 1e-6 else np.array([1.0, 0, 0])
-    placed = list(avoid)
-    peds, bodies, eqs, fruit = [], [], [], []
-    for i in range(n):
-        p_world = a + (i + 0.5) / n * axis
-        side = 1 if i % 2 == 0 else -1
-        lp = rng.uniform(*PEDICEL_LEN_M)
-        lean = np.radians(rng.uniform(*PEDICEL_LEAN_DEG))
-        sw = np.radians(rng.uniform(-PEDICEL_SWING_DEG, PEDICEL_SWING_DEG))
-        o = side * (np.cos(sw) * out + np.sin(sw) * np.cross([0, 0, 1.0], out))
-        tip = (np.sin(lean) * o + np.array([0, 0, -np.cos(lean)])) * lp
-        tilt, az = np.radians(rng.uniform(*HANG_TILT_DEG)), rng.uniform(0, 2 * np.pi)
-        hang = np.array([np.sin(tilt) * np.cos(az), np.sin(tilt) * np.sin(az), -np.cos(tilt)])
-        spin = rng.uniform(0, 2 * np.pi)
-        rip = ripeness[i] if ripeness else str(rng.choice(list(RIPENESS_RGBA)))
-        r = rng.uniform(*RADIUS_M)
-        for _ in range(4):
-            c = p_world + tip + hang * r
-            if all(np.linalg.norm(c - c2) >= r + r2 + FRUIT_GAP_M for c2, r2 in placed):
-                break
-            r *= 0.85
-        else:
-            continue
-        if r < RADIUS_M[0] * 0.8:
-            continue
-        ped, body, eq, info = _fruit(f"{name}_t{i}", p_world - mid, p_world, tip, r, rip,
-                                     rng.uniform(*DETACH_FORCE_N), hang=hang, spin=spin)
-        info["truss"] = name
-        placed.append((info["pos"], r))
-        peds.append(ped); bodies.append(body); eqs.append(eq); fruit.append(info)
-    rachis = (f'<body name="{name}_rachis" pos="{mid[0]:.5f} {mid[1]:.5f} {mid[2]:.5f}">'
-              f'<joint name="{name}_rachis_ball" type="ball" pos="{-axis[0]/2:.5f} {-axis[1]/2:.5f} {-axis[2]/2:.5f}" '
-              f'stiffness="{RACHIS_STIFFNESS}" damping="{RACHIS_DAMPING}" armature="{RACHIS_ARMATURE}"/>'
-              f'<geom type="capsule" fromto="{-axis[0]/2:.5f} {-axis[1]/2:.5f} {-axis[2]/2:.5f} '
-              f'{axis[0]/2:.5f} {axis[1]/2:.5f} {axis[2]/2:.5f}" size="0.002" '
-              f'rgba="{STEM_RGBA}" contype="0" conaffinity="0"/>' + "".join(peds) + "</body>")
-    return rachis, "\n".join(bodies), "\n".join(eqs), fruit
-
-
-def single_xml(name, centre, r, threshold, ripeness="ripe", pedicel_len=0.012, lever_dir=(1.0, 0.0, 0.0)):
-    """One tomato whose centre sits exactly at `centre`, hanging straight down from the end of a
-    stand-in truss: an anchor on a sprung ball joint RACHIS_LEVER_M away along `lever_dir` (same
-    compliance as a real truss in truss_xml). ⚠️ The direction matters for grasps: the scene's
-    trusses run from the row out toward the aisle, so for an arm facing the row the pivot lies
-    beyond the fingertips (check_grasp.py passes the arm's forward direction)."""
-    centre = np.asarray(centre, float)
-    top = centre + np.array([0, 0, r + pedicel_len])
-    piv = np.asarray(lever_dir, float) / np.linalg.norm(lever_dir) * RACHIS_LEVER_M
-    ped, body, eq, info = _fruit(name, np.zeros(3), top, np.array([0, 0, -pedicel_len]), r, ripeness,
-                                 threshold)
-    anchor = (f'<body name="{name}_anchor" pos="{top[0]:.5f} {top[1]:.5f} {top[2]:.5f}">'
-              f'<joint name="{name}_anchor_ball" type="ball" pos="{piv[0]:.5f} {piv[1]:.5f} {piv[2]:.5f}" '
-              f'stiffness="{RACHIS_STIFFNESS}" damping="{RACHIS_DAMPING}" armature="{RACHIS_ARMATURE}"/>'
-              f'<geom type="capsule" fromto="0 0 0 {piv[0]:.5f} {piv[1]:.5f} {piv[2]:.5f}" size="0.002" mass="0.002" '
-              f'rgba="{STEM_RGBA}" contype="0" conaffinity="0"/>'
-              f'{ped}</body>')
-    return anchor, body, eq, info
 
 
 class Detacher:

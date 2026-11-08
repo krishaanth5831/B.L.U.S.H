@@ -36,7 +36,7 @@ import numpy as np
 
 import arm_map
 
-CLEARANCE = 0.004        # m kept from hard obstacles on a route (B.L.U.S.H expert.CLEARANCE_M)
+CLEARANCE = 0.004        # m kept from hard obstacles on a route (the single-fruit picker's sweep clearance, guess)
 BLADE_CLEARANCE = 0.002  # m the blades keep from blade_guard things (guess, unverified)
 SOFT_CLEARANCE = 0.002   # m kept from soft / firm things by default (SHEAR's kept leaves; guess, unverified)
 STEP = np.radians(3.0)   # joint-space resolution of collision checks along a segment (largest joint)

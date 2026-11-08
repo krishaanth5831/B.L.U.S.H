@@ -4,7 +4,7 @@
     labels = yolo_labels(cams, d, m, info)            YOLO training rows: truss_ready / truss_not_ready / cut_point
     out = start_frame(cams, d, m, info, dets)         the target truss, its box and cut point, and why
 
-Same rule as target.py for single fruit, moved to trusses: on the first birdseye frame the truss YOLO's most
+The real rig's start-frame rule (target.py), for trusses: on the first birdseye frame the truss YOLO's most
 confident `truss_ready` box inside the reach mask is the target if it sits on a ready truss (source "yolo");
 otherwise the most visible ready truss's true box is drawn (source "true_box", reason yolo_missed / yolo_wrong),
 so no episode is lost. The cut point is the truss YOLO's `cut_point` box inside the target box (source "yolo"),
@@ -27,7 +27,9 @@ READY, NOT_READY, CUT = 0, 1, 2
 CUT_BOX_PX = 14
 # A truss counts as seen when at least this many pixels show (fruit + stalk); fewer and it gets no label.
 MIN_PX = 40
-T_READY_BIRDSEYE = 0.25          # ⚠️ unverified, like target.T_RIPE_BIRDSEYE: set from a measured test split
+# ⚠️ unverified: set it from a measured test split (Roadmap M2.5). 0.25 = live_view.py's default draw threshold,
+# leaning to recall as M2.5 asks (the ripeness gate's t_ripe_birdseye guess, reused).
+T_READY_BIRDSEYE = 0.25
 ENV_NAMES = ["box_cx", "box_cy", "box_w", "box_h", "cut_u", "cut_v"]
 W, H = 640, 480                  # every sim camera's frame (lens.W, H): birdseye, and base for rig "base" (view_target)
 
@@ -52,7 +54,7 @@ def truss_boxes(cams, d, m, info, ids=None, cam="birdseye"):
 
 
 def outline_box(cams, d, m, t, cam="birdseye"):
-    """Box around a truss's fruit outlines and stalk whether or not something hides it (cf. target.py)."""
+    """Box around a truss's fruit outlines and stalk whether or not something hides it."""
     bs = [cams.sphere_box(d, cam, d.xpos[m.body(f["tomato"]).id], f["radius"]) for f in t["fruit"]]
     b = m.body(t["body"]).id
     pts = [d.xpos[b] + d.xmat[b].reshape(3, 3) @ (q - t["knuckle"])

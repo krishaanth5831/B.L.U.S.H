@@ -4,11 +4,11 @@
     python check_truss_cut.py                 PASS/FAIL per stalk size, exit 1 on a FAIL
     python check_truss_cut.py --windowed      watch it in the MuJoCo window, slowed down
 
-The arm holds a fingers-down pose (check_grasp.find_pose), with the truss-harvest fingers (scene.compose
+The arm holds a fingers-down pose (find_pose), with the truss-harvest fingers (scene.compose
 cut_hold=True: rigid PLA fingers, blade + spring pads at the tips). One truss (truss.py, 7 fruit) leaves a stand-in
 stem on the gripper's -y side (the blade side), its peduncle crossing the fingertips along gripper y, the
 cut zone at the blades. The jaw closes like the expert does (min-jerk, 0.6 s), holds, then the arm shakes
-(wrist flex, pan, wrist roll, as check_grasp.py) for 6 s. Checks, per stalk radius:
+(wrist flex, pan, wrist roll: SHAKE) for 6 s. Checks, per stalk radius:
   - the blades cut it (TrussCutter) before the jaw has finished closing + 0.5 s
   - the pads still hold it: the stalk slips less than HOLD_DRIFT_M through the jaw while shaking (it may swing
     round the jaw's closing axis: that's how a truss hangs from cut-and-hold pads, scene.PAD_FRICTION)
@@ -16,13 +16,14 @@ cut zone at the blades. The jaw closes like the expert does (min-jerk, 0.6 s), h
 Free space, no greenhouse: this tests the fingertips, not the layout. Writes nothing.
 """
 import argparse
+import itertools
 import sys
+import threading
 import time
 
 import mujoco
 import numpy as np
 
-import check_grasp as cg
 import expert
 import scene
 import tomato as tm
@@ -31,12 +32,18 @@ import truss as tr
 RADII = (0.0015, 0.002, 0.0025)  # truss.PEDUNCLE_R's ends and middle
 HOLD_DRIFT_M = 0.015             # truss origin may move this much in the gripper while shaking (guess: a
                                  # dropped truss moves 100+ mm; a held one swings on its stalk, 5-14 mm, 2026-11-03)
-# check_grasp.SHAKE at this fraction of its amplitude. ⚠️ At full amplitude (0.4-0.8 rad at ~1 Hz, made for one
+# Teleop-like shake, per joint: (joint, amplitude rad, Hz), SHAKE_S each. From the single-fruit grasp check
+# (removed 2026-11-08), which held one fruit through it: ~1 Hz, a brisk teleop wrist (guess).
+SHAKE = (("wrist_flex", 0.4, 1.0), ("shoulder_pan", 0.4, 1.0), ("wrist_roll", 0.8, 0.75))
+SHAKE_S = 2.0
+JOINT_IDX = {j: k for k, j in enumerate(("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll",
+                                         "gripper"))}
+# SHAKE at this fraction of its amplitude. ⚠️ At full amplitude (0.4-0.8 rad at ~1 Hz, made for one
 # fruit) the 6-8 fruit truss swung hard enough on its stalk to tear a fruit off its tether (0.58-2.46 N) in 2 of 3
 # runs (2026-11-03). The scripted moves are min-jerk and far gentler; generate_truss's judge counts any fruit lost.
 SHAKE_SCALE = 0.5
 CLOSE_S, HOLD_S = 0.6, 1.0       # jaw close time (inside truss_expert.CLOSE_S) and hold before shaking (guess)
-STEM_R = 0.004                   # stand-in stem radius, m: truss_scene.STEM_R (scene.vines_xml's stem capsule)
+STEM_R = 0.004                   # stand-in stem radius, m: truss_scene.STEM_R
 FAILS = 0                        # FAIL count, set by report()
 
 
@@ -44,6 +51,50 @@ def report(ok, msg):
     global FAILS
     FAILS += not ok
     print(("PASS " if ok else "FAIL ") + msg, flush=True)
+
+
+def find_pose(kind):
+    """Arm pose (rad) with the jaw open: fingers horizontal ("side") or pointing down ("down"), jaw closing
+    horizontally either way. Gripper kinematics only, so a bare arm in free space does (the cut_hold model, as
+    build() below)."""
+    m, d = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True)
+    qidx, _ = scene.arm_ids(m)
+    G = m.body("arm/gripper").id
+    best = None
+    lifts = (-0.5,) if kind == "side" else np.linspace(-1.2, 0.4, 17)
+    elbows = (0.6,) if kind == "side" else np.linspace(-0.4, 1.4, 19)
+    rolls = (np.pi / 2, -np.pi / 2) if kind == "side" else (0.0, np.pi / 2)
+    for lift, elbow, roll in itertools.product(lifts, elbows, rolls):
+        for wf in np.linspace(-1.6, 1.6, 161):
+            q = np.array([0.0, lift, elbow, wf, roll, scene.GRIPPER_RANGE_RAD[1] * 0.85])
+            d.qpos[qidx] = q
+            mujoco.mj_kinematics(m, d)
+            R = d.xmat[G].reshape(3, 3)
+            if kind == "side":
+                score = abs(R[2, 2]) + abs(R[2, 0])        # finger axis (-z) and jaw axis (x) both horizontal
+            else:
+                if d.xpos[G][2] < 0.25:
+                    continue                                # keep the hand well above the table
+                score = (1 - R[2, 2]) + abs(R[2, 0])       # finger axis straight down, jaw axis horizontal
+            if best is None or score < best[0]:
+                best = (score, q.copy())
+    return best[1], best[0]
+
+
+def open_viewer(m, d, look_at):
+    import mujoco.viewer
+    before = set(threading.enumerate())
+    v = mujoco.viewer.launch_passive(m, d)
+    v._threads = [t for t in set(threading.enumerate()) - before if "_launch_internal" in t.name]
+    v.cam.lookat[:] = look_at
+    v.cam.distance, v.cam.azimuth, v.cam.elevation = 0.28, 150, -20
+    return v
+
+
+def close_viewer(v):
+    v.close()
+    for t in v._threads:              # ⚠️ join the render loop, or the next viewer / exit hangs (plugin note)
+        t.join(timeout=5)
 
 
 def build(q, r, knuckle_shift=None, seed=0):
@@ -113,7 +164,7 @@ def run(q, r, watch=False):
     det = tm.Detacher(m, d, info["fruit"])
     v = None
     if watch:
-        v = cg.open_viewer(m, d, d.xpos[G])
+        v = open_viewer(m, d, d.xpos[G])
     trace = []
 
     def step(n=1):
@@ -141,16 +192,16 @@ def run(q, r, watch=False):
     in_g0 = stalk_point_in_gripper(m, d, info, want[1])
     drift = 0.0
     q0 = d.ctrl[uidx].copy()
-    for joint, amp, hz in cg.SHAKE:
-        k = cg.JOINT_IDX[joint]
-        n = int(cg.SHAKE_S / m.opt.timestep)
+    for joint, amp, hz in SHAKE:
+        k = JOINT_IDX[joint]
+        n = int(SHAKE_S / m.opt.timestep)
         for i in range(n):
             d.ctrl[uidx[k]] = q0[k] + SHAKE_SCALE * amp * np.sin(2 * np.pi * hz * i * m.opt.timestep)
             step()
             drift = max(drift, np.linalg.norm(stalk_point_in_gripper(m, d, info, want[1]) - in_g0))
         d.ctrl[uidx] = q0
     if v is not None:
-        cg.close_viewer(v)
+        close_viewer(v)
     dropped = int(np.sum(~np.isnan(det.detached_at)))
     return dict(trace=trace, cut_t=cut_t, squeeze=cut.peak["squeeze"], cut_force=cut.cut_force, pad=cut.pad_force,
                 pad_peak=cut.peak["pad_force"], drift=drift, dropped=dropped, settled_mm=np.round(settled * 1000, 1),
@@ -162,7 +213,7 @@ def main():
     ap.add_argument("--windowed", action="store_true")
     ap.add_argument("--radius", type=float, default=None, help="one stalk radius (m) instead of RADII")
     a = ap.parse_args()
-    q, _ = cg.find_pose("down")
+    q, _ = find_pose("down")
     for r in ([a.radius] if a.radius else RADII):
         o = run(q, r, a.windowed)
         tag = f"stalk {r * 2000:.1f} mm"

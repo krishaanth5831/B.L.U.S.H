@@ -4,11 +4,11 @@
     python generate_truss.py --pilot --watch            # 5 episodes into ..._pilot, MuJoCo window at real time
     python generate_truss.py --dry --episodes 20        # plan + dry run + judge only: keep rate and time, no dataset
     python generate_truss.py --dry --watch --seed-start 200007 --episodes 1   # watch one in the MuJoCo window
-    python generate_truss.py                            # 200 episodes into krish5831/blush_sim_truss_v1
+    python generate_truss.py                            # 200 episodes, rig "base", into krish5831/blush_sim_truss_v3
     python generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 \
         --hold-share 0.10 --balance --seed-start 7600000   # how blush_sim_truss_v2 was recorded (rig "base")
 
-Per scene seed (as generate_scripted.py): build the truss scene (domain randomisation on, settle 1 s), take
+Per scene seed: build the truss scene (domain randomisation on, settle 1 s), take
 the first frame (the truss YOLO, or the true box, picks the ready truss and its cut point), plan, then
   1. dry run: play the plan with physics only, judge it;
   2. if it passed: rebuild the same seed, play the same plan again and record every frame like lerobot-record
@@ -48,7 +48,7 @@ import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_target as ttg  # noqa: E402
 
-# ⚠️ Not harvest/harvest.env's TASK: that string is shared with the real single-fruit recordings. Truss harvesting
+# ⚠️ Not harvest/harvest.env's TASK: that string is the real rig's single-fruit placeholder. Truss harvesting
 # is a different task; this string goes with it (K7 decides the real rig's wording when it records trusses).
 TASK = "Cut the ready tomato truss in the green box at the cross and put it in the crate."
 MISS_SHARE = 0.25                # K7 2026-11-03 (plan point 4: ~25 % recovery episodes)
@@ -64,9 +64,10 @@ HOLD_S = (4.0, 6.0)
 # of the row (BALANCE_BINS along truss_scene.STEM_X) already holding more than BALANCE_MAX_SHARE of the kept episodes
 # is skipped before planning (cheap), once BALANCE_AFTER episodes are kept (design choice).
 BALANCE_BINS, BALANCE_MAX_SHARE, BALANCE_AFTER = 4, 0.35, 8
-START_TOL_NORM = 3.0             # generate_scripted.START_TOL_NORM
+START_TOL_NORM = 3.0             # max norm units off the start pose at the end (as the single-fruit generator, guess)
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"
-DEFAULT_REPO = "krish5831/blush_sim_truss_v1"
+# The next dataset: v2 (rig "base") is the current one, v1 (birdseye) was deleted 2026-11-08 at K7's request.
+DEFAULT_REPO = "krish5831/blush_sim_truss_v3"
 YOLO_TRUSS = HERE.parent / "runs" / "yolo_truss" / "truss_v1" / "weights" / "best.pt"
 
 
@@ -185,7 +186,7 @@ def main():
                     help="truss YOLO for the start frame + overlay (default: runs/yolo_truss/truss_v1 if trained, "
                          "else the true box, no YOLO)")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame even if the truss YOLO exists")
-    ap.add_argument("--rig", default="birdseye", choices=("birdseye", "base"),
+    ap.add_argument("--rig", default="base", choices=("birdseye", "base"),
                     help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, or base + claw (2026-11-06)")
     ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
     ap.add_argument("--hold-share", type=float, default=0.0,
@@ -203,7 +204,7 @@ def main():
 
     overlay = "yolo" if a.yolo_weights else "true_box"
     cfg = SO101MujocoConfig(id="sim", seed=a.seed_start, viewer=False, overlay=overlay, realtime=False,
-                            fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss",
+                            fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False,
                             rig=a.rig, start_jitter_deg=a.start_jitter_deg,
                             yolo_weights=str(a.yolo_weights) if a.yolo_weights else None)
     robot = SO101Mujoco(cfg)

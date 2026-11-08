@@ -2,18 +2,18 @@
 
 - Same features: shoulder_pan.pos ... gripper.pos in use_degrees=false units, plus the cameras at 640x480
   (config/hardware.env size): `birdseye` and `claw` (rig="birdseye", the real rig's names), or `base` and `claw`
-  (rig="base", truss task only).
+  (rig="base").
 - send_action takes the leader's normalised values and converts them through follower_white.json,
   as the real follower does (sim/arm_map.py).
 - Physics runs in its own thread at wall-clock speed, like a real arm moving between calls.
   realtime=False instead steps it exactly 1/fps inside each send_action (scripted episodes).
-- Cameras go through the InnoMaker lens model (sim/lens.py). overlay="yolo" runs the ripeness YOLO
-  on both cameras every frame and draws its view into the frames (harvest/yolo_overlay.py): red
-  boxes + class + confidence on every detection, and on the birdseye a green box on the target, which
-  is picked among the scene's 2-3 ripe fruits on its first frame and then held (sim/target.py).
-- task="truss" (sim/truss_scene.py): the target is a ready truss (sim/truss_target.py), with a cut-point cross
-  next to its box; TrussCutter cuts a stalk the blades press hard enough. rig="base" draws the box + cross on the
-  base camera from the sim's truth (the target is still picked on a birdseye frame that isn't returned).
+- Whole-truss harvesting (sim/truss_scene.py, the only task since 2026-11-08): the target is a ready truss, picked
+  on the scene's first birdseye frame and then held (sim/truss_target.py), drawn as a green box with a cut-point
+  cross; TrussCutter cuts a stalk the blades press hard enough; done = the whole truss in the crate.
+- Cameras go through the InnoMaker lens model (sim/lens.py). overlay="yolo" runs the truss YOLO on both cameras
+  every frame (rig "birdseye") and draws its view into the frames (harvest/yolo_overlay.py): red boxes + class +
+  confidence on every detection. rig="base" draws the box + cross on the base camera from the sim's truth (the
+  target is still picked on a birdseye frame that isn't returned).
 
 MuJoCo window keys: N = new vine layout (next seed). Press it during lerobot-record's reset period.
 Ctrl + right-drag pulls a tomato by hand. Plucks and crate drops are printed in the terminal.
@@ -44,13 +44,12 @@ if str(SIM_DIR) not in sys.path:
 import arm_map  # noqa: E402
 import randomize  # noqa: E402
 import scene  # noqa: E402
-import target as tg  # noqa: E402
 import tomato as tm  # noqa: E402
 import truss as tr  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_target as ttg  # noqa: E402
 from cameras import RIG_CAMERAS, SimCameras  # noqa: E402
-from harvest import yolo_overlay as ov  # noqa: E402  (target.py put the repo root on sys.path)
+from harvest import yolo_overlay as ov  # noqa: E402  (target.py, via truss_target, put the repo root on sys.path)
 
 logger = logging.getLogger(__name__)
 OVERLAYS = ("none", "true_box", "yolo")
@@ -70,13 +69,11 @@ class SO101Mujoco(Robot):
             raise ValueError("so101_mujoco only speaks use_degrees=false units (see sim/arm_map.py)")
         if config.overlay not in OVERLAYS:
             raise ValueError(f"overlay={config.overlay!r}: one of {OVERLAYS}")
-        if config.task not in ("fruit", "truss"):
-            raise ValueError(f"task={config.task!r}: 'fruit' or 'truss'")
+        if config.overlay == "yolo" and not config.yolo_weights:
+            raise ValueError("overlay='yolo' needs yolo_weights: the truss YOLO, e.g. runs/yolo_truss/truss_v1/weights/"
+                             "best.pt (sim/yolo_truss/train.sh); or overlay='true_box'")
         if config.rig not in RIG_CAMERAS:
             raise ValueError(f"rig={config.rig!r}: one of {tuple(RIG_CAMERAS)}")
-        if config.rig == "base" and config.task != "truss":
-            raise ValueError("rig='base' is built for task='truss' "
-                             "(the box goes onto the base camera from truss truth)")
         self.config = config
         self.cam_names = RIG_CAMERAS[config.rig]  # what the policy sees, in order; [0] carries the target box
         self.cameras = dict.fromkeys(self.cam_names)   # names only; lerobot-rollout counts them
@@ -119,13 +116,8 @@ class SO101Mujoco(Robot):
         pass
 
     # --- scene ---
-    @property
-    def truss(self):
-        return self.config.task == "truss"
-
     def _build(self, seed, hold=False):
-        self.m, self.d, self.info = (ts.build(seed, hold=hold, base_mount=self.config.rig == "base") if self.truss
-                                     else scene.build(seed))
+        self.m, self.d, self.info = ts.build(seed, hold=hold, base_mount=self.config.rig == "base")
         self.info["dr"] = randomize.apply(self.m, seed, self.info["fruit"]) if self.config.domain_rand else None
         self.qidx, self.uidx = scene.arm_ids(self.m)
         if self.config.start_jitter_deg > 0:      # own stream: the scene's other draws stay as they were
@@ -136,7 +128,7 @@ class SO101Mujoco(Robot):
             self.info["start_jitter_deg"] = np.round(np.degrees(j), 2).tolist()
         self.det = tm.Detacher(self.m, self.d, self.info["fruit"])
         # One cutter per truss: a cut on the wrong truss shows up as that truss's cut.
-        self.cutters = [tr.TrussCutter(self.m, self.d, t) for t in self.info["trusses"]] if self.truss else []
+        self.cutters = [tr.TrussCutter(self.m, self.d, t) for t in self.info["trusses"]]
         self.d.ctrl[self.uidx] = self.d.qpos[self.qidx]
         self.extra = {}
         self.seed = seed
@@ -145,22 +137,15 @@ class SO101Mujoco(Robot):
         self._box = None
         self._box_info = None
         self._view = (None, None)            # rig="base": the target's box + cut point on the base camera
-        self._tgt_k = None                   # the target fruit, picked on the scene's first frame
-        self._tgt_body = None
+        self._tgt_k = None                   # the target truss, picked on the scene's first frame
         self._dropped = False
         self._log = []
         if self.config.settle_s > 0:          # the vines swing for ~1 s after the build
             self._advance(self.d.time + self.config.settle_s, quiet=True)
         self._t_frame = self.d.time           # realtime=False: sim time at the last frame boundary
-        if self.truss:
-            T = self.info["trusses"]
-            print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(T)} trusses ({len(self.info['fruit'])} "
-                  f"tomatoes), ready: {[T[k]['name'] for k in self.info['ready']]}. "
-                  f"Press N in the MuJoCo window for a new layout", flush=True)
-            return
-        breaks = ", ".join(f"{self.info['fruit'][k]['threshold']:.2f}" for k in self.info["ripe"])
-        print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(self.info['fruit'])} tomatoes, "
-              f"{len(self.info['ripe'])} ripe (break at {breaks} N). "
+        T = self.info["trusses"]
+        print(f"[so101_mujoco] scene {self._gen}: seed {seed}, {len(T)} trusses ({len(self.info['fruit'])} "
+              f"tomatoes), ready: {[T[k]['name'] for k in self.info['ready']]}. "
               f"Press N in the MuJoCo window for a new layout", flush=True)
 
     def _save_log(self):
@@ -185,7 +170,7 @@ class SO101Mujoco(Robot):
                                "dropped_in_crate": self._dropped, "overlay": self.config.overlay,
                                "display_conf": ov.DISPLAY_CONF, "box": self._box_info,
                                "yolo": self._yolo_meta, "domain_rand": self.info.get("dr"),
-                               "same_truss": self.info.get("same_truss"), "settle_s": self.config.settle_s,
+                               "settle_s": self.config.settle_s,
                                "realtime": self.config.realtime, **self.extra})
         meta.write_text(json.dumps(info, indent=2))
         self._log = []
@@ -227,29 +212,21 @@ class SO101Mujoco(Robot):
             for k in self.det.step():
                 f = self.info["fruit"][k]
                 if not quiet:
-                    tgt = (k == self._tgt_k) if not self.truss else False
-                    print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N"
-                          f"{'  <- the target' if tgt else ''}", flush=True)
+                    print(f"[so101_mujoco] plucked {f['tomato']} ({f['ripeness']}) at {self.det.force_at[k]:.2f} N",
+                          flush=True)
             for k, c in enumerate(self.cutters):
                 if c.step() and not quiet:
                     t = self.info["trusses"][k]
                     print(f"[so101_mujoco] cut {t['name']} ({'ready' if t['ready'] else 'NOT ready'}) at "
                           f"{c.peak['squeeze']:.1f} N{'  <- the target' if k == self._tgt_k else ''}", flush=True)
-        if self.truss:
-            if not self._dropped and self._tgt_k is not None and ts.in_crate(self.info, self.d, self.m, self._tgt_k):
-                self._dropped = True
-                if not quiet:
-                    print(f"[so101_mujoco] ✅ target truss in the crate (scene {self._gen})", flush=True)
-            return
-        if (not self._dropped and self._tgt_body is not None
-                and scene.in_crate(self.d.xpos[self._tgt_body])):
+        if not self._dropped and self._tgt_k is not None and ts.in_crate(self.info, self.d, self.m, self._tgt_k):
             self._dropped = True
             if not quiet:
-                print(f"[so101_mujoco] ✅ target in the crate (scene {self._gen})", flush=True)
+                print(f"[so101_mujoco] ✅ target truss in the crate (scene {self._gen})", flush=True)
 
     def new_scene(self, seed, log=True, hold=False):
         """realtime=False: next scene with this seed, now. log=False drops its state log (a dry run).
-        hold: task="truss", nothing ready to pick (truss_scene.build hold), for stay-home episodes."""
+        hold: nothing ready to pick (truss_scene.build hold), for stay-home episodes."""
         with self._lock:
             self._save_log()
             if self._viewer is not None:
@@ -293,8 +270,8 @@ class SO101Mujoco(Robot):
         if self.config.overlay == "yolo":
             from yolo_client import YoloClient
             # loads in the background; the first frame waits for it
-            self._yolo = YoloClient(self.config.yolo_weights) if self.config.yolo_weights else YoloClient()
-            self._yolo_meta = dict(self._yolo.meta(), t_ripe_birdseye=tg.T_RIPE_BIRDSEYE)
+            self._yolo = YoloClient(self.config.yolo_weights)
+            self._yolo_meta = dict(self._yolo.meta(), t_ready_birdseye=ttg.T_READY_BIRDSEYE)
         self._log_on = True
         self._build(self.config.seed)
         if self.config.viewer:
@@ -343,38 +320,19 @@ class SO101Mujoco(Robot):
         return self._cams
 
     def _pick_target(self, dets_birdseye, ids, gen):
-        """The scene's start frame: which ripe fruit is the target, and its box."""
+        """The scene's start frame: which ready truss is the target, its box and its cut point."""
         with self._lock:
             if gen != self._gen:               # N was pressed meanwhile: this frame belongs to the old scene
                 return
-            if self.truss:
-                info = ttg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids)
-            else:
-                info = tg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids)
+            info = ttg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids)
             if self.config.overlay == "true_box":
                 info["reason"] = "overlay=true_box"
             self._box_info, self._box = info, info["box"]
             self._tgt_k = info["target"]
-            body = (self.info["trusses"][self._tgt_k]["body"] if self.truss else info["target_name"]) \
-                if self._tgt_k is not None else None
-            self._tgt_body = None if body is None else self.m.body(body).id
-        if self.truss:
-            what = {"yolo": f"YOLO picked it (ready {info['yolo_conf'] or 0:.0%})"}.get(
-                info["source"], f"{info['source'].replace('_', ' ')} ({info['reason'].replace('_', ' ')})")
-            print(f"[so101_mujoco] scene {gen} target: {info['target_name']} of {len(info['ready'])} ready, {what}, "
-                  f"cut point from {info['cut_source']}", flush=True)
-            return
-        why = info["reason"].replace("_", " ")
-        if info["source"] == "yolo":
-            what = f"YOLO picked it (ripe {info['yolo_conf']:.0%}, IoU {info['yolo_iou']} with its true box)"
-        elif info["source"] == "true_box":
-            what = f"true box ({why})"
-        elif info["source"] == "true_box_hidden":
-            what = f"true box around a hidden ripe fruit ({why})"
-        else:
-            what = f"no box ({why})"
-        print(f"[so101_mujoco] scene {gen} target: {info['target_name']} of {len(info['ripe'])} ripe, {what}",
-              flush=True)
+        what = {"yolo": f"YOLO picked it (ready {info['yolo_conf'] or 0:.0%})"}.get(
+            info["source"], f"{info['source'].replace('_', ' ')} ({info['reason'].replace('_', ' ')})")
+        print(f"[so101_mujoco] scene {gen} target: {info['target_name']} of {len(info['ready'])} ready, {what}, "
+              f"cut point from {info['cut_source']}", flush=True)
 
     def get_observation(self):
         if self.config.rig == "base":
@@ -404,7 +362,7 @@ class SO101Mujoco(Robot):
             obs["claw"] = ov.draw_overlay(obs["claw"], dets["claw"], names)
         elif self.config.overlay == "true_box" and self._box is not None:
             obs["birdseye"] = ov.draw_overlay(obs["birdseye"], [], {}, target=self._box)
-        if self.truss and self.config.overlay != "none" and self._box_info and self._box_info.get("cut"):
+        if self.config.overlay != "none" and self._box_info and self._box_info.get("cut"):
             import cv2
             u, v = (int(round(c)) for c in self._box_info["cut"])
             cv2.drawMarker(obs["birdseye"], (u, v), ov.TARGET_COLOUR, cv2.MARKER_CROSS, 10, 2)
@@ -438,7 +396,7 @@ class SO101Mujoco(Robot):
                     k = self._tgt_k
                     self._view = ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], self.cam_names[0]) \
                         if k is not None else (None, None)
-        box, cut = getattr(self, "_view", (None, None)) if self._box_info is not None else (None, None)
+        box, cut = self._view if self._box_info is not None else (None, None)
         if self.config.overlay != "none" and box is not None:
             import cv2
             c0 = self.cam_names[0]
@@ -452,10 +410,10 @@ class SO101Mujoco(Robot):
         return obs
 
     def env_state(self):
-        """task="truss": the target truss's box + cut point as numbers (truss_target.ENV_NAMES); zeros before
-        the start frame. What the generator records as observation.environment_state."""
+        """The target truss's box + cut point as numbers (truss_target.ENV_NAMES); zeros before the start frame.
+        What the generator records as observation.environment_state."""
         if self.config.rig == "base":
-            box, cut = getattr(self, "_view", (None, None)) if self._box_info is not None else (None, None)
+            box, cut = self._view if self._box_info is not None else (None, None)
             return ttg.env_vector(box, cut)
         info = self._box_info or {}
         return ttg.env_vector(info.get("box"), info.get("cut"))

@@ -7,8 +7,8 @@
   python check_tomato_release.py              headless checks, PASS/FAIL per check, exit 1 on a FAIL
 
 Writes nothing. Run in the lerobot env (it has mujoco).
-Still tests what the truss task runs on (tomato.Detacher), but on tomato.truss_xml's single-fruit trusses,
-not truss.truss_xml's cuttable ones.
+The trusses are truss.truss_xml's (the harvest scenes' cuttable ones), hanging in free space off a stand-in
+knuckle; only the tethers (tomato.Detacher) are tested here, the stalk cut is check_truss_cut.py's.
 """
 import argparse
 import os
@@ -18,15 +18,26 @@ import time
 import numpy as np
 
 import tomato as tm
+import truss as tr
 
 TIMESTEP = 0.002   # 500 Hz, = scene.TIMESTEP (same as the Vinea FR5 sim); the module's scene() shadows `scene`
 G = 9.81
 
 
-def scene(n=1, seed=0, thresholds=None):
+# The truss leaves its knuckle along +y, so its fruit alternate between the +x (even k) and -x (odd k) sides of
+# the rachis (truss.truss_xml): a pull on fruit 0 or 2 toward +x or -y moves it away from every other fruit.
+KNUCKLE, ALONG = (0.0, -0.06, 0.40), (0.0, 1.0, 0.0)
+
+
+def scene(n=2, seed=0, thresholds=None):
+    """One truss of n fruit (>= 2: truss.draw_ripeness spreads the ripening front over n - 1 gaps)."""
     rng = np.random.default_rng(seed)
-    rachis, tomatoes, eq, fruit = tm.truss_xml("tr", (-0.06, 0, 0.40), (0.06, 0, 0.40), n, rng)
-    body = rachis + tomatoes
+    out = tr.truss_xml("tr", KNUCKLE, ALONG, rng, "unripe", n=n)
+    if out is None:
+        raise RuntimeError(f"seed {seed}: the {n} fruit didn't fit on the truss, pick another seed")
+    knuckle, truss_body, tomatoes, eq, excl, info = out
+    fruit = info["fruit"]
+    body = knuckle + truss_body + tomatoes
     if thresholds is not None:
         for f, t in zip(fruit, thresholds):
             f["threshold"] = t
@@ -39,6 +50,7 @@ def scene(n=1, seed=0, thresholds=None):
     {body}
   </worldbody>
   <equality>{eq}</equality>
+  <contact>{excl}</contact>
 </mujoco>"""
     import mujoco
     m = mujoco.MjModel.from_xml_string(xml)
@@ -62,7 +74,7 @@ def run_checks():
         print(("PASS " if ok else "FAIL ") + msg)
 
     # 1. Hanging: 3 s under gravity only. No release, force ~ weight, fruit settles.
-    m, d, fruit = scene(n=1)
+    m, d, fruit = scene()
     det = tm.Detacher(m, d, fruit)
     b = bid(m, fruit[0]["tomato"])
     mass = m.body_mass[b]
@@ -83,7 +95,7 @@ def run_checks():
     ramp = 2.0   # N/s
     for direction, label in (((1, 0, 0), "sideways"), ((0, 0, -1), "down"), ((0.3, -0.7, 0.65), "up-out")):
         for thr in (tm.DETACH_FORCE_N[0], 1.5, tm.DETACH_FORCE_N[1]):
-            m, d, fruit = scene(n=1, thresholds=[thr])
+            m, d, fruit = scene(thresholds=[thr, tm.DETACH_FORCE_N[1]])
             det = tm.Detacher(m, d, fruit)
             b = bid(m, fruit[0]["tomato"])
             u = np.array(direction, float); u /= np.linalg.norm(u)
@@ -106,7 +118,7 @@ def run_checks():
             report(thr < f_rel < thr + slack,
                    f"{label} pull, threshold {thr:.2f} N: released at {f_rel:.2f} N (t={det.detached_at[0]-t0:.2f} s)")
             # Free fall check: 0.1 s after release the fruit has dropped about g t^2 / 2 relative
-            # to where it would be with its release velocity. The floor is 0.36 m below, so no hit yet.
+            # to where it would be with its release velocity. The floor is ~0.3 m below, so no hit yet.
             # Free joint dofs = world linear velocity (3), then angular (3).
             z0, vz0 = d.xpos[b, 2], d.qvel[m.jnt_dofadr[m.body_jntadr[b]] + 2]
             for _ in range(int(0.1 / TIMESTEP)):
@@ -116,7 +128,7 @@ def run_checks():
                    f"{label} pull, threshold {thr:.2f} N: falls free ({drop*1000:.1f} mm vs {0.5*G*0.01*1000:.1f} mm)")
 
     # 3. A spike over threshold shorter than the hold time must not pluck.
-    m, d, fruit = scene(n=1, thresholds=[1.0])
+    m, d, fruit = scene(thresholds=[1.0, 1.0])
     det = tm.Detacher(m, d, fruit)
     b = bid(m, fruit[0]["tomato"])
     for _ in range(int(1.0 / TIMESTEP)):
@@ -136,10 +148,8 @@ def run_checks():
     for _ in range(int(1.0 / TIMESTEP)):
         mujoco.mj_step(m, d); det.step()
     for _ in range(int(2.0 / TIMESTEP)):
-        d.xfrc_applied[b, :3] = (0, 2.0, 0) if np.isnan(det.detached_at[2]) else (0, 0, 0)
+        d.xfrc_applied[b, :3] = (2.0, 0, 0) if np.isnan(det.detached_at[2]) else (0, 0, 0)   # out, +x side
         mujoco.mj_step(m, d); det.step()
-    # ⚠️ truss_xml drops fruit that would overlap, so "6" can come out fewer (4 for seed 1 since the
-    # 2026-10-27 hang/lean ranges): count what's there.
     others = [k for k in range(len(fruit)) if k != 2]
     report(not np.isnan(det.detached_at[2]) and np.all(np.isnan(det.detached_at[others])),
            f"plucking tomato 2 of {len(fruit)} leaves the other {len(others)} hanging")
@@ -158,7 +168,7 @@ def windowed(seed):
     print("\nDouble-click a tomato, then Ctrl + right-drag to pull it.\n")
     last_print = 0.0
     with mujoco.viewer.launch_passive(m, d) as v:
-        v.cam.lookat[:] = (0, 0, 0.37); v.cam.distance = 0.35; v.cam.elevation = -10; v.cam.azimuth = 90
+        v.cam.lookat[:] = (0, 0.02, 0.36); v.cam.distance = 0.35; v.cam.elevation = -10; v.cam.azimuth = 180
         while v.is_running():
             t_wall = time.time()
             with v.lock():

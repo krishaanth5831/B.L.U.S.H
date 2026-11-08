@@ -7,7 +7,8 @@
     info["ready"]                       indices of the ready trusses the arm can cut (1-2 per scene)
     in_crate(info, d, m, k)             every fruit of truss k inside the (bigger) truss crate
 
-Same greenhouse, cameras, arm base and start pose as scene.build (the single-fruit scenes). Changed:
+Greenhouse, cameras, arm base and start pose from scene.py. Compared with the single-fruit scenes it replaced
+(removed 2026-11-08):
 - every truss carries 6-8 fruit on a cuttable stalk (truss.py), ripening from the stem end;
 - more stems and trusses inside the reach, trusses crossing in front of each other (K7: "crowded, so the arm
   learns tough situations"); fruit never overlap, stalks may pass close by fruit of other trusses;
@@ -27,13 +28,13 @@ import truss as tr
 import truss_ik
 
 # --- layout (design choices, K7 2026-11-03 "crowded"; ranges unverified against a real greenhouse) ---
-# Along the row, in front of the arm (scene.STEM_X was 0.26-0.48). ⚠️ Not past 0.48: trusses of a stem at 0.52
+# Along the row, in front of the arm (the single-fruit scenes had 0.26-0.48). ⚠️ Not past 0.48: trusses of a stem at 0.52
 # spread over the crate, and the carried truss hit them while lowering in (6 of 14 dry runs, 2026-11-03).
 STEM_X = (0.20, 0.48)
 # ⚠️ More than it looks: trusses hanging into the arm's start pose are dropped afterwards (START_CLEAR_M), which
 # left 1-5 per scene at 3-4 stems x 1-3 trusses (2026-11-03).
 N_STEMS = (4, 5)
-STEM_GAP = 0.05                  # m between stems (scene.STEM_GAP 0.08): trusses of neighbouring stems overlap
+STEM_GAP = 0.05                  # m between stems (single-fruit scenes 0.08): trusses of neighbouring stems overlap
 TRUSSES_PER_STEM = (2, 3)
 KNUCKLE_Z = (0.14, 0.32)         # where a stalk leaves its stem. truss_ik scan (2026-11-03): cut poses exist
                                  # at 0.10-0.22 m for a 45 deg droop and 0.18-0.34 m for 70 deg
@@ -42,7 +43,7 @@ KNUCKLE_GAP_Z = 0.07             # m between trusses on one stem
 # because a level one has no cut pose above ~0.2 m (truss_ik scan); real peduncles bend down under the fruit.
 DROOP_DEG = (40.0, 70.0)
 SPREAD_DEG = 35.0                # +- along the row
-STEM_R = 0.004                   # scene.vines_xml's stem capsule
+STEM_R = 0.004                   # stem capsule radius, m (as the single-fruit scenes', guess)
 TRIES = 30                       # draws per truss before a stem slot is left empty
 N_READY = (1, 2)
 STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: half are hard decoys)
@@ -117,7 +118,7 @@ def vines_xml(rng):
     toward = -np.sign(scene.TARGET_ROW - scene.ARM_BASE[1])
     n = int(rng.integers(N_STEMS[0], N_STEMS[1] + 1))
     xs = []
-    for _ in range(200):                               # ⚠️ bounded, as scene.vines_xml
+    for _ in range(200):                               # ⚠️ bounded: early stems can leave no room (looped forever once)
         x = rng.uniform(*STEM_X)
         if all(abs(x - x2) >= STEM_GAP for x2 in xs):
             xs.append(x)
@@ -200,7 +201,7 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
 
 def build(seed=0, arm=True, hold=False, base_mount=False):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
-    the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model (scene.build does the same).
+    the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model, not in the XML.
     The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
     hold: nothing is ready (every truss a decoy or unripe), for "nothing to pick, stay home" episodes (K7
     2026-11-06, SockBot's lesson: the policy has to see what not reaching looks like).
@@ -209,7 +210,6 @@ def build(seed=0, arm=True, hold=False, base_mount=False):
         out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, base_mount)
         if out[2]["ready"]:
             break
-    out[2]["layout_try"] = j
     return out
 
 
