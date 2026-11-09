@@ -98,6 +98,35 @@ SEARCH_AHEAD = 6.0                         # ...and this many ahead (keeps it fr
 MAX_S = 45.0                               # done after this long whatever happens (a stuck leg can't loop forever)
 
 
+# ⚠️ Self-collision (2026-11-09): rrt.Checker skips every contact between two arm parts, so neither the v2 expert's
+# RRT nor this teacher saw the arm fold into itself. At the cut pose of seed 9100090 the wrist camera mount pressed
+# into the upper arm at 48 N; the elbow servo sat at its full 3.35 N.m (gravity there: 0.4 N.m) and the slide stalled
+# until the time limit, the stalk never reached (5 of 95 planned runs, 2026-11-09). Every checker the teacher uses now
+# also reports arm parts closer than SELF_CLEARANCE, except pairs inside the hand (HAND_PARTS touch by design).
+SELF_CLEARANCE = 0.002                     # m (the planner's soft clearance, rrt.SOFT_CLEARANCE; guess, unverified)
+HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade")
+
+
+def add_self_check(chk, prefix="arm/"):
+    """Make chk.hits (and so free / segment_free / path_ok) also report self-collisions of the arm. Returns chk."""
+    m = chk.m
+    body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
+    arm = np.array([b.startswith(prefix) for b in body])
+    hand = np.array([any(h in b for h in HAND_PARTS) for b in body])
+    orig = chk.hits
+
+    def hits(q, **kw):
+        out = orig(q, **kw)                       # leaves chk.d at q, contacts current
+        for c in chk.d.contact[:chk.d.ncon]:
+            a, b = c.geom1, c.geom2
+            if (arm[a] and arm[b] and m.geom_bodyid[a] != m.geom_bodyid[b] and not (hand[a] and hand[b])
+                    and c.dist < SELF_CLEARANCE):
+                out.add(f"self: {body[a][len(prefix):]} / {body[b][len(prefix):]}")
+        return out
+    chk.hits = hits
+    return chk
+
+
 class Leg:
     """One piece of the motion: a joint path (norm units, (n, 5)) or a hold, the jaw command, the pace."""
 
@@ -142,6 +171,7 @@ class TrussTeacher(tx.TrussPlanner):
 
     def __init__(self, m, d, info, k):
         super().__init__(m, d, info, k)
+        add_self_check(self.chk)
         self.legs, self.phases, self.meta = [], [], {}
         self.q_home = np.asarray(scene.START_NORM, float)
         self._vias = []
@@ -267,7 +297,8 @@ class TrussTeacher(tx.TrussPlanner):
         x_cut, p_cut, f, s = leg["x_cut"], leg["p_cut"], leg["f"], leg["s"]
         carry = self._carry(x_cut)
         point = truss_ik.cut_point_in_gripper(r)
-        cchk = tx.CarryChecker(self.m, self.d, carry[0], carry[1], point, hard=self.hard, soft=self.soft)
+        cchk = add_self_check(tx.CarryChecker(self.m, self.d, carry[0], carry[1], point, hard=self.hard,
+                                              soft=self.soft))
         cchk.d.qpos[self.g_adr] = np.radians(-10.0)
         self.jaw(-10.0)
         aisle = np.array([0, -np.sign(scene.TARGET_ROW - scene.ARM_BASE[1]), 0.0])
