@@ -28,7 +28,8 @@ The motion (§6.1 sketch):
   the approach axis, straight Cartesian line) -> slide straight in, slowly -> close, squeeze (fixed times) ->
   retreat straight back and up -> over to the release pose above the crate -> open, wait -> back to start ->
   short hold. Each free move (start -> standoff, retreat -> crate, crate -> start) is a straight joint line, or when
-  that is blocked the one detour: up over a fixed via-pose high in front of the row, then down (VIA_POINTS).
+  that is blocked the one detour: up over a fixed via-pose high in front of the row, then down (VIA_NORM), or
+  two such vias chained.
   ⚠️ §6.1 named a fixed via-pose over the crate; one constant pose 20 cm over the crate's centre hit a neighbour
   truss's fruit with the cut truss in hand in 2 of 3 test scenes (2026-11-09), so the carry uses the same rule.
 
@@ -57,7 +58,7 @@ STANDOFF_M = (0.04, 0.02, 0.0)             # standoff this far behind the pre-cu
 APPROACH_STEPS = 8                         # IK way-points from standoff to pre-cut (as the slide's 10, guess)
 RETREAT_M, RETREAT_UP_M = 0.04, 0.03       # v2 drew 3-5 cm back and 2-4 cm up; now the middle of each
 # Every free move: the template is one straight joint-space line; the one detour goes over a fixed via-pose high in
-# front of the row (§6.1 "up, across, down"), the first of VIA_POINTS that's clear. ⚠️ The trusses hang down and out
+# front of the row (§6.1 "up, across, down"), the first of VIA_NORM that's clear. ⚠️ The trusses hang down and out
 # into the aisle (fruit 3-22 cm high, out to 6 cm from the arm's base line) while the cut points sit near the stem at
 # ~28 cm and the start pose low at 11 cm: a straight line from start to standoff crossed fruit in 3 of 3 test scenes,
 # and rising straight up with the orientation held ran out of reach (2026-11-09). The v2 RRT's routes went over such
@@ -67,7 +68,13 @@ RETREAT_M, RETREAT_UP_M = 0.04, 0.03       # v2 drew 3-5 cm back and 2-4 cm up; 
 # ⚠️ Defined by IK as (point, pitch, tilt 0) first: unreachable, no detour was ever tried (2026-11-09).
 VIA_NORM = ((-59.0, -44.0, 8.0, -34.0, 6.0),     # grip (0.27, 0.29, 0.46): high, left of centre (seed 9100009)
             (-54.0, -46.0, 44.0, -35.0, 19.0),   # grip (0.18, 0.36, 0.34): left (seed 9100005)
-            (21.0, -64.0, -6.0, 76.0, 61.0))     # grip (0.42, 0.37, 0.32): right (seed 9100005)
+            (21.0, -64.0, -6.0, 76.0, 61.0),     # grip (0.42, 0.37, 0.32): right (seed 9100005)
+            # Added from a search (2026-11-09): v2 RRT routes on seeds 9200000-9200059 (apart from the test seeds),
+            # way-points pooled, the one that unblocks most scenes the line and the vias above can't reach kept.
+            # 15 of 60 scenes were blocked start -> standoff; this pose unblocks 3, no other pose 2 more.
+            (-90.0, -19.0, 41.0, -56.0, 22.0))   # gripper (0.18, 0.21, 0.23): the arm raised in place over its base
+# ⚠️ 12 of those 15 scenes had no single clear via in 75 RRT way-points: their routes needed two. So the last
+# fallback chains two vias (up out of the start, then over: §6.1's "up, across, down"), pairs in a fixed order.
 # --- timing: fixed, the middle of v2's ranges ---
 CLOSE_S = 0.65                             # v2 0.5-0.8
 SQUEEZE_S = 0.75                           # v2 0.6-0.9 (the cut lands ~0.45 s into the close)
@@ -228,15 +235,21 @@ class TrussTeacher(tx.TrussPlanner):
         return self._vias
 
     def free_move(self, xa, xb, chk, r, **kw):
-        """The template (one straight joint line xa -> xb), else the one detour over a fixed via-pose (VIA_POINTS),
-        nearest xb first. Returns (way-points, 0 for the template or the via's number in VIA_NORM from 1) or
-        (None, None)."""
+        """The template (one straight joint line xa -> xb), else the detour over a fixed via-pose (VIA_NORM, nearest
+        xb first), else two of them chained. Returns (way-points, 0 for the line, the via's number from 1, or
+        10 * first + second for a chain) or (None, None)."""
         if chk.path_ok([xa, xb], **kw):
             return [xa, xb], 0
         vias = self.vias()
-        for i in sorted(range(len(vias)), key=lambda j: float(np.abs(vias[j] - xb).max())):
+        dist = lambda u, v: float(np.abs(u - v).max())   # noqa: E731
+        for i in sorted(range(len(vias)), key=lambda j: dist(vias[j], xb)):
             if chk.path_ok([xa, vias[i], xb], **kw):
                 return [xa, vias[i], xb], i + 1
+        pairs = sorted(((i, j) for i in range(len(vias)) for j in range(len(vias)) if i != j),
+                       key=lambda ij: dist(xa, vias[ij[0]]) + dist(vias[ij[0]], vias[ij[1]]) + dist(vias[ij[1]], xb))
+        for i, j in pairs:
+            if chk.path_ok([xa, vias[i], vias[j], xb], **kw):
+                return [xa, vias[i], vias[j], xb], 10 * (i + 1) + j + 1
         return None, None
 
     def _to_standoff(self, q0, leg):
