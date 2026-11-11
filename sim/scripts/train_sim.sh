@@ -2,6 +2,7 @@
 # train_sim.sh: train on sim data, or on sim + real merged (lerobot env). Same recipes as harvest/scripts.
 #   sim/scripts/train_sim.sh act-smoke [ds]   500 ACT steps on the laptop: data loads, both cameras, loss falls
 #   sim/scripts/train_sim.sh act-truss [ds]   ACT + box numbers + temporal ensembling on the rig "base" truss episodes (100k)
+#   sim/scripts/train_sim.sh act-teacher <ds> ACT on teacher-v3 data, augmentation on (STEPS, SAVE, RUN env vars)
 #   sim/scripts/train_sim.sh act-full         ACT on the sim dataset (rented 4090)
 #   sim/scripts/train_sim.sh merge <real_ds>  sim + real into $COTRAIN_DATASET (lerobot-train takes one dataset)
 #   sim/scripts/train_sim.sh pi05-smoke [ds]  200 π0.5 steps, rented GPU (default ds: $COTRAIN_DATASET)
@@ -32,6 +33,16 @@ case "${1:-}" in
       --policy.push_to_hub=false --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1 \
       --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=10000 --log_freq=50 --num_workers=8 \
       --output_dir=$OUT/act_truss_v1${RUN_SUFFIX:-} --job_name=act_truss_v1 --wandb.enable=false ;;
+  act-teacher)
+    # The post-mortem recipe (§6.3, vault, 2026-11-11) on teacher-v3 data: ACT defaults (chunk 100, batch 8, lr 1e-5,
+    # the box + cut point as numbers through observation.environment_state), lerobot's image augmentation on (colour,
+    # sharpness, RandomAffine +-5 deg / 5 % shift). How chunks are executed (ensembling / full chunk / every 25) is set
+    # at evaluation (eval_truss.py --ensemble / --n-action-steps), not here. Step 1 (one layout): STEPS=20000.
+    DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_onelayout_v1}
+    lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
+      --policy.push_to_hub=false --dataset.image_transforms.enable=true \
+      --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=${SAVE:-10000} --log_freq=100 --num_workers=8 \
+      --output_dir=$OUT/${RUN:-act_teacher_v1} --job_name=${RUN:-act_teacher_v1} --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
       --policy.repo_id="$SIM_ACT_POLICY" --batch_size=32 --steps=80000 --save_freq=20000 --num_workers=8 \
@@ -48,5 +59,5 @@ case "${1:-}" in
     lerobot-train --dataset.repo_id="$DS" "${PI05[@]}" --policy.repo_id="$SIM_PI05_POLICY" \
       --output_dir=$OUT/pi05_sim_v1 --job_name=pi05_sim_v1 --batch_size=32 --steps=30000 --save_freq=5000 \
       --num_workers=8 --wandb.enable=true ;;
-  *) echo "usage: $0 act-smoke [ds] | act-truss [ds] | act-full | merge <real_ds> | pi05-smoke [ds] | pi05-full [ds]"; exit 1 ;;
+  *) echo "usage: $0 act-smoke [ds] | act-truss [ds] | act-teacher <ds> | act-full | merge <real_ds> | pi05-smoke [ds] | pi05-full [ds]"; exit 1 ;;
 esac

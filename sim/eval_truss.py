@@ -3,6 +3,8 @@
 
     python eval_truss.py ../outputs/train/act_truss_v1/checkpoints/last/pretrained_model
     python eval_truss.py <policy> --scenes 5 --seed-start 1234567      # replay: the seeds are printed
+    python eval_truss.py <policy> --headless --no-dr --no-yolo --same-seed --seed-start 9100009 --scenes 20 --noise 1.0
+                                                                       # post-mortem step 1: the one-layout check
 
 Windows: the MuJoCo viewer (third person, mouse to orbit) and one per camera showing exactly what the policy gets
 (truss-YOLO overlay, green target box + cut-point cross, as in the recorded episodes). Keys in a camera window:
@@ -39,11 +41,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+import truss_ik  # noqa: E402
 import truss_scene as ts  # noqa: E402
 
 TRAIN_DATASET = "krish5831/blush_sim_truss_v2"   # fallback for a checkpoint without train_config.json (act-truss's)
 EPISODE_S = 45.0          # scripted truss episodes run 19-31 s (run_v1.log); 45 s gives the policy slack
 AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a late knock-off still counts
+NOISE_NEAR_M = 0.03       # --noise is off within this of the cut point (generate_truss.NOISE_OFF at the stalk)
 
 
 def cameras(path):
@@ -61,14 +65,17 @@ def trained_on(path):
     return (json.loads(cfg.read_text())["dataset"]["repo_id"] if cfg.exists() else TRAIN_DATASET), rig
 
 
-def load_policy(path, device, ds_meta):
-    """A checkpoint via lerobot's make_policy, as trained (the policy type is config.json's "type": ACT now)."""
+def load_policy(path, device, ds_meta, overrides=None):
+    """A checkpoint via lerobot's make_policy, as trained (the policy type is config.json's "type": ACT now).
+    overrides: config fields to change for this run (the execution sweep: temporal_ensemble_coeff, n_action_steps)."""
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies import make_pre_post_processors
     from lerobot.policies.factory import make_policy
     cfg = PreTrainedConfig.from_pretrained(path)
     cfg.pretrained_path = str(path)
     cfg.device = str(device)
+    for k, v in (overrides or {}).items():
+        setattr(cfg, k, v)
     policy = make_policy(cfg, ds_meta=ds_meta).eval()
     pre, post = make_pre_post_processors(policy_cfg=cfg, pretrained_path=str(path),
                                          preprocessor_overrides={"device_processor": {"device": str(device)}})
@@ -92,6 +99,14 @@ def main():
     ap.add_argument("--fast", action="store_true", help="don't sleep to real time")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame, no YOLO overlay")
     ap.add_argument("--headless", action="store_true", help="no windows (implies --fast): just the graded results")
+    # post-mortem step 1 (2026-11-11): the one-layout pipeline check and the execution sweep
+    ap.add_argument("--no-dr", action="store_true", help="no domain randomisation (the teacher datasets have none)")
+    ap.add_argument("--same-seed", action="store_true", help="every scene the layout of --seed-start")
+    ap.add_argument("--noise", type=float, default=0.0,
+                    help="generate_truss.Noise on the executed action (norm units), on the approach only: before the "
+                         "cut and while the jaw is more than NOISE_NEAR_M from the cut point; a fresh seed per scene")
+    ap.add_argument("--ensemble", type=float, default=None, help="override temporal_ensemble_coeff (ACT)")
+    ap.add_argument("--n-action-steps", type=int, default=None, help="override n_action_steps (ACT, no ensembling)")
     a = ap.parse_args()
     a.fast = a.fast or a.headless
     policy_path = a.policy.resolve()
@@ -114,7 +129,13 @@ def main():
     obs_feats = {k: v for k, v in features.items() if k != OBS_ENV_STATE}
     _, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy, pre, post, pcfg = load_policy(policy_path, device, meta)
+    over = {}
+    if a.ensemble is not None:
+        over.update(temporal_ensemble_coeff=a.ensemble if a.ensemble > 0 else None,
+                    n_action_steps=1 if a.ensemble > 0 else (a.n_action_steps or 100))
+    elif a.n_action_steps is not None:
+        over.update(temporal_ensemble_coeff=None, n_action_steps=a.n_action_steps)
+    policy, pre, post, pcfg = load_policy(policy_path, device, meta, over)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
     ens = getattr(pcfg, "temporal_ensemble_coeff", None)   # ACT: None = plays n_action_steps per chunk instead
     print(f"policy {policy_path} ({pcfg.type}) on {device}; task {gt.TASK!r}; box + cut point as numbers: {wants_env}; "
@@ -123,7 +144,7 @@ def main():
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
-        fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False,
+        fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
         yolo_weights=yolo, state_log_dir=None, rig=rig))
     robot.connect()
     out_dir = HERE.parent / "outputs" / "eval"
@@ -135,7 +156,7 @@ def main():
     results, seed, quit_ = [], a.seed_start - 1, False
     try:
         while len(results) < a.scenes and not quit_:
-            seed += 1
+            seed = a.seed_start if a.same_seed else seed + 1
             robot.new_scene(seed, log=False)
             obs = robot.get_observation()              # the start frame: picks the target, like the episodes
             if robot._tgt_k is None:
@@ -148,6 +169,11 @@ def main():
                   f"stalk {t_info['r'] * 2000:.1f} mm), box from {robot._box_info['source']}", flush=True)
             env = robot.env_state()
             policy.reset()
+            noise = gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
+            p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+            grip = truss_ik.cut_point_in_gripper(t_info["r"])
+            gid = robot.m.body("arm/gripper").id
+            closest = np.inf
             frames = 0
             watch = gt.Watch(robot)
             t0, t_crate, gave_up = robot.d.time, None, False
@@ -159,7 +185,14 @@ def main():
                 with torch.inference_mode():
                     x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
                     act = post(policy.select_action(pre(x)))
-                robot.send_action(make_robot_action(act, features))
+                cmd = make_robot_action(act, features)
+                jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
+                dist = float(np.linalg.norm(jaw_pt - p_cut))
+                closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
+                if noise is not None:
+                    near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None
+                    cmd = noise("approach" if not near else "settle_at_stalk", cmd)   # NOISE_OFF has settle_at_stalk
+                robot.send_action(cmd)
                 frames += 1
                 obs = robot.get_observation()
                 watch.step()
@@ -185,7 +218,9 @@ def main():
                    if not np.isnan(robot.det.detached_at[j])]
             in_crate = bool(ts.in_crate(robot.info, robot.d, robot.m, k))
             ok = cut and in_crate and not wrong and not off
-            rec = dict(seed=seed, target=t_info["name"], box_source=robot._box_info["source"], success=ok, cut=cut,
+            ok_strict = ok and watch.max <= gt.NEIGHBOUR_MOVE_M          # generate_truss.judge's neighbour rule too
+            rec = dict(seed=seed, target=t_info["name"], box_source=robot._box_info["source"], success=ok,
+                       success_strict=ok_strict, closest_mm=round(closest * 1000, 1), noise=a.noise, cut=cut,
                        in_crate=in_crate, wrong_cut=wrong, fruit_off=off,
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
@@ -204,12 +239,18 @@ def main():
         cv2.destroyAllWindows()
         if results:
             s = sum(r["success"] for r in results)
+            ens = getattr(pcfg, "temporal_ensemble_coeff", None)
             summary = dict(summary=True, policy=str(policy_path), policy_type=pcfg.type, temporal_ensemble_coeff=ens,
+                           n_action_steps=getattr(pcfg, "n_action_steps", None), noise=a.noise, no_dr=a.no_dr,
+                           same_seed=a.same_seed, success_strict=sum(r["success_strict"] for r in results),
+                           closest_mm_median=float(np.median([r["closest_mm"] for r in results])),
                            rig=rig, scenes=len(results), success=s, cut=sum(r["cut"] for r in results),
                            in_crate=sum(r["in_crate"] for r in results), seed_start=a.seed_start)
             log.write(json.dumps(summary) + "\n")
-            print(f"\n{s}/{len(results)} successes (target cut in {summary['cut']}, in the crate in "
-                  f"{summary['in_crate']}).  log {log_path}", flush=True)
+            print(f"\n{s}/{len(results)} successes, {summary['success_strict']} with neighbours within "
+                  f"{gt.NEIGHBOUR_MOVE_M * 1000:.0f} mm (target cut in {summary['cut']}, in the crate in "
+                  f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm).  "
+                  f"log {log_path}", flush=True)
         log.close()
 
 

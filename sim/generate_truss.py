@@ -7,6 +7,8 @@
     python generate_truss.py                            # 200 episodes, rig "base", into krish5831/blush_sim_truss_v3
     python generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 \
         --hold-share 0.10 --balance --seed-start 7600000   # how blush_sim_truss_v2 was recorded (rig "base")
+    python generate_truss.py --teacher --one-layout --seed-start 9100009 --episodes 50 --no-dr --no-yolo \
+        --repo-id krish5831/blush_sim_teacher_onelayout_v1    # post-mortem step 1: one layout, teacher + noise
 
 Per scene seed: build the truss scene (domain randomisation on, settle 1 s), take
 the first frame (the truss YOLO, or the true box, picks the ready truss and its cut point), plan, then
@@ -47,6 +49,7 @@ import scene  # noqa: E402
 import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_target as ttg  # noqa: E402
+import truss_teacher as tt  # noqa: E402
 
 # ⚠️ Not harvest/harvest.env's TASK: that string is the real rig's single-fruit placeholder. Truss harvesting
 # is a different task; this string goes with it (K7 decides the real rig's wording when it records trusses).
@@ -69,6 +72,38 @@ LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"
 # The next dataset: v2 (rig "base") is the current one, v1 (birdseye) was deleted 2026-11-08 at K7's request.
 DEFAULT_REPO = "krish5831/blush_sim_truss_v3"
 YOLO_TRUSS = HERE.parent / "runs" / "yolo_truss" / "truss_v1" / "weights" / "best.pt"
+# --teacher (post-mortem step 1+, 2026-11-11): the closed-loop teacher (truss_teacher.py) instead of the v2 planner,
+# with DART-style noise (Laskey et al. 2017): the arm EXECUTES the teacher's command plus noise, the dataset records
+# the teacher's clean command (the label) for the state the arm is really in, so the policy sees off-path states and
+# what to do there. The noise: per arm joint an AR(1) process, stationary std NOISE_NORM (norm units, ~1.5-1.8 deg
+# each), NOISE_RHO per frame (~0.3 s correlation at 30 fps); its seed per episode is logged, so the executed
+# commands can be rebuilt (a replay of the recorded CLEAN actions won't reproduce a noisy episode).
+NOISE_NORM = 1.0                 # guess, unverified: aims at ~1 cm at the jaw; the push test recovered from 1 cm
+NOISE_RHO = 0.9                  # guess, unverified
+# No noise at the stalk, at the crate or going home (the judge wants the arm within START_TOL_NORM of the start pose
+# 0.3 s after the return); half on the slide (2 cm pushes there failed 4 of 18 in check_teacher.py push).
+NOISE_OFF = {"settle_at_stalk", "close_cut", "squeeze", "lower", "release", "drop", "return", "hold_end"}
+NOISE_SCALE = {"slide_in": 0.5}
+
+
+class Noise:
+    """The executed command = the teacher's label + an AR(1) noise per arm joint (gripper untouched)."""
+
+    def __init__(self, sigma, rho, seed, episode):
+        self.sigma, self.rho = sigma, rho
+        self.rng = np.random.default_rng([seed, episode, 0xDA27])
+        self.n = np.zeros(5)
+        self.max = 0.0
+
+    def __call__(self, leg, act):
+        # the process steps every frame, also where it's switched off, so a leg's noise doesn't depend on the last
+        self.n = self.rho * self.n + self.sigma * np.sqrt(1 - self.rho ** 2) * self.rng.normal(size=5)
+        k = 0.0 if leg in NOISE_OFF else NOISE_SCALE.get(leg, 1.0)
+        out = dict(act)
+        for j, v in zip(expert.arm_map.JOINTS[:5], k * self.n):
+            out[f"{j}.pos"] += float(v)
+        self.max = max(self.max, float(np.abs(k * self.n).max()))
+        return out
 
 
 class Watch:
@@ -153,8 +188,9 @@ def hold_plan(robot, rng):
                        dict(hold=True, frames=n, seconds=round(n / expert.FPS, 2)))
 
 
-def play(robot, plan, on_frame=None, realtime=False):
-    """Plays a plan from the scene's start frame; returns (t0, Watch). realtime: paced at FPS (a window to watch)."""
+def play(robot, plan, on_frame=None, realtime=False, noise=None):
+    """Plays a plan from the scene's start frame; returns (t0, Watch). realtime: paced at FPS (a window to watch).
+    noise (--teacher): the arm executes noise(leg, label); on_frame gets the clean label, which the dataset records."""
     plan.reset()
     watch = Watch(robot)
     t0 = robot.d.time
@@ -162,8 +198,11 @@ def play(robot, plan, on_frame=None, realtime=False):
     while not plan.done:
         t_f = time.time()
         state = robot._present_norm() if obs is None else [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
+        leg = getattr(plan, "leg", None)
         act = plan.act(state)
-        sent = robot.send_action(act)
+        sent = robot.send_action(act if noise is None else noise(leg, act))
+        if noise is not None:
+            sent = act                               # the label, not what was executed
         if on_frame is not None:
             obs = on_frame(sent)
         watch.step()
@@ -192,6 +231,12 @@ def main():
     ap.add_argument("--hold-share", type=float, default=0.0,
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
     ap.add_argument("--balance", action="store_true", help="spread targets along the row (BALANCE_*)")
+    ap.add_argument("--teacher", action="store_true",
+                    help="teacher v3 (truss_teacher.py) + DART noise instead of the v2 planner; no misses")
+    ap.add_argument("--noise", type=float, default=NOISE_NORM, help="--teacher: noise std per arm joint, norm units")
+    ap.add_argument("--one-layout", action="store_true",
+                    help="every episode the scene of --seed-start (the step-1 pipeline check); the noise differs")
+    ap.add_argument("--no-dr", action="store_true", help="no domain randomisation (post-mortem: off until 50 %%)")
     a = ap.parse_args()
     if a.no_yolo:
         a.yolo_weights = None
@@ -204,7 +249,7 @@ def main():
 
     overlay = "yolo" if a.yolo_weights else "true_box"
     cfg = SO101MujocoConfig(id="sim", seed=a.seed_start, viewer=False, overlay=overlay, realtime=False,
-                            fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False,
+                            fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
                             rig=a.rig, start_jitter_deg=a.start_jitter_deg,
                             yolo_weights=str(a.yolo_weights) if a.yolo_weights else None)
     robot = SO101Mujoco(cfg)
@@ -245,9 +290,12 @@ def main():
     seed, attempts, t_start = a.seed_start - 1, 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
-            seed += 1
+            seed = a.seed_start if a.one_layout else seed + 1
             attempts += 1
             rec = dict(seed=seed)
+            noise = None
+            if a.teacher:
+                rec["noise"] = dict(std_norm=a.noise, rho=NOISE_RHO, seed=[seed, attempts, 0xDA27])
             t_try = time.time()
 
             def skip(why, rec=rec, t_try=t_try, seed=seed):   # bound now (B023); only called in this iteration anyway
@@ -285,27 +333,38 @@ def main():
                     if (bins[b] + 1) / (kept["n"] - kept["hold"] + 1) > BALANCE_MAX_SHARE:
                         skip(f"balance: row part {b + 1}/{BALANCE_BINS} has {bins[b]} of "
                              f"{kept['n'] - kept['hold']}"); continue
-                miss = bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
+                miss = not a.teacher and bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
                 rec["cut_x"] = round(float(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d,
                                                              robot.m)[0][0]), 4)
                 rec.update(target=robot._box_info["target_name"], target_source=robot._box_info["source"],
                            cut_source=robot._box_info["cut_source"], miss=miss, env=robot.env_state().round(4).tolist())
                 fails, ok, plan = [], False, None
-                for k in range(PLAN_TRIES):
+                for k in range(1 if a.teacher else PLAN_TRIES):    # the teacher is deterministic: one try
                     if k:
                         robot.new_scene(seed, log=False)
                         robot.get_observation()
                     try:
-                        plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
+                        if a.teacher:
+                            plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
+                            # ⚠️ The cross + environment_state mark u = 0.5 (truss_target.cut_pixel); marking the
+                            # teacher's own u is generator v3 (step 2) work. Until then only scenes cut at 0.5.
+                            if plan.meta["cut_u"] != 0.5:
+                                fails.append(f"teacher cuts at u {plan.meta['cut_u']}, the cue marks 0.5")
+                                break
+                            noise = Noise(a.noise, NOISE_RHO, seed, attempts)
+                        else:
+                            plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
                     except tx.PlanError as e:
                         fails.append(f"no plan: {e}")
                         break
-                    t0, watch = play(robot, plan, realtime=a.watch and a.dry)
+                    t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
                     ok, why = judge(robot, plan, t0, watch)
                     if ok:
                         break
                     fails.append(f"dry run: {why}")
                 rec["plan_tries"] = k + 1
+                if noise is not None:
+                    rec["noise"]["max_norm"] = round(noise.max, 2)
                 if not ok:
                     skip(" | ".join(fails)); continue
                 rec["plan"] = plan.meta
@@ -343,7 +402,8 @@ def main():
                     time.sleep(max(0.0, 1 / expert.FPS - (time.time() - t_f)))
                 return cur["obs"]
 
-            t0, watch = play(robot, plan, on_frame=frame)
+            t0, watch = play(robot, plan, on_frame=frame,
+                             noise=None if noise is None else Noise(a.noise, NOISE_RHO, seed, attempts))
             ok, why = judge_hold(robot, watch) if hold else judge(robot, plan, t0, watch)
             if not ok:
                 ds.clear_episode_buffer()
