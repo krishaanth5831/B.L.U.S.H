@@ -8,7 +8,9 @@
     python generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base --start-jitter-deg 3 \
         --hold-share 0.10 --balance --seed-start 7600000   # how blush_sim_truss_v2 was recorded (rig "base")
     python generate_truss.py --teacher --one-layout --seed-start 9100009 --episodes 50 --no-dr --no-yolo \
-        --repo-id krish5831/blush_sim_teacher_onelayout_v1    # post-mortem step 1: one layout, teacher + noise
+        --noise-share 1.0 --repo-id krish5831/blush_sim_teacher_onelayout_v1   # post-mortem step 1: one layout
+    python generate_truss.py --teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 \
+        --seed-start 9300000 --episodes 600 --repo-id krish5831/blush_sim_teacher_v3   # step 2: dataset v3
 
 Per scene seed: build the truss scene (domain randomisation on, settle 1 s), take
 the first frame (the truss YOLO, or the true box, picks the ready truss and its cut point), plan, then
@@ -80,6 +82,7 @@ YOLO_TRUSS = HERE.parent / "runs" / "yolo_truss" / "truss_v1" / "weights" / "bes
 # commands can be rebuilt (a replay of the recorded CLEAN actions won't reproduce a noisy episode).
 NOISE_NORM = 1.0                 # guess, unverified: aims at ~1 cm at the jaw; the push test recovered from 1 cm
 NOISE_RHO = 0.9                  # guess, unverified
+NOISE_SHARE = 0.5                # share of teacher episodes with noise (post-mortem 6.2: "on about half")
 # No noise at the stalk, at the crate or going home (the judge wants the arm within START_TOL_NORM of the start pose
 # 0.3 s after the return); half on the slide (2 cm pushes there failed 4 of 18 in check_teacher.py push).
 NOISE_OFF = {"settle_at_stalk", "close_cut", "squeeze", "lower", "release", "drop", "return", "hold_end"}
@@ -234,6 +237,8 @@ def main():
     ap.add_argument("--teacher", action="store_true",
                     help="teacher v3 (truss_teacher.py) + DART noise instead of the v2 planner; no misses")
     ap.add_argument("--noise", type=float, default=NOISE_NORM, help="--teacher: noise std per arm joint, norm units")
+    ap.add_argument("--noise-share", type=float, default=NOISE_SHARE,
+                    help="--teacher: share of episodes with noise, drawn per seed (step 1 used 1.0)")
     ap.add_argument("--one-layout", action="store_true",
                     help="every episode the scene of --seed-start (the step-1 pipeline check); the noise differs")
     ap.add_argument("--no-dr", action="store_true", help="no domain randomisation (post-mortem: off until 50 %%)")
@@ -294,7 +299,9 @@ def main():
             attempts += 1
             rec = dict(seed=seed)
             noise = None
-            if a.teacher:
+            # per seed, not per attempt, so a scene's dry run and recording agree (0xA015: its own stream)
+            noisy = a.teacher and bool(np.random.default_rng([seed, 0xA015]).random() < a.noise_share)
+            if noisy:
                 rec["noise"] = dict(std_norm=a.noise, rho=NOISE_RHO, seed=[seed, attempts, 0xDA27])
             t_try = time.time()
 
@@ -351,7 +358,7 @@ def main():
                             if plan.meta["cut_u"] != 0.5:
                                 fails.append(f"teacher cuts at u {plan.meta['cut_u']}, the cue marks 0.5")
                                 break
-                            noise = Noise(a.noise, NOISE_RHO, seed, attempts)
+                            noise = Noise(a.noise, NOISE_RHO, seed, attempts) if noisy else None
                         else:
                             plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
                     except tx.PlanError as e:

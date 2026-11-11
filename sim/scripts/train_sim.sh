@@ -38,10 +38,12 @@ case "${1:-}" in
     # the box + cut point as numbers through observation.environment_state), lerobot's image augmentation on (colour,
     # sharpness, RandomAffine +-5 deg / 5 % shift). How chunks are executed (ensembling / full chunk / every 25) is set
     # at evaluation (eval_truss.py --ensemble / --n-action-steps), not here. Step 1 (one layout): STEPS=20000.
+    # Saves every 5k: pick the checkpoint by rollouts (sim/pick_checkpoint.py), never "last". Step 1 went
+    # 74 % at 20k, 95 % at 40k, 5 % at 50k with the training loss flat (post-mortem section 6.9).
     DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_onelayout_v1}
     lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
       --policy.push_to_hub=false --dataset.image_transforms.enable=true \
-      --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=${SAVE:-10000} --log_freq=100 --num_workers=8 \
+      --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=${SAVE:-5000} --log_freq=100 --num_workers=8 \
       --output_dir=$OUT/${RUN:-act_teacher_v1} --job_name=${RUN:-act_teacher_v1} --wandb.enable=false ;;
   act-full)
     lerobot-train --dataset.repo_id="$SIM_DATASET" --policy.type=act --policy.device=cuda \
