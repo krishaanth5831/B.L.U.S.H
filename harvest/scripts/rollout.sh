@@ -11,8 +11,6 @@ source "$(dirname "$0")/common.sh"
 MODE=${1:?eval|run}; POLICY=${2:?policy repo, e.g. \$ACT_POLICY}
 SEATBELT=--robot.max_relative_target=10   # caps per-step joint jump for first runs. Remove once it behaves (it caps speed).
 EXTRA=()
-# SmolVLA: uncomment both, with the SAME rename map used in training.
-# EXTRA+=(--inference.type=rtc --rename_map='...')
 
 case "$MODE" in
   eval)

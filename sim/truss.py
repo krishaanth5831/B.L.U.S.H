@@ -59,7 +59,7 @@ STALK_FRICTION = (0.9, 0.01, 0.001)   # guess (unverified), like the fruit's
 CUT_WELD_SOLREF = (0.004, 1.0)   # timeconst = 2 x the 2 ms step (MuJoCo's stability floor)
 CUT_WELD_SOLIMP = (0.99, 0.999, 0.0001, 0.5, 2)   # as scene.FINRAY_LOOP_SOLIMP
 KNUCKLE_MASS = 0.02
-# Knuckle spring (guess, unverified: push a real truss with a scale and measure). ⚠️ At tomato.RACHIS_STIFFNESS's
+# Knuckle spring (guess, unverified: push a real truss with a scale and measure). ⚠️ At the single-fruit trusses'
 # 0.3 N.m/rad a 6-8 fruit truss sagged 20-23 deg while the scene settled (2026-11-03), turning its stalk out of
 # the narrow band where a cut pose exists (truss_ik scan) after the scene had checked it. 3 N.m/rad: ~2 deg.
 KNUCKLE_STIFFNESS = 3.0          # N.m/rad
@@ -223,7 +223,6 @@ class TrussCutter:
         self.pads = tuple(gid(p) for p in pads)
         self.weld = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, info["weld"])
         self.cut_force = cut_force_for(info["r"])
-        self._bits = {b: (m.geom_contype[b], m.geom_conaffinity[b]) for b in self.blades}
         self._f6 = np.zeros(6)
         self.cut_t, self._over_t = None, None
         self.squeeze = self.pad_force = 0.0
@@ -269,7 +268,3 @@ class TrussCutter:
         for b in self.blades:                 # through the stalk: they don't push it any more
             m.geom_contype[b], m.geom_conaffinity[b] = 0, 0
         return True
-
-    def restore(self):
-        for b, (ct, ca) in self._bits.items():
-            self.m.geom_contype[b], self.m.geom_conaffinity[b] = ct, ca

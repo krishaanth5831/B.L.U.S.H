@@ -1,6 +1,6 @@
 """Domain randomisation for one scene: lighting, colours, camera poses, and the physics guesses.
 
-    params = apply(m, seed, info["fruit"])   # after scene.build(seed) / truss_scene.build(seed), before the first frame
+    params = apply(m, seed, info["fruit"])   # after truss_scene.build(seed), before the first frame
 
 K7 (2026-10-27) asked for it with the scripted episodes, so the data isn't all one look and one feel.
 Everything is drawn from the scene seed (its own stream, so the vine layout stays the same with or
@@ -43,6 +43,9 @@ FINGER_FRICTION = (0.9, 1.4)      # sliding; nominal 1.2 (scene.FINGER_FRICTION,
 FINGER_STIFFNESS = (0.7, 1.4)     # x the fin-ray hinge springs; nominal = 2 N/mm at mid-finger (a guess),
                                   # 40 N/mm on the truss scenes' rigid fingers (scene.RIGID_FINGER_K_N_PER_MM)
 TRUSS_STIFFNESS = (0.6, 1.6)      # x rachis + pedicel ball-joint springs (guesses in tomato.py)
+# ⚠️ The truss scenes have no *_rachis_ball joint (that was the single-fruit trusses'); their knuckle spring
+# (*_knuckle_ball, truss.KNUCKLE_STIFFNESS) is NOT scaled, only the pedicels. Left as is: recorded datasets rebuild
+# with exactly these scales.
 FRUIT_MASS = (0.85, 1.25)         # x fruit mass (density guess in tomato.py)
 
 

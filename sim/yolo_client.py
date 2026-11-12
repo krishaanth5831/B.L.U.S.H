@@ -1,6 +1,6 @@
-"""yolo_client.py: the ripeness YOLO from the lerobot env, via yolo_worker.py in the ripeness env.
+"""yolo_client.py: a YOLO (the sim's truss YOLO) from the lerobot env, via yolo_worker.py in the ripeness env.
 
-    yolo = YoloClient()            # starts the worker; loading the weights takes a few seconds
+    yolo = YoloClient(weights)     # starts the worker; loading the weights takes a few seconds
     dets = yolo(rgb)               # 640x480 RGB uint8 -> [{"box", "cls", "conf"}, ...]
     d_bird, d_claw = yolo.many([bird, claw])   # both cameras as one batch
     yolo.close()
@@ -22,11 +22,10 @@ ROOT = HERE.parent
 # The ripeness env's python. Override with BLUSH_RIPENESS_PYTHON if conda lives elsewhere.
 RIPENESS_PYTHON = os.environ.get("BLUSH_RIPENESS_PYTHON",
                                  str(pathlib.Path.home() / "miniforge3/envs/ripeness/bin/python"))
-# ⚠️ unverified for the birdseye: pretrain_v4 is the current default weights (ripeness/models/README),
-# trained on claw-distance photos. gate.yaml has no released weights yet.
-WEIGHTS = ROOT / "ripeness/models/pretrain_v4.pt"
+# No default weights: the sim's truss YOLO lives in the gitignored runs/yolo_truss/<version>/weights/best.pt
+# (sim/yolo_truss/train.sh). The single-fruit ripeness weights (ripeness/models/) were the default until 2026-11-08.
 # Lowest confidence returned. Drawing (harvest/yolo_overlay.DISPLAY_CONF) and the selection threshold
-# (t_ripe) are applied later by the caller; the recall score also looks below them.
+# (truss_target.T_READY_BIRDSEYE) are applied later by the caller.
 CONF_FLOOR = 0.05
 MAX_FRAMES, MAX_H, MAX_W = 4, 480, 640     # what the shared frames file holds (config/hardware.env size)
 
@@ -44,7 +43,7 @@ def _sweep_stale(folder):
 
 
 class YoloClient:
-    def __init__(self, weights=WEIGHTS, python=RIPENESS_PYTHON, conf=CONF_FLOOR):
+    def __init__(self, weights, python=RIPENESS_PYTHON, conf=CONF_FLOOR):
         if not pathlib.Path(python).exists():
             raise FileNotFoundError(f"ripeness env python not found at {python} (set BLUSH_RIPENESS_PYTHON)")
         self.weights = pathlib.Path(weights)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # capped_ripeness_python.sh: the ripeness env's python in its own 3 GB memory scope (K7's cap rule).
 # For runs that already sit under a 3 GB cap themselves: the YOLO worker (~1.4 GB, torch) is a child
-# process, so inside the parent's scope it pushed generate_scripted.py's recording pass past 3 GB and
+# process, so inside the parent's scope it pushed the (single-fruit) generator's recording pass past 3 GB and
 # the OOM killer ended the pilot (2026-10-27). With this it gets its own scope (generate_truss.py,
 # dagger_truss.py and eval_truss.py use it the same way):
 #   BLUSH_RIPENESS_PYTHON=$PWD/scripts/capped_ripeness_python.sh python generate_truss.py ...

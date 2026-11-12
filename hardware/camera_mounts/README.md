@@ -12,8 +12,10 @@
   camera low on a bracket left of the arm's base instead of the birdseye mast, and the truss dataset
   `blush_sim_truss_v2` uses it. No bracket is drawn yet; its pose in `sim/scene.py` is the design guess.
 
-What each camera sees, in the sim (lerobot env, a window with the claw | birdseye frames as recorded):
+What each camera sees, in the sim (lerobot env, a window with the birdseye | claw frames as recorded,
+or base | claw with `--rig base`):
 
 ```bash
 cd sim && python view_scene.py --cams
+cd sim && python view_scene.py --cams --rig base
 ```

@@ -10,7 +10,7 @@ again. Names and the task string in `harvest.env` are still single-fruit placeho
 trusses before the first real episode. Nothing here has recorded real episodes yet.
 
 ⚠️ Policy choice now (K7 2026-11-08): **ACT**, as in the sim (`sim/scripts/train_sim.sh act-truss`).
-SmolVLA was tried on the sim truss episodes and is not being used this time.
+SmolVLA was tried on the sim truss episodes and removed on 2026-11-08.
 
 ## Layout
 
@@ -24,7 +24,6 @@ harvest/
 │   ├── record.sh         one recording session (--resume for later ones)
 │   ├── check_dataset.py  episode count, camera keys, normalised-not-degrees
 │   ├── train_act.sh      smoke | full
-│   ├── train_smolvla.sh  not used (SmolVLA dropped; exits until RENAME_MAP is set)
 │   └── rollout.sh        eval (episodic, saved) | run (one shot)
 ├── yolo_overlay.py       draws the YOLO view (red detections + green target) into the frames; the sim uses it too
 ├── control/              target-centring controller (hybrid approach, see below; not built)
@@ -88,7 +87,7 @@ slow. Fumbled the align? Press ← and re-record. Don't correct on camera.
 ## Steps
 
 1. `scripts/teleop.sh`: pre-flight in the rerun viewer window (wrist roll OK, both streams live,
-   cable free). No follower at hand: `sim/scripts/teleop_sim.sh` drives the MuJoCo arm from the leader.
+   cable free). No follower at hand: `sim/scripts/teleop_sim.sh` drives the MuJoCo arm (a truss scene) from the leader.
 2. `scripts/record.sh` per session of 25. Log each one in `logs/session_log.md`.
 3. Watch every episode (`lerobot-dataset-viz`). Delete the bad ones into `$DATASET_CLEAN`
    with `lerobot-edit-dataset --operation.type delete_episodes`.

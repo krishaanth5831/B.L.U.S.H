@@ -3,10 +3,12 @@
 
     python dagger_truss.py --dry --episodes 10           # pilot: keep rate, triggers, time; nothing written
     python dagger_truss.py --dry --watch --episodes 1    # watch one takeover in the MuJoCo window
-    python dagger_truss.py                               # 100 episodes appended to krish5831/blush_sim_truss_v1
+    python dagger_truss.py                               # 100 episodes appended to krish5831/blush_sim_truss_v2
 
-⚠️ Birdseye rig only, as written for blush_sim_truss_v1 + smolvla_truss_expert_v1 (2026-11-05): the sim is built
-without `rig=`, so a rig "base" policy / dataset (blush_sim_truss_v2, act_truss_v1) needs changes first.
+The sim runs on the checkpoint's rig (eval_truss.trained_on: "base" for act_truss_v1); the dataset must have the same
+cameras as the checkpoint takes, else it stops before anything runs (written 2026-11-05 for the birdseye rig, made
+rig-aware 2026-11-08). ⚠️ rig "base" also builds the scene with the camera bracket (truss_scene.build base_mount), so
+a seed's scene isn't the birdseye-rig scene of the same seed.
 
 Per scene seed (fresh range DEFAULT_SEED, never trained or evaluated on):
   1. policy pass (nothing recorded): the scene as in eval_truss.py; the policy drives, every action it sends is
@@ -18,8 +20,8 @@ Per scene seed (fresh range DEFAULT_SEED, never trained or evaluated on):
      with generate_truss.judge (the same rules as the 200 scripted episodes, over the WHOLE episode from frame 0).
      PLAN_TRIES plans, each from a fresh rebuild + replay.
      ⚠️ Rebuild + replay instead of mj_getState/mj_setState: the cutters and the detacher keep their state in
-     Python. And the stored actions, not the policy again: SmolVLA samples noise, so a second run differs (ACT
-     doesn't, but replaying is cheaper than inference either way).
+     Python. And the stored actions, not the policy again: cheaper than inference, and exact even for a policy that
+     samples.
   3. recording pass: rebuild, replay the policy's actions and then the expert's plan, recording every frame like
      generate_truss.py; judged again, a mismatch is discarded.
 The episode holds the policy's own actions up to the takeover (so it starts at the scene's first frame like the
@@ -53,7 +55,8 @@ import truss_expert as tx  # noqa: E402
 import truss_ik  # noqa: E402
 import truss_scene as ts  # noqa: E402
 
-DEFAULT_POLICY = HERE.parent / "outputs/train/smolvla_truss_expert_v1/checkpoints/060000/pretrained_model"
+DEFAULT_POLICY = HERE.parent / "outputs/train/act_truss_v1/checkpoints/last/pretrained_model"   # train_sim.sh act-truss
+DEFAULT_REPO = "krish5831/blush_sim_truss_v2"   # what act_truss_v1 trains on (rig "base")
 # v1 training 210000-210512, pilot 200000-200008, eval 5000000-5000019 + ~1.6e9; ⚠️ blush_sim_truss_v2 was
 # recorded from 7600000 (7600000-7600533), so a run past ~600k attempts would reach it
 DEFAULT_SEED = 7_000_000
@@ -142,7 +145,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--policy", type=pathlib.Path, default=DEFAULT_POLICY)
     ap.add_argument("--episodes", type=int, default=100)
-    ap.add_argument("--repo-id", default=gt.DEFAULT_REPO)
+    ap.add_argument("--repo-id", default=DEFAULT_REPO, help="dataset to append to; its cameras must be the policy's")
     ap.add_argument("--seed-start", type=int, default=DEFAULT_SEED)
     ap.add_argument("--max-attempts", type=int, default=None)
     ap.add_argument("--dry", action="store_true", help="policy pass + takeover test only: write no dataset")
@@ -160,20 +163,27 @@ def main():
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
 
+    policy_path = a.policy.resolve()
+    if not (policy_path / "config.json").exists():
+        sys.exit(f"⚠️ no checkpoint at {policy_path} (config.json missing)")
+    _, rig = ev.trained_on(policy_path)
     root = HF_LEROBOT_HOME / a.repo_id
     meta = LeRobotDatasetMetadata(a.repo_id, root=root)
+    ds_cams, pol_cams = {k for k in meta.features if k.startswith("observation.images.")}, ev.cameras(policy_path)
+    if ds_cams != pol_cams:
+        sys.exit(f"⚠️ {a.repo_id} has cameras {sorted(ds_cams)}, the policy (rig {rig!r}) takes {sorted(pol_cams)}: "
+                 f"pass the dataset of the policy's rig (--repo-id)")
     obs_feats = {k: v for k, v in meta.features.items() if k != OBS_ENV_STATE}
     tap, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy_path = a.policy.resolve()
     policy, pre, post, pcfg = ev.load_policy(policy_path, device, meta)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=False, overlay="yolo" if yolo else "true_box", realtime=False,
-        fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False, task="truss",
-        yolo_weights=yolo))
+        fps=expert.FPS, domain_rand=True, settle_s=1.0, snap_to_first_action=False,
+        yolo_weights=yolo, rig=rig))
 
     ds = None
     if not a.dry:
@@ -188,8 +198,8 @@ def main():
     gt.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = gt.LOG_DIR / f"dagger{'_dry' if a.dry else ''}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
-    print(f"policy {policy_path}\ndataset {a.repo_id if ds is not None else '(dry, none)'} ({n_before} episodes "
-          f"before)\nattempt log {log_path}", flush=True)
+    print(f"policy {policy_path} (rig {rig})\ndataset {a.repo_id if ds is not None else '(dry, none)'} "
+          f"({n_before} episodes before)\nattempt log {log_path}", flush=True)
     robot.connect()
 
     def start(seed, viewer=False):

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Step 2 checks: unit mapping, tomato layouts, cameras. The grasp checks are in check_grasp.py.
+"""Scene checks: unit mapping, truss layouts, the full scene at the start pose, cameras (both rigs).
 
   python check_scene.py            all checks, PASS/FAIL per check, exit 1 on a FAIL
   python check_scene.py --quick    fewer layout seeds
 
-Watch it instead: python view_scene.py --cams
+The fingertips' cut + hold are check_truss_cut.py's, the tethers check_tomato_release.py's.
+Watch it instead: python view_scene.py --cams [--rig base]
 
 Writes nothing. Run in the lerobot env.
 """
@@ -19,8 +20,11 @@ import numpy as np  # noqa: E402
 
 import arm_map  # noqa: E402
 import scene  # noqa: E402
-from cameras import SimCameras  # noqa: E402
 import tomato as tm  # noqa: E402
+import truss as tr  # noqa: E402
+import truss_scene as ts  # noqa: E402
+import truss_target as ttg  # noqa: E402
+from cameras import SimCameras  # noqa: E402
 
 FAILS = 0
 
@@ -56,7 +60,7 @@ def check_mapping():
     q_open = fm.norm_to_rad([0, 0, 0, 0, 0, 100])[5]
     report(abs(np.degrees(q_closed) + 10) < 1e-6 and abs(q_open - scene.GRIPPER_RANGE_RAD[1]) < 1e-6,
            f"gripper 0 -> {np.degrees(q_closed):.1f} deg (closed stop), 100 -> {np.degrees(q_open):.1f} deg")
-    m, d, _ = scene.build(0)
+    m, _ = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True)   # the truss scenes' arm, free space
     qidx, _ = scene.arm_ids(m)
     jid = [m.jnt_qposadr.tolist().index(q) for q in qidx]
     lo, hi = fm.rad_limits()
@@ -72,22 +76,18 @@ def check_mapping():
 
 # ----------------------------------------------------------------------------------------------
 def check_layouts(n_seeds, n_settle):
-    bad_overlap, bad_ripe, bad_settle, counts, n_ripe = [], [], [], [], []
-    sh = scene.shoulder_world()
+    """truss_scene layouts without the arm: no fruit overlapping, none on the floor, a quiet settle."""
+    bad_overlap, bad_floor, bad_settle, counts, n_trusses = [], [], [], [], []
     for seed in range(n_seeds):
-        m, d, info = scene.build(seed, arm=False)
+        m, d, info = ts.build(seed, arm=False)
         fruit = info["fruit"]
         counts.append(len(fruit))
-        tg = [gid(m, f["geom"]) for f in fruit]
-        if contacts(m, d, tg, tg):
+        n_trusses.append(len(info["trusses"]))
+        fg = [gid(m, f["geom"]) for f in fruit]
+        if contacts(m, d, fg, fg):
             bad_overlap.append(seed)
-        ripe = [k for k, f in enumerate(fruit) if f["ripeness"] == "ripe"]
-        n_ripe.append(len(ripe))
-        apart = all(np.linalg.norm(fruit[a]["pos"] - fruit[b]["pos"]) >= scene.RIPE_GAP_M
-                    for a in ripe for b in ripe if a < b)
-        if (ripe != info["ripe"] or not scene.N_RIPE[0] <= len(ripe) <= scene.N_RIPE[1] or not apart
-                or any(np.linalg.norm(fruit[k]["pos"] - sh) >= scene.REACH_M for k in ripe)):
-            bad_ripe.append(seed)
+        if any(d.geom_xpos[g][2] - m.geom_size[g][0] < 0.02 for g in fg):   # truss_scene.vines_xml's floor rule
+            bad_floor.append(seed)
         if seed < n_settle:
             det = tm.Detacher(m, d, fruit)
             for _ in range(int(2.0 / scene.TIMESTEP)):
@@ -96,52 +96,67 @@ def check_layouts(n_seeds, n_settle):
             if not np.all(np.isnan(det.detached_at)):
                 bad_settle.append((seed, int(np.sum(~np.isnan(det.detached_at)))))
     report(not bad_overlap, f"{n_seeds} layouts: no two tomatoes start overlapping {bad_overlap[:10]}")
-    report(not bad_ripe, f"{n_seeds} layouts: {scene.N_RIPE[0]}-{scene.N_RIPE[1]} ripe fruits, all within reach, "
-                         f">= {scene.RIPE_GAP_M * 100:.0f} cm apart {bad_ripe[:10]}")
+    report(not bad_floor, f"{n_seeds} layouts: every tomato hangs >= 2 cm above the floor {bad_floor[:10]}")
     report(not bad_settle, f"{n_settle} layouts: 2 s settle without a single release {bad_settle[:10]}")
-    print(f"     fruit per scene: {min(counts)}-{max(counts)}, mean {np.mean(counts):.1f}; "
-          f"ripe per scene: {dict(zip(*np.unique(n_ripe, return_counts=True)))}")
+    print(f"     trusses per scene: {min(n_trusses)}-{max(n_trusses)}; fruit per scene: {min(counts)}-{max(counts)}, "
+          f"mean {np.mean(counts):.1f}")
 
 
 # ----------------------------------------------------------------------------------------------
 def check_full_scene(seeds):
+    """The full truss scene (arm, base camera bracket): the arm starts clear and holds still, nothing comes off or
+    gets cut, the ready truss shows in the birdseye and base cameras, the claw camera sees the fingers."""
     for seed in seeds:
-        m, d, info = scene.build(seed)
+        m, d, info = ts.build(seed, base_mount=True)
         qidx, uidx = scene.arm_ids(m)
         cams = SimCameras(m)   # ⚠️ one per model: a renderer is bound to its model
         arm_geoms = [i for i in range(m.ngeom) if m.geom(i).name.startswith("arm/") or
                      m.body(m.geom_bodyid[i]).name.startswith("arm/")]
         house = [i for i in range(m.ngeom) if not m.body(m.geom_bodyid[i]).name.startswith(("arm/", "s"))
                  and m.geom(i).name != "table"]
-        report(not contacts(m, d, arm_geoms, house), f"seed {seed}: arm starts clear of the greenhouse")
+        report(not contacts(m, d, arm_geoms, house),
+               f"seed {seed}: arm starts clear of the greenhouse, crate and base camera bracket")
         det = tm.Detacher(m, d, info["fruit"])
+        cutters = [tr.TrussCutter(m, d, t) for t in info["trusses"]]
         d.ctrl[uidx] = d.qpos[qidx]
         for _ in range(int(2.0 / scene.TIMESTEP)):
             mujoco.mj_step(m, d)
             det.step()
+            for c in cutters:
+                c.step()
         drift = np.degrees(np.abs(d.qpos[qidx] - d.ctrl[uidx])).max()
-        report(np.all(np.isnan(det.detached_at)) and drift < 2.0,
-               f"seed {seed}: 2 s at the start pose, no release, arm holds within {drift:.2f} deg")
-        # Cameras (through the lens model): the ripe fruits in the birdseye view, the fingers in the claw view.
-        seen = [cams.true_box(d, "birdseye", gid(m, info["fruit"][k]["geom"])) for k in info["ripe"]]
-        report(max(px for _, px in seen) >= 30,
-               f"seed {seed}: ripe fruits visible in birdseye, "
-               + ", ".join(f"{px} px ({b and b[2] - b[0] + 1} px across)" for b, px in seen)
-               + f" at {scene.CAM_W}x{scene.CAM_H}")
+        cut = [info["trusses"][k]["name"] for k, c in enumerate(cutters) if c.cut_t is not None]
+        report(np.all(np.isnan(det.detached_at)) and not cut and drift < 2.0,
+               f"seed {seed}: 2 s at the start pose, no release, no cut {cut}, arm holds within {drift:.2f} deg")
+        # Cameras (through the lens model): the target truss gets a box on the birdseye (the start frame's true-box
+        # path) and on the base camera (rig "base", view_target), the claw camera sees the fingers. ⚠️ Crowded on
+        # purpose: a ready truss can be hidden behind others; then the box is its outline (truss_target.outline_box).
+        if info["ready"]:
+            st = ttg.start_frame(cams, d, m, info, [])
+            px = {c: [ttg.truss_boxes(cams, d, m, info, cam=c)[k][1] for k in info["ready"]]
+                  for c in ("birdseye", "base")}
+            report(st["box"] is not None and st["target"] in info["ready"],
+                   f"seed {seed}: birdseye start frame boxes ready truss {st['target_name']} ({st['source']}); "
+                   f"ready trusses show {px['birdseye']} px on birdseye, {px['base']} px on base")
+            if st["target"] is not None:
+                box, cut = ttg.view_target(cams, d, m, info["trusses"][st["target"]], "base")
+                report(box is not None, f"seed {seed}: base camera boxes it too, box {box}, cut point {cut}")
+        else:
+            print(f"     seed {seed}: no ready truss (skipped the camera box checks)")
         ids = cams.ids(d, "claw")
-        fing = [i for i in range(m.ngeom) if m.geom(i).name.startswith(("arm/finger_", "arm/finray_"))]
+        fing = [i for i in range(m.ngeom) if m.geom(i).name.startswith(("arm/finray_", "arm/blade_", "arm/pad_"))]
         fpx = int(np.isin(ids, fing).sum())
-        report(fpx > 500, f"seed {seed}: claw camera sees the fin-ray fingers, {fpx} px")
+        report(fpx > 500, f"seed {seed}: claw camera sees the fingers + tips, {fpx} px")
         cams.close()
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--quick", action="store_true", help="20 layout seeds instead of 200")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--quick", action="store_true", help="5 layout seeds instead of 30, 1 full scene instead of 3")
     a = ap.parse_args()
     print("== unit mapping"); check_mapping()
-    print("\n== tomato layouts"); check_layouts(20 if a.quick else 200, 10 if a.quick else 50)
-    print("\n== full scene + cameras"); check_full_scene((0, 1) if a.quick else (0, 1, 2, 3, 4))
+    print("\n== truss layouts"); check_layouts(5 if a.quick else 30, 3 if a.quick else 10)
+    print("\n== full scene + cameras"); check_full_scene((0,) if a.quick else (0, 1, 2))
     print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAIL'}")
     sys.exit(1 if FAILS else 0)
 

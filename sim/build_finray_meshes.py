@@ -10,12 +10,14 @@ geometry that gets printed. Frames:
 Checked: the MJCF body poses equal the URDF origins finray_gripper.py uses (FIXED_VIS = geom quat
 0 1 0 0, JOINT = body pos 0.0202 0.0188 -0.0234 quat 0.7071 0.7071 0 0, MOVING_VIS = pos 0 0 0.0189).
 
-The bending fingers (scene.py FINRAY_BENDING) are built in MuJoCo from plates, so this only adds:
+The fingers themselves are built in MuJoCo from plates (scene._finray_ladder: the soft fin-ray, or near-rigid for the
+truss harvest's cut-and-hold tips), so besides the stubs this only adds:
   finger_<side>_base.stl   the TPU block the clevis clamps (the finger cut at the block's bottom face),
                            rigid with the jaw
   chain.json               per finger: the width axis, the "ladder" (flank and rib nodes on the plate
                            centrelines, tip cap box, plate thicknesses, TPU density) in the jaw frame,
-                           and the contact flank line in gripper_link mm (check_grasp.py places fruit by it)
+                           and the contact flank line in gripper_link mm (the single-fruit grasp code placed fruit
+                           by it; nothing reads it since 2026-11-08)
 
 Needs: numpy shapely trimesh manifold3d (a throwaway venv works, like the finray generator).
 """
