@@ -428,7 +428,9 @@ def main():
             if not ok:
                 ds.clear_episode_buffer()
                 skip(f"recording differs from the dry run: {why}"); continue
-            ds.save_episode()
+            # one camera after the other, in this process: lerobot's parallel encoding forks a worker per camera,
+            # which took a part from 3.9 to 5.2 GB (2026-11-12), and the 6 GB caps killed 4 shards
+            ds.save_episode(parallel_encoding=False)
             ep = kept["n"]
             kept["n"] += 1; kept["miss"] += miss; kept["hold"] += hold
             if not hold:
