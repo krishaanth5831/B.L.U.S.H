@@ -10,7 +10,7 @@
     python generate_truss.py --teacher --one-layout --seed-start 9100009 --episodes 50 --no-dr --no-yolo \
         --noise-share 1.0 --repo-id krish5831/blush_sim_teacher_onelayout_v1   # post-mortem step 1: one layout
     python generate_truss.py --teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 \
-        --seed-start 9300000 --episodes 600 --repo-id krish5831/blush_sim_teacher_v3   # step 2: dataset v3
+        --seed-start 9300000 --episodes 150 --part-size 25 --repo-id krish5831/blush_sim_teacher_v3_s0  # step 2, 1 of 4
 
 Per scene seed: build the truss scene (domain randomisation on, settle 1 s), take
 the first frame (the truss YOLO, or the true box, picks the ready truss and its cut point), plan, then
@@ -242,6 +242,9 @@ def main():
     ap.add_argument("--one-layout", action="store_true",
                     help="every episode the scene of --seed-start (the step-1 pipeline check); the noise differs")
     ap.add_argument("--no-dr", action="store_true", help="no domain randomisation (post-mortem: off until 50 %%)")
+    ap.add_argument("--part-size", type=int, default=0,
+                    help="finalize a dataset every N kept episodes, into <repo-id>_p00, _p01, ... (merge them after "
+                         "with lerobot's aggregate); a killed run then keeps its finished parts. 0 = one dataset")
     a = ap.parse_args()
     if a.no_yolo:
         a.yolo_weights = None
@@ -266,9 +269,12 @@ def main():
         from lerobot.processor import make_default_processors
         from lerobot.utils.constants import ACTION, HF_LEROBOT_HOME, OBS_ENV_STATE, OBS_STR
         from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
-        root = HF_LEROBOT_HOME / repo_id
-        if root.exists():
-            sys.exit(f"⚠️ {root} exists already: pick another --repo-id or move it (nothing was written).")
+        n_parts = -(-n_eps // a.part_size) if a.part_size > 0 else 1
+        part_ids = [f"{repo_id}_p{k:02d}" for k in range(n_parts)] if a.part_size > 0 else [repo_id]
+        for pid in part_ids:
+            if (HF_LEROBOT_HOME / pid).exists():
+                sys.exit(f"⚠️ {HF_LEROBOT_HOME / pid} exists already: pick another --repo-id or move it "
+                         "(nothing was written).")
         tap, _, rop = make_default_processors()
         features = combine_feature_dicts(
             aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(
@@ -276,14 +282,21 @@ def main():
             aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(
                 observation=robot.observation_features), use_videos=True))
         features[OBS_ENV_STATE] = {"dtype": "float32", "shape": [len(ttg.ENV_NAMES)], "names": ttg.ENV_NAMES}
-        ds = LeRobotDataset.create(repo_id, expert.FPS, root=root, robot_type=robot.name, features=features,
-                                   use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
-                                   image_writer_threads=4)
+
+        def new_part(k):
+            # ⚠️ a dataset is only readable after finalize() (the parquet footer): 4 shards killed by low memory
+            # on 2026-11-12 lost all 108 episodes, so long runs write parts (--part-size)
+            return LeRobotDataset.create(part_ids[k], expert.FPS, root=HF_LEROBOT_HOME / part_ids[k],
+                                         robot_type=robot.name, features=features, use_videos=True,
+                                         rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"), image_writer_threads=4)
+        part = 0
+        ds = new_part(part)
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{repo_id.split('/')[-1]}{'_dry' if a.dry else ''}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
-    print(f"dataset {repo_id if ds is not None else '(dry, none)'}  task {TASK!r}\n"
+    parts = f" in parts of {a.part_size}" if a.part_size > 0 else ""
+    print(f"dataset {repo_id + parts if ds is not None else '(dry, none)'}  task {TASK!r}\n"
           f"start frame: {'truss YOLO ' + str(a.yolo_weights) if a.yolo_weights else 'true box (no truss YOLO yet)'}\n"
           f"attempt log {log_path}", flush=True)
     robot.connect()
@@ -397,7 +410,7 @@ def main():
             # them up in the robot's dict (KeyError 'box_cx', pilot 2026-11-03); they're added below instead
             obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
 
-            def frame(sent, cur=cur, obs_feats=obs_feats, env=env):   # bound now (B023); play() calls it right away
+            def frame(sent, cur=cur, obs_feats=obs_feats, env=env, ds=ds):  # bound now (B023); play() calls it at once
                 t_f = time.time()
                 o = cur["obs"]
                 fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),
@@ -420,8 +433,13 @@ def main():
             kept["n"] += 1; kept["miss"] += miss; kept["hold"] += hold
             if not hold:
                 bins[bin_of(rec["cut_x"])] += 1
-            robot.extra = dict(episode_index=ep, dataset=repo_id, scripted=plan.meta, env_state=env.tolist())
-            rec.update(kept=True, reason="ok", episode_index=ep, wall_s=round(time.time() - t_try, 1))
+            robot.extra = dict(episode_index=ep, dataset=ds.repo_id, scripted=plan.meta, env_state=env.tolist())
+            rec.update(kept=True, reason="ok", episode_index=ep, part=ds.repo_id, wall_s=round(time.time() - t_try, 1))
+            if a.part_size > 0 and kept["n"] % a.part_size == 0 and kept["n"] < n_eps:
+                ds.finalize()
+                print(f"💾 part {ds.repo_id} finalized ({a.part_size} episodes)", flush=True)
+                part += 1
+                ds = new_part(part)
             log.write(json.dumps(rec) + "\n"); log.flush()
             m = plan.meta
             if hold:
