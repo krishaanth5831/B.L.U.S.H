@@ -5,6 +5,8 @@
     python eval_truss.py <policy> --scenes 5 --seed-start 1234567      # replay: the seeds are printed
     python eval_truss.py <policy> --headless --no-dr --no-yolo --same-seed --seed-start 9100009 --scenes 20 --noise 1.0
                                                                        # post-mortem step 1: the one-layout check
+    python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --holds 5 \
+        --seeds-from heldout_v3.jsonl                                  # step 3: the 20 held-out scenes
 
 Windows: the MuJoCo viewer (third person, mouse to orbit) and one per camera showing exactly what the policy gets
 (truss-YOLO overlay, green target box + cut-point cross, as in the recorded episodes). Keys in a camera window:
@@ -16,6 +18,19 @@ pilot 200000-200008, blush_sim_truss_v2 7600000-7600533: a random start can land
 truss YOLO picks the ready truss on the first frame, true box when it's wrong). The policy gets
 observation.environment_state (box + cut point) if it was trained with it; the box + cross are drawn on the image
 either way. The rig (cameras) and the dataset whose features are used come from the checkpoint (trained_on).
+
+--seeds-from (step 3, 2026-11-14): the scenes are the kept seeds of a generate_truss.py attempt log instead of
+seed-start + 1, + 2, ... Teacher v3 solves about a third of the scenes with a ready truss (step 0: 73 of 200) and the
+dataset holds only those, so the step-3 test set is 20 seeds from 9900000 (outside every recorded range) that a clean
+teacher dry run solved:
+    python generate_truss.py --teacher --no-dr --no-yolo --dry --noise-share 0 --seed-start 9900000 --episodes 20 \
+        --max-attempts 400 --repo-id krish5831/blush_eval_heldout_v3
+(2026-11-14: 20 of 53 scenes solved, seeds 9900006 to 9900052; its kept rows are sim/heldout_v3.jsonl. Unbalanced,
+as scenes come: 13 of the 20 targets hang in the first quarter of the row.) A success rate on them is "of the
+scenes the teacher solves", as S.H.E.A.R's "of teacher-feasible cuts".
+--holds K adds K nothing-ready scenes (truss_scene.build hold, as the dataset's stay-home episodes) from
+--hold-seed-start: the policy runs HOLD_EVAL_S; success = generate_truss.judge_hold (nothing cut, no fruit off,
+nothing moved) and the arm stayed within HOLD_MOVE_NORM of where it started. Reported apart, not in the success count.
 
 Graded like generate_truss.judge, at the end of each scene: success = the target truss was cut and lies whole in
 the crate, no other truss was cut, no fruit came off anywhere. Also logged: cut at all, which fruit came off, how
@@ -48,6 +63,9 @@ TRAIN_DATASET = "krish5831/blush_sim_truss_v2"   # fallback for a checkpoint wit
 EPISODE_S = 45.0          # scripted truss episodes run 19-31 s (run_v1.log); 45 s gives the policy slack
 AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a late knock-off still counts
 NOISE_NEAR_M = 0.03       # --noise is off within this of the cut point (generate_truss.NOISE_OFF at the stalk)
+HOLD_EVAL_S = 6.0         # --holds: the dataset's stay-home episodes last 4-6 s (generate_truss.HOLD_S)
+HOLD_MOVE_NORM = 3.0      # --holds: the arm "stayed home" within this on every joint, norm units (guess, unverified)
+HOLD_SEED_START = 9_950_000   # --holds: outside every recorded range (step 2 ended at 9722070)
 
 
 def cameras(path):
@@ -107,7 +125,17 @@ def main():
                          "cut and while the jaw is more than NOISE_NEAR_M from the cut point; a fresh seed per scene")
     ap.add_argument("--ensemble", type=float, default=None, help="override temporal_ensemble_coeff (ACT)")
     ap.add_argument("--n-action-steps", type=int, default=None, help="override n_action_steps (ACT, no ensembling)")
+    # post-mortem step 3 (2026-11-14): a fixed held-out set the teacher solves, and stay-home scenes
+    ap.add_argument("--seeds-from", type=pathlib.Path, default=None,
+                    help="a generate_truss.py attempt log (.jsonl): run its kept, non-hold seeds, at most --scenes")
+    ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
+    ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
+    seeds = None
+    if a.seeds_from is not None:
+        rows = [json.loads(ln) for ln in a.seeds_from.expanduser().read_text().splitlines() if ln.strip()]
+        seeds = [r["seed"] for r in rows if r.get("kept") is True and not r.get("hold")]
+        a.seed_start = seeds[0]
     a.fast = a.fast or a.headless
     policy_path = a.policy.resolve()
     if a.seed_start is None:
@@ -153,10 +181,16 @@ def main():
     run = policy_path.parents[2].name if policy_path.name == "pretrained_model" else ""
     log_path = out_dir / f"{run}_{name}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
     log = log_path.open("w")
-    results, seed, quit_ = [], a.seed_start - 1, False
+    results, holds, seed, quit_, n_tried = [], [], a.seed_start - 1, False, 0
     try:
         while len(results) < a.scenes and not quit_:
-            seed = a.seed_start if a.same_seed else seed + 1
+            if seeds is not None:
+                if n_tried >= len(seeds):
+                    break
+                seed = seeds[n_tried]
+                n_tried += 1
+            else:
+                seed = a.seed_start if a.same_seed else seed + 1
             robot.new_scene(seed, log=False)
             obs = robot.get_observation()              # the start frame: picks the target, like the episodes
             if robot._tgt_k is None:
@@ -234,6 +268,33 @@ def main():
                        f"❌ in the crate, but {len(off)} fruit came off")
             print(f"  {verdict}  (neighbours moved {watch.max * 1000:.0f} mm, {frames} frames)   "
                   f"[{sum(r['success'] for r in results)}/{len(results)} so far]", flush=True)
+        for i in range(0 if quit_ else a.holds):
+            seed = a.hold_seed_start + i
+            robot.new_scene(seed, log=False, hold=True)
+            obs = robot.get_observation()
+            env = robot.env_state()
+            policy.reset()
+            start = np.asarray(robot._present_norm(), float)
+            watch, t0, moved = gt.Watch(robot), robot.d.time, 0.0
+            while robot.d.time - t0 < HOLD_EVAL_S:
+                frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
+                if wants_env:
+                    frame[OBS_ENV_STATE] = env
+                with torch.inference_mode():
+                    x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
+                    act = post(policy.select_action(pre(x)))
+                robot.send_action(make_robot_action(act, features))
+                obs = robot.get_observation()
+                watch.step()
+                moved = max(moved, float(np.abs(np.asarray(robot._present_norm(), float) - start).max()))
+            ok, why = gt.judge_hold(robot, watch)
+            if ok and moved > HOLD_MOVE_NORM:
+                ok, why = False, f"the arm moved {moved:.1f} norm units"
+            rec = dict(seed=seed, hold=True, success=bool(ok), why=why, moved_norm=round(moved, 1), rig=rig)
+            holds.append(rec)
+            log.write(json.dumps(rec) + "\n"); log.flush()
+            print(f"  {'✅' if ok else '❌'} hold scene {i + 1}/{a.holds}: seed {seed}, "
+                  f"{'stayed home' if ok else why} (moved {moved:.1f})", flush=True)
     finally:
         robot.disconnect()
         cv2.destroyAllWindows()
@@ -245,11 +306,14 @@ def main():
                            same_seed=a.same_seed, success_strict=sum(r["success_strict"] for r in results),
                            closest_mm_median=float(np.median([r["closest_mm"] for r in results])),
                            rig=rig, scenes=len(results), success=s, cut=sum(r["cut"] for r in results),
-                           in_crate=sum(r["in_crate"] for r in results), seed_start=a.seed_start)
+                           in_crate=sum(r["in_crate"] for r in results), seed_start=a.seed_start,
+                           seeds_from=None if a.seeds_from is None else str(a.seeds_from),
+                           holds=len(holds), holds_ok=sum(r["success"] for r in holds))
             log.write(json.dumps(summary) + "\n")
+            held = f"; holds {summary['holds_ok']}/{len(holds)}" if holds else ""
             print(f"\n{s}/{len(results)} successes, {summary['success_strict']} with neighbours within "
                   f"{gt.NEIGHBOUR_MOVE_M * 1000:.0f} mm (target cut in {summary['cut']}, in the crate in "
-                  f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm).  "
+                  f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm{held}).  "
                   f"log {log_path}", flush=True)
         log.close()
 

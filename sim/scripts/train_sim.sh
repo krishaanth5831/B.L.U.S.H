@@ -40,9 +40,24 @@ case "${1:-}" in
     # at evaluation (eval_truss.py --ensemble / --n-action-steps), not here. Step 1 (one layout): STEPS=20000.
     # Saves every 5k: pick the checkpoint by rollouts (sim/pick_checkpoint.py), never "last". Step 1 went
     # 74 % at 20k, 95 % at 40k, 5 % at 50k with the training loss flat (post-mortem section 6.9).
+    # Learning rate (step 3, 2026-11-14): that drift past the peak happened at a constant 1e-5 (S.H.E.A.R's too:
+    # 45k 18 of 19, 50k 8 of 19), so the default is now a cosine decay to zero at STEPS after WARMUP steps
+    # (lerobot's cosine_annealing_with_warmup; LR_SCHED=constant for the old recipe). ACT's preset is AdamW lr 1e-5,
+    # weight decay 1e-4 and no scheduler (configuration_act.py), so the same optimiser is spelled out. Without the
+    # preset lerobot passes policy.parameters() as one group instead of ACT's two (backbone apart): the same thing,
+    # since optimizer_lr_backbone is 1e-5 too. Checked 2026-11-14: lr 1e-5 at step 1000, 5.1e-6 at 50k, 0 at 100k.
+    # Warmup 1000 = pi0's value (guess, unverified).
+    # EMA=1 adds lerobot's weight average (pretrained_model_ema per checkpoint).
+    #   RUN=act_teacher_v3 sim/scripts/train_sim.sh act-teacher $HF_USER/blush_sim_teacher_v3     step 3
     DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_onelayout_v1}
+    SCHED=()
+    if [[ "${LR_SCHED:-cosine}" == cosine ]]; then
+      SCHED=(--use_policy_training_preset=false --optimizer.type=adamw --optimizer.lr=1e-5 --optimizer.weight_decay=1e-4
+             --scheduler.type=cosine_annealing_with_warmup --scheduler.num_warmup_steps=${WARMUP:-1000})
+    fi
+    [[ -n "${EMA:-}" ]] && SCHED+=(--ema.enable=true)
     lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
-      --policy.push_to_hub=false --dataset.image_transforms.enable=true \
+      --policy.push_to_hub=false --dataset.image_transforms.enable=true "${SCHED[@]}" \
       --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=${SAVE:-5000} --log_freq=100 --num_workers=8 \
       --output_dir=$OUT/${RUN:-act_teacher_v1} --job_name=${RUN:-act_teacher_v1} --wandb.enable=false ;;
   act-full)
