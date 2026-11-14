@@ -114,6 +114,43 @@ ensembling, 100k steps, a checkpoint every 10k into `outputs/train/act_truss_v1`
 loads, loss falls), `act-full`, `merge <real_ds>`, `pi05-smoke`, `pi05-full`; the script header says what each
 does. SmolVLA was tried on the truss episodes and removed with its recipes on 2026-11-08.
 
+## Teacher v3 pipeline (the post-mortem ladder, November 2026)
+
+The scripted planner's episodes held coin-flips the camera can't see, so the policy data now comes from a
+deterministic closed-loop teacher (`truss_teacher.py`), half of the episodes with noise on the executed action and
+the teacher's clean action as the label. Plan and results: vault note "BLUSH + SHEAR Policy Post-Mortem".
+
+| Step | What | State |
+|---|---|---|
+| 0 | teacher + its three tests (`check_teacher.py`) | done: solves 73 of 200 scenes |
+| 1 | one layout, 50 episodes, ACT: the pipeline check | passed at 40k steps (18 of 19 noisy rollouts) |
+| 2 | dataset v3 | done: `krish5831/blush_sim_teacher_v3`, 610 episodes (525 cuts, 85 stay-home), local only |
+| 3 | ACT on v3, a test at every 5k checkpoint | set up, not started |
+
+```bash
+python check_teacher.py solve --scenes 1 --seed-start 9100003 --watch     # watch the teacher do one scene
+# step 2, how v3 was recorded: one process per 20-episode part (the recorder grows to ~6-7 GB while it records,
+# and a dataset is only readable after its final write), then merged and replayed
+python generate_truss.py --teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 \
+    --seed-start 9700000 --episodes 20 --max-attempts 900 --repo-id krish5831/blush_sim_teacher_v3_w_p00
+python merge_parts.py krish5831/blush_sim_teacher_v3 krish5831/blush_sim_teacher_v3_s krish5831/blush_sim_teacher_v3_w
+python replay_check.py ~/.cache/blush_sim/truss/blush_sim_teacher_v3_w_p*.jsonl --n 10    # clean episodes must reproduce
+# step 3 (from the repo root): cosine learning-rate decay, a checkpoint every 5k
+RUN=act_teacher_v3 sim/scripts/train_sim.sh act-teacher krish5831/blush_sim_teacher_v3
+# ... and in a second shell, a test of every checkpoint as it lands, on the CPU (the GPU stays with training)
+python pick_checkpoint.py ../outputs/train/act_teacher_v3 --watch --until 100000 --cpu -- --headless --no-dr \
+    --no-yolo --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 20 --holds 5
+python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrained_model --no-dr --no-yolo \
+    --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 3            # watch a checkpoint in the windows
+```
+
+`heldout_v3.jsonl`: the step-3 test set, 20 scenes from seed 9900000 on (outside every recorded range) that a
+clean teacher dry run solved (20 of 53 tried). A success rate on it is "of the scenes the teacher solves". ⚠️ As
+scenes come, not balanced like the dataset: 13 of the 20 targets hang in the first quarter of the row.
+`--holds 5` adds nothing-ready scenes, where the arm must stay home; they're reported apart.
+⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
+⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
+
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
 The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in

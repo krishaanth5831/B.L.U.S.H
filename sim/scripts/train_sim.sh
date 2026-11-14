@@ -43,8 +43,10 @@ case "${1:-}" in
     # Learning rate (step 3, 2026-11-14): that drift past the peak happened at a constant 1e-5 (S.H.E.A.R's too:
     # 45k 18 of 19, 50k 8 of 19), so the default is now a cosine decay to zero at STEPS after WARMUP steps
     # (lerobot's cosine_annealing_with_warmup; LR_SCHED=constant for the old recipe). ACT's preset is AdamW lr 1e-5,
-    # weight decay 1e-4 and no scheduler (configuration_act.py), so the same optimiser is spelled out; the backbone's
-    # param group comes from ACTPolicy.get_optim_params either way. Warmup 1000 = pi0's value (guess, unverified).
+    # weight decay 1e-4 and no scheduler (configuration_act.py), so the same optimiser is spelled out. Without the
+    # preset lerobot passes policy.parameters() as one group instead of ACT's two (backbone apart): the same thing,
+    # since optimizer_lr_backbone is 1e-5 too. Checked 2026-11-14: lr 1e-5 at step 1000, 5.1e-6 at 50k, 0 at 100k.
+    # Warmup 1000 = pi0's value (guess, unverified).
     # EMA=1 adds lerobot's weight average (pretrained_model_ema per checkpoint).
     #   RUN=act_teacher_v3 sim/scripts/train_sim.sh act-teacher $HF_USER/blush_sim_teacher_v3     step 3
     DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_onelayout_v1}
