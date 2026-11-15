@@ -221,7 +221,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     name = policy_path.parent.name if policy_path.name == "pretrained_model" else policy_path.name
     run = policy_path.parents[2].name if policy_path.name == "pretrained_model" else ""
-    log_path = out_dir / f"{run}_{name}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+    log_path = out_dir / f"{run}_{name}_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.jsonl"   # pid: two tests
+    # started in the same second wrote one file (S.H.E.A.R, 2026-11-15)
     log = log_path.open("w")
     results, holds, seed, quit_, n_tried = [], [], a.seed_start - 1, False, 0
     try:
@@ -249,7 +250,7 @@ def main():
             p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
             gid = robot.m.body("arm/gripper").id
-            closest = np.inf
+            closest = closest_live = np.inf
             frames = 0
             watch = gt.Watch(robot)
             t0, t_crate, gave_up = robot.d.time, None, False
@@ -269,6 +270,11 @@ def main():
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
+                # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
+                # so successes showed 16 and 35 mm (2026-11-15). closest_live measures to where it hangs NOW.
+                if robot.cutters[k].cut_t is None:
+                    p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+                    closest_live = min(closest_live, float(np.linalg.norm(jaw_pt - p_now)))
                 if noise is not None:
                     near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None
                     cmd = noise("approach" if not near else "settle_at_stalk", cmd)   # NOISE_OFF has settle_at_stalk
@@ -302,7 +308,8 @@ def main():
             ok = cut and in_crate and not wrong and not off
             ok_strict = ok and watch.max <= gt.NEIGHBOUR_MOVE_M          # generate_truss.judge's neighbour rule too
             rec = dict(seed=seed, target=t_info["name"], box_source=robot._box_info["source"], success=ok,
-                       success_strict=ok_strict, closest_mm=round(closest * 1000, 1), noise=a.noise, cut=cut,
+                       success_strict=ok_strict, closest_mm=round(closest * 1000, 1),
+                       closest_live_mm=round(closest_live * 1000, 1), noise=a.noise, cut=cut,
                        in_crate=in_crate, wrong_cut=wrong, fruit_off=off,
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
