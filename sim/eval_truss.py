@@ -7,6 +7,8 @@
                                                                        # post-mortem step 1: the one-layout check
     python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --holds 5 \
         --seeds-from heldout_v3.jsonl                                  # step 3: the 20 held-out scenes
+    python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --seeds-from heldout_v3.jsonl \
+        --scenes 10 --video ../outputs/videos/<name>                   # one .mp4 per scene, when a live window can't keep up
 
 Windows: the MuJoCo viewer (third person, mouse to orbit) and one per camera showing exactly what the policy gets
 (truss-YOLO overlay, green target box + cut-point cross, as in the recorded episodes). Keys in a camera window:
@@ -49,6 +51,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")      # cv2's Qt windows under Wayland, via XWayland
 
 import cv2  # noqa: E402
+import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
@@ -100,6 +103,42 @@ def load_policy(path, device, ds_meta, overrides=None):
     return policy, pre, post, cfg
 
 
+class SceneVideo:
+    """--video: one .mp4 per scene, the viewer's third-person view next to the policy's cameras, at sim speed.
+    For when a live window can't keep up (K7 2026-11-15: the CPU held at 1 GHz froze the viewer)."""
+
+    def __init__(self, path, robot):
+        import av
+        self.av, self.robot, self.fps = av, robot, int(round(expert.FPS))
+        self.r = mujoco.Renderer(robot.m, 480, 640)           # ⚠️ bound to this scene's model: one per scene
+        self.cam = mujoco.MjvCamera()
+        self.cam.lookat[:] = (0.42, 0.30, 0.18)               # the viewer's start view (so101_mujoco._launch_viewer)
+        self.cam.distance, self.cam.azimuth, self.cam.elevation = 0.75, 90, -35
+        self.out, self.stream = av.open(str(path), "w"), None
+
+    def add(self, obs, label, n=1):
+        self.r.update_scene(self.robot.d, self.cam)
+        imgs = [self.r.render()] + [obs[c] for c in ("birdseye", "base", "claw") if c in obs]
+        h = min(i.shape[0] for i in imgs) // 2 * 2
+        img = np.hstack([i[:h] for i in imgs])
+        img = np.ascontiguousarray(img[:, :img.shape[1] // 2 * 2])
+        cv2.putText(img, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+        if self.stream is None:
+            self.stream = self.out.add_stream("libx264", rate=self.fps)
+            self.stream.width, self.stream.height, self.stream.pix_fmt = img.shape[1], img.shape[0], "yuv420p"
+            self.stream.options = {"preset": "ultrafast", "crf": "23"}
+        for _ in range(n):
+            for pkt in self.stream.encode(self.av.VideoFrame.from_ndarray(img, format="rgb24")):
+                self.out.mux(pkt)
+
+    def close(self):
+        if self.stream is not None:
+            for pkt in self.stream.encode():
+                self.out.mux(pkt)
+        self.out.close()
+        self.r.close()
+
+
 def show(obs, label):
     for c in [c for c in ("birdseye", "base", "claw") if c in obs]:   # whichever rig the policy uses
         img = cv2.cvtColor(obs[c], cv2.COLOR_RGB2BGR)
@@ -128,6 +167,9 @@ def main():
     # post-mortem step 3 (2026-11-14): a fixed held-out set the teacher solves, and stay-home scenes
     ap.add_argument("--seeds-from", type=pathlib.Path, default=None,
                     help="a generate_truss.py attempt log (.jsonl): run its kept, non-hold seeds, at most --scenes")
+    ap.add_argument("--video", type=pathlib.Path, default=None,
+                    help="save every scene as <dir>/scene_NN_seed_<seed>.mp4 (third person + the policy's cameras); "
+                         "works with --headless, plays at sim speed however slow the rollout ran")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -211,6 +253,10 @@ def main():
             frames = 0
             watch = gt.Watch(robot)
             t0, t_crate, gave_up = robot.d.time, None, False
+            vid = None
+            if a.video is not None:
+                a.video.mkdir(parents=True, exist_ok=True)
+                vid = SceneVideo(a.video / f"scene_{n:02d}_seed_{seed}.mp4", robot)
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
                 frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
@@ -236,6 +282,8 @@ def main():
                     print(f"  🍅 truss in the crate at {t:.1f} s", flush=True)
                 if t_crate is not None and t - t_crate > AFTER_CRATE_S:
                     break
+                if vid is not None:
+                    vid.add(obs, f"scene {n}/{a.scenes}  seed {seed}  t {t:4.1f} s  closest {closest * 1000:.0f} mm")
                 key = 0 if a.headless else show(obs, f"scene {n}/{a.scenes}  seed {seed}  t {t:4.1f} s")
                 if key == ord("q"):
                     quit_ = gave_up = True
@@ -266,6 +314,10 @@ def main():
                        "❌ never cut the target" if not cut else
                        "❌ cut, but not (all) in the crate" if not in_crate else
                        f"❌ in the crate, but {len(off)} fruit came off")
+            if vid is not None:                          # two seconds of the last frame with the verdict on it
+                vid.add(obs, f"scene {n}/{a.scenes}  seed {seed}  " + ("SUCCESS" if ok else "FAIL: " + verdict[2:])
+                        + f"  (closest {closest * 1000:.0f} mm)", n=2 * vid.fps)
+                vid.close()
             print(f"  {verdict}  (neighbours moved {watch.max * 1000:.0f} mm, {frames} frames)   "
                   f"[{sum(r['success'] for r in results)}/{len(results)} so far]", flush=True)
         for i in range(0 if quit_ else a.holds):

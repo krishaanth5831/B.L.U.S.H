@@ -142,6 +142,9 @@ python pick_checkpoint.py ../outputs/train/act_teacher_v3 --watch --until 100000
     --no-yolo --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 20 --holds 5
 python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrained_model --no-dr --no-yolo \
     --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 3            # watch a checkpoint in the windows
+python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrained_model --headless --no-dr --no-yolo \
+    --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 10 --video ../outputs/videos/<name>
+                                                                             # or one video per scene (slow CPU, busy GPU)
 ```
 
 `heldout_v3.jsonl`: the step-3 test set, 20 scenes from seed 9900000 on (outside every recorded range) that a
