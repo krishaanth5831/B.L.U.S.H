@@ -64,7 +64,7 @@ import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_teacher as tt  # noqa: E402
 
-TRAIN_DATASET = "krish5831/blush_sim_truss_v2"   # fallback for a checkpoint without train_config.json (act-truss's)
+TRAIN_DATASET = "krish5831/blush_sim_scripted_v2"   # fallback for a checkpoint without train_config.json (act-truss's)
 EPISODE_S = 45.0          # scripted truss episodes run 19-31 s (run_v1.log); 45 s gives the policy slack
 AFTER_CRATE_S = 3.0       # keep going this long after the truss lands, so a late knock-off still counts
 NOISE_NEAR_M = 0.03       # --noise is off within this of the cut point (generate_truss.NOISE_OFF at the stalk)
@@ -179,6 +179,10 @@ def main():
     ap.add_argument("--handoff-mm", type=float, default=50.0,
                     help="--hybrid: hand over when the jaw point is this close to where the cut point hangs now "
                          "(the teacher's slide is 45 mm long)")
+    ap.add_argument("--replan", action="store_true",
+                    help="--hybrid: at the hand-over the teacher plans afresh from where the arm and the truss are NOW "
+                         "(its start-frame plan aims where the stalk hung before the policy moved things), else it "
+                         "re-enters its start-frame plan (resync)")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -255,7 +259,7 @@ def main():
                   f"stalk {t_info['r'] * 2000:.1f} mm), box from {robot._box_info['source']}", flush=True)
             env = robot.env_state()
             policy.reset()
-            T, handed, t_hand, mm_hand, leg_hand = None, None, None, None, None
+            T, handed, t_hand, mm_hand, leg_hand, replan_why = None, None, None, None, None, None
             if a.hybrid:                               # the teacher's plan, from the start frame as in the recordings
                 try:
                     T = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
@@ -282,7 +286,18 @@ def main():
                     d_now = float(np.linalg.norm(jaw_pt - ts.cut_target_now(t_info, robot.d, robot.m)[0]))
                     if d_now < a.handoff_mm / 1000:    # --hybrid: the teacher takes over on its leg nearest the arm
                         st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
-                        leg_hand = T.resync(st_norm, cut=False, released=False)
+                        T2 = None
+                        if a.replan:                   # plan afresh from here, on the live truss (cut_target_now)
+                            try:
+                                T2 = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
+                                T2.reset()
+                            except tx.PlanError as e:
+                                replan_why = str(e)[:120]
+                        if T2 is not None:
+                            T, leg_hand = T2, "replan:" + T2.legs[0].name
+                        else:
+                            leg_hand = ("resync(replan failed: " + replan_why + "):" if a.replan else "") + \
+                                T.resync(st_norm, cut=False, released=False)
                         handed, t_hand, mm_hand = frames, round(robot.d.time - t0, 2), round(d_now * 1000, 1)
                 if handed is not None:
                     if T.done:
