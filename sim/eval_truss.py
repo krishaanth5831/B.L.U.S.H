@@ -60,7 +60,9 @@ sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
 import truss_ik  # noqa: E402
+import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
+import truss_teacher as tt  # noqa: E402
 
 TRAIN_DATASET = "krish5831/blush_sim_truss_v2"   # fallback for a checkpoint without train_config.json (act-truss's)
 EPISODE_S = 45.0          # scripted truss episodes run 19-31 s (run_v1.log); 45 s gives the policy slack
@@ -170,6 +172,13 @@ def main():
     ap.add_argument("--video", type=pathlib.Path, default=None,
                     help="save every scene as <dir>/scene_NN_seed_<seed>.mp4 (third person + the policy's cameras); "
                          "works with --headless, plays at sim speed however slow the rollout ran")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="the policy brings the jaw near the stalk, then the scripted teacher (truss_teacher) finishes: "
+                         "slide in, cut and hold, carry, release, home. The bar for any learned last stage "
+                         "(S.H.E.A.R's eval_onecut --hybrid, 2026-11-16)")
+    ap.add_argument("--handoff-mm", type=float, default=50.0,
+                    help="--hybrid: hand over when the jaw point is this close to where the cut point hangs now "
+                         "(the teacher's slide is 45 mm long)")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -246,6 +255,14 @@ def main():
                   f"stalk {t_info['r'] * 2000:.1f} mm), box from {robot._box_info['source']}", flush=True)
             env = robot.env_state()
             policy.reset()
+            T, handed, t_hand, mm_hand, leg_hand = None, None, None, None, None
+            if a.hybrid:                               # the teacher's plan, from the start frame as in the recordings
+                try:
+                    T = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
+                    T.reset()
+                except tx.PlanError as e:
+                    print(f"  seed {seed}: skip, --hybrid and the teacher has no plan ({e})", flush=True)
+                    continue
             noise = gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
             p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
@@ -260,14 +277,25 @@ def main():
                 vid = SceneVideo(a.video / f"scene_{n:02d}_seed_{seed}.mp4", robot)
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
-                frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
-                if wants_env:
-                    frame[OBS_ENV_STATE] = env
-                with torch.inference_mode():
-                    x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
-                    act = post(policy.select_action(pre(x)))
-                cmd = make_robot_action(act, features)
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
+                if T is not None and handed is None and robot.cutters[k].cut_t is None:
+                    d_now = float(np.linalg.norm(jaw_pt - ts.cut_target_now(t_info, robot.d, robot.m)[0]))
+                    if d_now < a.handoff_mm / 1000:    # --hybrid: the teacher takes over on its leg nearest the arm
+                        st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
+                        leg_hand = T.resync(st_norm, cut=False, released=False)
+                        handed, t_hand, mm_hand = frames, round(robot.d.time - t0, 2), round(d_now * 1000, 1)
+                if handed is not None:
+                    if T.done:
+                        break
+                    cmd = T.act([obs[f"{j}.pos"] for j in expert.arm_map.JOINTS])
+                else:
+                    frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
+                    if wants_env:
+                        frame[OBS_ENV_STATE] = env
+                    with torch.inference_mode():
+                        x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
+                        act = post(policy.select_action(pre(x)))
+                    cmd = make_robot_action(act, features)
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
@@ -275,7 +303,7 @@ def main():
                 if robot.cutters[k].cut_t is None:
                     p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m)
                     closest_live = min(closest_live, float(np.linalg.norm(jaw_pt - p_now)))
-                if noise is not None:
+                if noise is not None and handed is None:
                     near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None
                     cmd = noise("approach" if not near else "settle_at_stalk", cmd)   # NOISE_OFF has settle_at_stalk
                 robot.send_action(cmd)
@@ -313,7 +341,8 @@ def main():
                        in_crate=in_crate, wrong_cut=wrong, fruit_off=off,
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
-                       gave_up=gave_up, frames=frames, rig=rig)
+                       gave_up=gave_up, frames=frames, rig=rig, hybrid=a.hybrid, handoff_t=t_hand,
+                       handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed)
             results.append(rec)
             log.write(json.dumps(rec) + "\n"); log.flush()
             verdict = ("✅ success" if ok else
