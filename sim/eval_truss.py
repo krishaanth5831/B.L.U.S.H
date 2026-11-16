@@ -37,8 +37,21 @@ nothing moved) and the arm stayed within HOLD_MOVE_NORM of where it started. Rep
 Graded like generate_truss.judge, at the end of each scene: success = the target truss was cut and lies whole in
 the crate, no other truss was cut, no fruit came off anywhere. Also logged: cut at all, which fruit came off, how
 far the neighbours moved, time to the crate. Results: ../outputs/eval/<run>_<checkpoint>_<stamp>.jsonl.
-Nothing is recorded or pushed. Run in the lerobot env, outside the Claude sandbox (GPU + display), with
-BLUSH_RIPENESS_PYTHON set as for generate_truss.py (the YOLO worker).
+Nothing is pushed, and nothing is recorded without --record. Run in the lerobot env, outside the Claude sandbox
+(GPU + display), with BLUSH_RIPENESS_PYTHON set as for generate_truss.py (the YOLO worker).
+
+--record REPO_ID (with --hybrid --rejoin; the last-stage finisher's data, K7 2026-11-16): every scene from the
+hand-over on goes into a new local dataset, the teacher's commands as the actions, the start frame's box + cut point
+as observation.environment_state (as in blush_sim_teacher_v3), the same features as the checkpoint's dataset (checked
+before anything runs). Kept only if generate_truss.judge passes over the WHOLE scene from frame 0 (so nothing the
+policy did before the hand-over broke the rules either) and the teacher got the arm home; else discarded. Only scenes
+the teacher cuts at u 0.5 (the cue's mark), as generate_truss. Two --handoff-mm values: a radius drawn per scene
+between them; --handoff-from cue measures to the start frame's cut point (what a real arm knows) instead of the live
+one. Seeds: use a range no dataset or test uses (step 2 recorded 9300000-9722070, the tests 9900000-9900999, holds
+9950000+): the finisher's is 9800000-9899999.
+    python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --hybrid --rejoin \
+        --handoff-mm 20 50 --handoff-from cue --seed-start 9800000 --scenes 400 --episodes 10 \
+        --record krish5831/blush_sim_teacher_v3_finisher_pilot
 """
 import argparse
 import json
@@ -62,6 +75,7 @@ import generate_truss as gt  # noqa: E402
 import truss_ik  # noqa: E402
 import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
+import truss_target as ttg  # noqa: E402
 import truss_teacher as tt  # noqa: E402
 
 TRAIN_DATASET = "krish5831/blush_sim_scripted_v2"   # fallback for a checkpoint without train_config.json (act-truss's)
@@ -176,9 +190,16 @@ def main():
                     help="the policy brings the jaw near the stalk, then the scripted teacher (truss_teacher) finishes: "
                          "slide in, cut and hold, carry, release, home. The bar for any learned last stage "
                          "(S.H.E.A.R's eval_onecut --hybrid, 2026-11-16)")
-    ap.add_argument("--handoff-mm", type=float, default=50.0,
+    ap.add_argument("--handoff-mm", type=float, nargs="+", default=[50.0],
                     help="--hybrid: hand over when the jaw point is this close to where the cut point hangs now "
-                         "(the teacher's slide is 45 mm long)")
+                         "(the teacher's slide is 45 mm long); two values: a radius per scene drawn between them")
+    ap.add_argument("--handoff-from", choices=("live", "cue"), default="live",
+                    help="--hybrid: measure the hand-over distance to where the cut point hangs now (live, "
+                         "privileged) or to where it hung at the start frame (cue: what a real arm knows)")
+    ap.add_argument("--record", default=None, metavar="REPO_ID",
+                    help="--hybrid --rejoin: record each scene from the hand-over on into this new local dataset "
+                         "(the finisher's data); kept only if judged clean, see the top of the file")
+    ap.add_argument("--episodes", type=int, default=None, help="--record: stop once this many are kept")
     ap.add_argument("--rejoin", action="store_true",
                     help="--hybrid: at the hand-over TrussTeacher.rejoin (back out if needed, back to its standoff, its "
                          "start-frame cut), else its nearest leg (resync)")
@@ -189,6 +210,10 @@ def main():
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
+    if a.record and not (a.hybrid and a.rejoin):
+        sys.exit("--record needs --hybrid --rejoin (it records the teacher's finish)")
+    if len(a.handoff_mm) not in (1, 2):
+        sys.exit("--handoff-mm takes one radius or two (a range)")
     seeds = None
     if a.seeds_from is not None:
         rows = [json.loads(ln) for ln in a.seeds_from.expanduser().read_text().splitlines() if ln.strip()]
@@ -213,7 +238,7 @@ def main():
     meta = LeRobotDatasetMetadata(train_ds, root=HF_LEROBOT_HOME / train_ds)
     features = meta.features
     obs_feats = {k: v for k, v in features.items() if k != OBS_ENV_STATE}
-    _, _, rop = make_default_processors()
+    tap, _, rop = make_default_processors()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     over = {}
     if a.ensemble is not None:
@@ -233,6 +258,33 @@ def main():
         fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
         yolo_weights=yolo, state_log_dir=None, rig=rig))
     robot.connect()
+    ds, kept = None, 0
+    if a.record:
+        from lerobot.configs.video import RGBEncoderConfig
+        from lerobot.datasets import LeRobotDataset, aggregate_pipeline_dataset_features, create_initial_features
+        from lerobot.utils.constants import ACTION
+        from lerobot.utils.feature_utils import combine_feature_dicts
+        if (HF_LEROBOT_HOME / a.record).exists():
+            robot.disconnect()
+            sys.exit(f"⚠️ {HF_LEROBOT_HOME / a.record} exists already: pick another --record (nothing was written)")
+        # the same features generate_truss.py records, which must be the checkpoint's dataset's (a finisher trained
+        # on them reads the same cameras, state and environment_state)
+        rfeat = combine_feature_dicts(
+            aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(
+                action=robot.action_features), use_videos=True),
+            aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(
+                observation=robot.observation_features), use_videos=True))
+        rfeat[OBS_ENV_STATE] = {"dtype": "float32", "shape": [len(ttg.ENV_NAMES)], "names": ttg.ENV_NAMES}
+        same = lambda k, v: (v["dtype"], list(v["shape"])) == (features[k]["dtype"], list(features[k]["shape"]))  # noqa: E731
+        diff = [k for k, v in rfeat.items() if k not in features or not same(k, v)]
+        if diff:
+            robot.disconnect()
+            sys.exit(f"⚠️ --record: features {diff} differ from {train_ds}'s (nothing was written)")
+        ds = LeRobotDataset.create(a.record, expert.FPS, root=HF_LEROBOT_HOME / a.record, robot_type=robot.name,
+                                   features=rfeat, use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
+                                   image_writer_threads=4)
+        rec_obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
+        print(f"recording the teacher's finish into {HF_LEROBOT_HOME / a.record}", flush=True)
     out_dir = HERE.parent / "outputs" / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
     name = policy_path.parent.name if policy_path.name == "pretrained_model" else policy_path.name
@@ -242,7 +294,7 @@ def main():
     log = log_path.open("w")
     results, holds, seed, quit_, n_tried = [], [], a.seed_start - 1, False, 0
     try:
-        while len(results) < a.scenes and not quit_:
+        while len(results) < a.scenes and not quit_ and (a.episodes is None or ds is None or kept < a.episodes):
             if seeds is not None:
                 if n_tried >= len(seeds):
                     break
@@ -270,7 +322,14 @@ def main():
                 except tx.PlanError as e:
                     print(f"  seed {seed}: skip, --hybrid and the teacher has no plan ({e})", flush=True)
                     continue
-            noise = gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
+                if ds is not None and T.meta.get("cut_u") != 0.5:   # as generate_truss: the cue marks u 0.5
+                    print(f"  seed {seed}: skip, the teacher cuts at u {T.meta.get('cut_u')}, the cue marks 0.5",
+                          flush=True)
+                    continue
+            r_hand = (a.handoff_mm[0] if len(a.handoff_mm) == 1 else
+                      float(np.random.default_rng([seed, 0x4A0F]).uniform(*a.handoff_mm))) / 1000
+            nb_hand, n_rec = None, 0
+            noise =gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
             p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
             gid = robot.m.body("arm/gripper").id
@@ -286,8 +345,10 @@ def main():
                 t_f = time.time()
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                 if T is not None and handed is None and robot.cutters[k].cut_t is None:
-                    d_now = float(np.linalg.norm(jaw_pt - ts.cut_target_now(t_info, robot.d, robot.m)[0]))
-                    if d_now < a.handoff_mm / 1000:    # --hybrid: the teacher takes over on its leg nearest the arm
+                    p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m)[0]
+                    d_now = float(np.linalg.norm(jaw_pt - p_ref))
+                    if d_now < r_hand:                 # --hybrid: the teacher takes over on its leg nearest the arm
+                        nb_hand = round(watch.max * 1000, 1)
                         st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
                         T2 = None
                         if a.rejoin:
@@ -333,7 +394,13 @@ def main():
                 if noise is not None and handed is None:
                     near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None
                     cmd = noise("approach" if not near else "settle_at_stalk", cmd)   # NOISE_OFF has settle_at_stalk
-                robot.send_action(cmd)
+                sent = robot.send_action(cmd)
+                if ds is not None and handed is not None:   # --record: this frame's observation + the teacher's command
+                    fr = {**build_dataset_frame(rec_obs_feats, rop(obs), prefix=OBS_STR),
+                          **build_dataset_frame(ds.features, tap((sent, obs)), prefix=ACTION), "task": gt.TASK}
+                    fr[OBS_ENV_STATE] = env
+                    ds.add_frame(fr)
+                    n_rec += 1
                 frames += 1
                 obs = robot.get_observation()
                 watch.step()
@@ -341,7 +408,8 @@ def main():
                 if t_crate is None and ts.in_crate(robot.info, robot.d, robot.m, k):
                     t_crate = t
                     print(f"  🍅 truss in the crate at {t:.1f} s", flush=True)
-                if t_crate is not None and t - t_crate > AFTER_CRATE_S:
+                # --record: the teacher's return home stays in the episode (it ends with T.done above)
+                if t_crate is not None and t - t_crate > AFTER_CRATE_S and (ds is None or handed is None):
                     break
                 if vid is not None:
                     vid.add(obs, f"scene {n}/{a.scenes}  seed {seed}  t {t:4.1f} s  closest {closest * 1000:.0f} mm")
@@ -370,6 +438,24 @@ def main():
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
                        gave_up=gave_up, frames=frames, rig=rig, hybrid=a.hybrid, handoff_t=t_hand,
                        handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed)
+            if a.hybrid:
+                rec.update(handoff_radius_mm=round(r_hand * 1000, 1), handoff_from=a.handoff_from,
+                           neighbours_at_handoff_mm=nb_hand)
+            if ds is not None:
+                # ⚠️ judge's fruit-off message names legs by T.phases, which restart at the hand-over: the leg named
+                # can be wrong there; the verdict isn't
+                kept_ok, why_rec = (False, "no hand-over") if handed is None else gt.judge(robot, T, t0, watch)
+                if kept_ok and not T.done:
+                    kept_ok, why_rec = False, "the teacher didn't finish in the episode"
+                if kept_ok:
+                    ds.save_episode(parallel_encoding=False)   # one camera at a time (generate_truss: memory)
+                    rec.update(episode_index=kept)
+                    kept += 1
+                else:
+                    ds.clear_episode_buffer()
+                rec.update(recorded=kept_ok, record_why=why_rec, record_frames=n_rec)
+                print(f"  {'💾 kept as episode ' + str(kept - 1) if kept_ok else '🗑 not kept: ' + why_rec}"
+                      f" ({n_rec} frames from the hand-over; {kept} kept)", flush=True)
             results.append(rec)
             log.write(json.dumps(rec) + "\n"); log.flush()
             verdict = ("✅ success" if ok else
@@ -413,6 +499,10 @@ def main():
     finally:
         robot.disconnect()
         cv2.destroyAllWindows()
+        if ds is not None:
+            ds.finalize()                              # ⚠️ the parquet is unreadable without it
+            print(f"💾 {a.record}: {kept} episodes, local only ({HF_LEROBOT_HOME / a.record}); nothing pushed",
+                  flush=True)
         if results:
             s = sum(r["success"] for r in results)
             ens = getattr(pcfg, "temporal_ensemble_coeff", None)
