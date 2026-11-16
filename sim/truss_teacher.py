@@ -38,6 +38,7 @@ IK, the carried-truss checker (CarryChecker), the release-pose fit (crate_poses 
 samples come from a fixed seed). Timing constants come from expert.py; the sag correction is expert.Plan's,
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
+import mujoco
 import numpy as np
 
 import arm_map
@@ -96,6 +97,19 @@ STALL_NORM, STALL_FRAMES = 0.05, 8         # ...or the arm moved less than this 
 SEARCH_BACK = 0.5                          # projection window: this many leads behind the last projection...
 SEARCH_AHEAD = 6.0                         # ...and this many ahead (keeps it from jumping where a path folds back)
 MAX_S = 45.0                               # done after this long whatever happens (a stuck leg can't loop forever)
+# --- rejoin (2026-11-16): taking over from a state the teacher didn't drive to (hybrid hand-over, DAgger) ---
+ESCAPE_M = (0.02, 0.04, 0.06)              # back out along the slide line this far, the first that is clear (guess)
+ESCAPE_STEPS = 8                           # IK points along that line
+# ⚠️ With the arm pushed 2 cm in a random direction the slide-line escape found no clear pose in 11 of 126 runs
+# (2026-11-16): then also straight back along the gripper's own finger axis, then straight up (position only).
+ESCAPE_DIRS = ("slide", "back", "up")
+# After a rejoin's way back to the standoff: hold there until the stalk hangs where the plan cuts it (a state test,
+# not a timed hold) or WAIT_MAX_S. ⚠️ 5 of 18 hard takeovers escaped fine and then slid onto empty air (blade
+# squeeze 0 N): the knocked truss was still swinging (2026-11-16).
+ESCAPE_STALL_FRAMES = 30                   # an escape that stops moving for 1 s is over: go on from there (guess)
+WAIT_STILL_MM = 3.0                        # cut point within this of the planned one (guess)
+WAIT_STILL_MM_S = 10.0                     # ... and moving slower than this (guess)
+WAIT_MAX_S = 3.0                           # then go anyway (guess)
 
 
 # ⚠️ Self-collision (2026-11-09): rrt.Checker skips every contact between two arm parts, so neither the v2 expert's
@@ -131,8 +145,9 @@ class Leg:
     """One piece of the motion: a joint path (norm units, (n, 5)) or a hold, the jaw command, the pace."""
 
     def __init__(self, name, W=None, hold=None, jaw=None, jaw_to=None, lead=FREE_LEAD, servo=False, frames=None,
-                 checker_ok=True):
+                 checker_ok=True, until=None):
         self.name, self.lead, self.servo, self.frames = name, lead, servo, frames
+        self.until = until                          # a hold leg: also done once until() is true
         self.W = None if W is None else np.asarray(W, float)
         self.hold = None if hold is None else np.asarray(hold, float)
         self.jaw, self.jaw_to = jaw, jaw_to         # jaw: fixed command; jaw_to: (from, to) ramped over the leg
@@ -209,6 +224,7 @@ class TrussTeacher(tx.TrussPlanner):
                 if isinstance(rest, str):
                     tried.append(rest)
                     continue
+                self._parts = dict(leg=leg, rest=rest)   # for rejoin: the cut and after, on the start-frame scene
                 self._build_legs(q0, to_std, leg, rest)
                 self.meta = dict(teacher="v3", neighbours=mode, cut_u=u, approach_blend_deg=float(beta),
                                  slide_mm=round(leg["slide_m"] * 1000), standoff_mm=round(leg["standoff_m"] * 1000),
@@ -467,15 +483,101 @@ class TrussTeacher(tx.TrussPlanner):
             moved = np.inf if self.q_prev is None else float(np.abs(q - self.q_prev).max())
             self.stall = self.stall + 1 if moved < STALL_NORM else 0
             self.q_prev = q
-            at_end = self.s + g.lead >= g.L
+            at_end = self.s + g.lead >= g.L or (g.name == "escape" and self.stall >= ESCAPE_STALL_FRAMES)
             close = float(np.abs(q - end).max()) < END_TOL["servo" if g.servo else "free"]
             if at_end and (close or self.stall >= STALL_FRAMES):
                 self._next_leg()
-        elif self.n_in_leg >= g.frames:
+        elif self.n_in_leg >= g.frames or (g.until is not None and g.until()):
             self._next_leg()
         if not self.done and self.n_total >= MAX_S * FPS:
             self.meta.update(frames=self.n_total, seconds=round(self.n_total / FPS, 2), timed_out=True)
         return {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, a)}
+
+    def rejoin(self, state_norm):
+        """Take over from a state the teacher didn't drive to, before the cut (a hybrid hand-over, a DAgger
+        takeover), keeping the start-frame plan's cut: if the arm is in among the plant, back out along the slide
+        line to the first clear pose (ESCAPE_M), then a free move to the plan's standoff, then the plan's own approach,
+        slide, cut, carry and return. The cut and everything after it stay planned on the start-frame scene, where
+        the stalk hangs again once the arm has let go of it. Evidence (check_teacher takeover, 63 held-out scenes,
+        2026-11-16): re-entering the old plan's nearest leg (resync) failed 29 % with the arm 2 cm off; planning
+        afresh on the live scene failed 37 % with the stalk swung 5 mm (it springs back to where the old plan aims)
+        and found no cut pose for a tilted stalk. Returns the first leg's name; raises PlanError."""
+        leg, rest = self._parts["leg"], self._parts["rest"]
+        r = self.t["r"]
+        q = self.fm.norm_to_rad(np.r_[np.asarray(state_norm, float)[:5], 0.0])[:5]
+        self.jaw(tx.JAW_OPEN_DEG)
+        esc, how_out = [], None
+        if not self.chk.free(q, **self.kw):
+            p_now, R_now = self.ik.frame(q, r)
+            for how_out in ESCAPE_DIRS:
+                for back in ESCAPE_M:
+                    # position only: the slide line's IK (stalk-aligned) turned the wrist inside the plant on its
+                    # first point and the arm jammed there until MAX_S (seed 9900089, 2026-11-16)
+                    v = {"slide": -leg["f"], "back": R_now[:, 2], "up": np.array([0.0, 0.0, 1.0])}[how_out]
+                    xs = self._move_point(q, v * back, ESCAPE_STEPS)     # fingers run along gripper -z
+                    if xs is not None and self.chk.free(xs[-1], **self.kw):
+                        esc = [q] + xs
+                        break
+                if esc:
+                    break
+            else:
+                raise PlanError("rejoin: no clear pose backing out (slide line, finger axis or up)")
+        start = esc[-1] if esc else q
+        path, how = self.free_move(start, leg["approach"][0], self.chk, r, **self.kw)
+        if path is None:
+            raise PlanError("rejoin: no free move to the standoff")
+        self._build_legs(start, path, leg, rest)
+        if esc:
+            fm = self.fm
+            W = np.array([fm.rad_to_norm(np.r_[x, 0])[:5] for x in esc])
+            L = float(np.linalg.norm(np.diff(W, axis=0), axis=1).sum())
+            g_now = float(fm.rad_to_norm(np.r_[np.zeros(5), self.d.qpos[self.g_adr]])[5])
+            self.legs[0].jaw, self.legs[0].jaw_to = self.g_open, None
+            self.legs.insert(0, Leg("escape", W, jaw_to=(g_now, self.g_open), servo=True,
+                                    lead=max(L / max(back / CART_M_S * FPS, 1.0), 1e-3)))
+        k = next(i for i, g in enumerate(self.legs) if g.name == "to_standoff") + 1
+        self.legs.insert(k, Leg("wait_still", hold=self.legs[k - 1].W[-1], jaw=self.g_open, servo=True,
+                                frames=max(1, int(round(WAIT_MAX_S * FPS))), until=self._stalk_still(leg)))
+        self.meta.update(rejoined=dict(escape_mm=round(back * 1000) if esc else 0, escape_dir=how_out if esc else None,
+                                       to_standoff_via=how))
+        self.reset()
+        return self.legs[0].name
+
+    def _stalk_still(self, leg):
+        """A test for wait_still: the live cut point (ts.cut_target_now, at the plan's u) near the planned one and
+        slow. Reads the live scene (self.d): the teacher is privileged, a learned finisher has to see it."""
+        prev = {}
+
+        def still():
+            p, _ = ts.cut_target_now(self.t, self.d, self.m, leg["u"])
+            v = np.inf if "p" not in prev else float(np.linalg.norm(p - prev["p"])) * FPS
+            prev["p"] = p
+            return np.linalg.norm(p - leg["p_cut"]) * 1000 < WAIT_STILL_MM and v * 1000 < WAIT_STILL_MM_S
+        return still
+
+    def _move_point(self, q, delta, n):
+        """Joint poses (rad) moving the gripper by `delta` (world, m) in n steps, orientation free: damped least
+        squares on the planning copy (self.chk), so the live scene isn't touched. None if it can't follow."""
+        m, d = self.chk.m, self.chk.d
+        b = m.body("arm/gripper").id
+        dadr = [m.jnt_dofadr[m.joint("arm/" + j).id] for j in arm_map.JOINTS[:5]]
+        d.qpos[self.chk.adr] = q
+        mujoco.mj_fwdPosition(m, d)
+        p0, x, xs = d.xpos[b].copy(), np.asarray(q, float).copy(), []
+        for u in np.linspace(0, 1, n + 1)[1:]:
+            goal = p0 + np.asarray(delta) * u
+            for _ in range(5):
+                jacp = np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, d, jacp, None, b)
+                J = jacp[:, dadr]
+                dq = J.T @ np.linalg.solve(J @ J.T + 1e-6 * np.eye(3), goal - d.xpos[b])
+                x = np.clip(x + dq, self.lo, self.hi)
+                d.qpos[self.chk.adr] = x
+                mujoco.mj_fwdPosition(m, d)
+            if np.linalg.norm(goal - d.xpos[b]) > 0.003:
+                return None
+            xs.append(x.copy())
+        return xs
 
     def resync(self, state_norm, cut, released):
         """Re-enter from a state the teacher didn't drive to (a DAgger takeover): the eligible leg whose path passes

@@ -21,8 +21,9 @@ printed; legs: to_standoff (free move), approach (standoff -> pre-cut), slide_in
 The takeover (test 4, 2026-11-16, for the last-stage finisher): the teacher's own run, stopped the first time the jaw
 comes within TRIGGER_MM of where the cut point hangs now; there the arm is displaced --arm-mm in a random direction
 and/or the truss swung so its cut point moves --swing-mm (as the policy leaves things at a hybrid hand-over), and
-the teacher goes on either by re-entering its start-frame plan (resync, what eval_truss --hybrid did) or by
-planning afresh from the arm and truss as they are now (replan). Judged like the episodes.
+the teacher goes on by re-entering its start-frame plan's nearest leg (resync, what eval_truss --hybrid did), by
+planning afresh from the arm and truss as they are now (replan), or by TrussTeacher.rejoin (back out if needed,
+back to the plan's standoff, the plan's own cut). Judged like the episodes.
 
 Writes only the solve log ~/.cache/blush_sim/teacher/solve_<stamp>.jsonl (and nothing for repeat / push).
 Run in the lerobot env under the memory cap:
@@ -194,13 +195,22 @@ def run_takeover(robot, seed, mode, arm_m, swing_m, rng):
                 if swing_m > 0:
                     took["swing_reached_mm"] = round(swing_truss(robot, k, swing_m, rng) * 1000, 1)
                 T2 = None
-                if mode == "replan":
+                if mode == "rejoin":
+                    try:
+                        took["entered"] = "rejoin:" + T.rejoin(robot._present_norm())
+                        took.update(T.meta.get("rejoined", {}))
+                    except tt.PlanError as e:
+                        took["rejoin_failed"] = str(e)[:150]
+                        took["entered"] = "resync:" + T.resync(robot._present_norm(), cut=False, released=False)
+                elif mode == "replan":
                     try:
                         T2 = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
                         T2.reset()
                     except tt.PlanError as e:
                         took["replan_failed"] = str(e)[:150]
-                if T2 is not None:
+                if mode == "rejoin":
+                    pass
+                elif T2 is not None:
                     T = T2
                     took.update(entered="replan:" + T.legs[0].name, cut_u=T.meta["cut_u"],
                                 standoff_mm=T.meta["standoff_mm"])
@@ -363,7 +373,7 @@ def main():
     p.add_argument("--mm", nargs="+", type=float, default=list(PUSH_MM))
     p = sub.add_parser("takeover", help="test 4: the teacher taking over near the stalk (resync or replan)")
     p.add_argument("--seeds-from", type=pathlib.Path, required=True)
-    p.add_argument("--modes", nargs="+", default=["resync", "replan"], choices=["resync", "replan"])
+    p.add_argument("--modes", nargs="+", default=["resync", "rejoin"], choices=["resync", "replan", "rejoin"])
     p.add_argument("--arm-mm", nargs="+", type=float, default=[0.0, 20.0])
     p.add_argument("--swing-mm", nargs="+", type=float, default=[0.0, 5.0])
     p.add_argument("--shard", type=int, default=0)

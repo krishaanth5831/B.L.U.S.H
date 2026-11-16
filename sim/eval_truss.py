@@ -179,6 +179,9 @@ def main():
     ap.add_argument("--handoff-mm", type=float, default=50.0,
                     help="--hybrid: hand over when the jaw point is this close to where the cut point hangs now "
                          "(the teacher's slide is 45 mm long)")
+    ap.add_argument("--rejoin", action="store_true",
+                    help="--hybrid: at the hand-over TrussTeacher.rejoin (back out if needed, back to its standoff, its "
+                         "start-frame cut), else its nearest leg (resync)")
     ap.add_argument("--replan", action="store_true",
                     help="--hybrid: at the hand-over the teacher plans afresh from where the arm and the truss are NOW "
                          "(its start-frame plan aims where the stalk hung before the policy moved things), else it "
@@ -287,13 +290,22 @@ def main():
                     if d_now < a.handoff_mm / 1000:    # --hybrid: the teacher takes over on its leg nearest the arm
                         st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
                         T2 = None
-                        if a.replan:                   # plan afresh from here, on the live truss (cut_target_now)
+                        if a.rejoin:
+                            try:
+                                leg_hand = "rejoin:" + T.rejoin(st_norm)
+                            except tx.PlanError as e:
+                                replan_why = str(e)[:120]
+                                leg_hand = f"resync(rejoin failed: {replan_why}):" + T.resync(st_norm, cut=False,
+                                                                                            released=False)
+                        elif a.replan:                   # plan afresh from here, on the live truss (cut_target_now)
                             try:
                                 T2 = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
                                 T2.reset()
                             except tx.PlanError as e:
                                 replan_why = str(e)[:120]
-                        if T2 is not None:
+                        if a.rejoin:
+                            pass
+                        elif T2 is not None:
                             T, leg_hand = T2, "replan:" + T2.legs[0].name
                         else:
                             leg_hand = ("resync(replan failed: " + replan_why + "):" if a.replan else "") + \
