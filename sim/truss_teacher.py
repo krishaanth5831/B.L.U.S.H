@@ -103,13 +103,11 @@ ESCAPE_STEPS = 8                           # IK points along that line
 # ⚠️ With the arm pushed 2 cm in a random direction the slide-line escape found no clear pose in 11 of 126 runs
 # (2026-11-16): then also straight back along the gripper's own finger axis, then straight up (position only).
 ESCAPE_DIRS = ("slide", "back", "up")
-# After a rejoin's way back to the standoff: hold there until the stalk hangs where the plan cuts it (a state test,
-# not a timed hold) or WAIT_MAX_S. ⚠️ 5 of 18 hard takeovers escaped fine and then slid onto empty air (blade
-# squeeze 0 N): the knocked truss was still swinging (2026-11-16).
 ESCAPE_STALL_FRAMES = 30                   # an escape that stops moving for 1 s is over: go on from there (guess)
-WAIT_STILL_MM = 3.0                        # cut point within this of the planned one (guess)
-WAIT_STILL_MM_S = 10.0                     # ... and moving slower than this (guess)
-WAIT_MAX_S = 3.0                           # then go anyway (guess)
+# ⚠️ No wait at the standoff. A hold there until the stalk hung still (3 mm, 10 mm/s, at most 3 s) was tried for the
+# 5 of 18 hard takeovers that escaped and then slid onto empty air (2026-11-16): it fixed none of the 18, and on the
+# 10 seeds that changed between rejoin versions it caused 5 failures (neighbours nudged to 15-17 mm, a drop) against
+# 2 it prevented (check_teacher takeover, deterministic, same 40 runs with and without it). Removed.
 
 
 # ⚠️ Self-collision (2026-11-09): rrt.Checker skips every contact between two arm parts, so neither the v2 expert's
@@ -535,25 +533,10 @@ class TrussTeacher(tx.TrussPlanner):
             self.legs[0].jaw, self.legs[0].jaw_to = self.g_open, None
             self.legs.insert(0, Leg("escape", W, jaw_to=(g_now, self.g_open), servo=True,
                                     lead=max(L / max(back / CART_M_S * FPS, 1.0), 1e-3)))
-        k = next(i for i, g in enumerate(self.legs) if g.name == "to_standoff") + 1
-        self.legs.insert(k, Leg("wait_still", hold=self.legs[k - 1].W[-1], jaw=self.g_open, servo=True,
-                                frames=max(1, int(round(WAIT_MAX_S * FPS))), until=self._stalk_still(leg)))
         self.meta.update(rejoined=dict(escape_mm=round(back * 1000) if esc else 0, escape_dir=how_out if esc else None,
                                        to_standoff_via=how))
         self.reset()
         return self.legs[0].name
-
-    def _stalk_still(self, leg):
-        """A test for wait_still: the live cut point (ts.cut_target_now, at the plan's u) near the planned one and
-        slow. Reads the live scene (self.d): the teacher is privileged, a learned finisher has to see it."""
-        prev = {}
-
-        def still():
-            p, _ = ts.cut_target_now(self.t, self.d, self.m, leg["u"])
-            v = np.inf if "p" not in prev else float(np.linalg.norm(p - prev["p"])) * FPS
-            prev["p"] = p
-            return np.linalg.norm(p - leg["p_cut"]) * 1000 < WAIT_STILL_MM and v * 1000 < WAIT_STILL_MM_S
-        return still
 
     def _move_point(self, q, delta, n):
         """Joint poses (rad) moving the gripper by `delta` (world, m) in n steps, orientation free: damped least
