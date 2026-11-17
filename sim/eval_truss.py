@@ -52,6 +52,15 @@ one. Seeds: use a range no dataset or test uses (step 2 recorded 9300000-9722070
     python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --hybrid --rejoin \
         --handoff-mm 20 50 --handoff-from cue --seed-start 9800000 --scenes 400 --episodes 10 \
         --record krish5831/blush_sim_teacher_v3_finisher_pilot
+
+--finisher PATH (with --hybrid; K7 2026-11-17: "make the finisher policy take over at the end"): at the hand-over a
+second trained policy, the last-stage finisher (trained on --record's data), takes over instead of the teacher. Same
+trigger as its recordings (--handoff-mm 20 50 --handoff-from cue), the start frame's box + cut point as
+observation.environment_state as there; the finisher starts with an empty action queue at the hand-over. The teacher
+still plans each scene first, only so the scenes are the ones its recordings and the teacher-hybrid were measured on
+(a scene it can't plan is skipped); it never moves the arm. The summary row names the finisher and the crate.
+    python eval_truss.py <approach policy> --headless --no-dr --no-yolo --n-action-steps 100 --hybrid \
+        --handoff-mm 20 50 --handoff-from cue --finisher <finisher pretrained_model> --seeds-from heldout_v3b.jsonl
 """
 import argparse
 import json
@@ -207,6 +216,9 @@ def main():
                     help="--hybrid: at the hand-over the teacher plans afresh from where the arm and the truss are NOW "
                          "(its start-frame plan aims where the stalk hung before the policy moved things), else it "
                          "re-enters its start-frame plan (resync)")
+    ap.add_argument("--finisher", type=pathlib.Path, default=None,
+                    help="--hybrid: at the hand-over this policy (a checkpoint's pretrained_model folder, the "
+                         "last-stage finisher) takes over instead of the teacher")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -214,6 +226,8 @@ def main():
         sys.exit("--record needs --hybrid --rejoin (it records the teacher's finish)")
     if len(a.handoff_mm) not in (1, 2):
         sys.exit("--handoff-mm takes one radius or two (a range)")
+    if a.finisher is not None and (not a.hybrid or a.rejoin or a.replan or a.record):
+        sys.exit("--finisher needs --hybrid and takes the teacher's place: no --rejoin, --replan or --record")
     seeds = None
     if a.seeds_from is not None:
         rows = [json.loads(ln) for ln in a.seeds_from.expanduser().read_text().splitlines() if ln.strip()]
@@ -251,6 +265,29 @@ def main():
     ens = getattr(pcfg, "temporal_ensemble_coeff", None)   # ACT: None = plays n_action_steps per chunk instead
     print(f"policy {policy_path} ({pcfg.type}) on {device}; task {gt.TASK!r}; box + cut point as numbers: {wants_env}; "
           f"temporal ensembling {ens}; rig {rig} (trained on {train_ds})", flush=True)
+    finisher = fin_path = None
+    if a.finisher is not None:
+        fin_path = a.finisher.resolve()
+        fin_ds, fin_rig = trained_on(fin_path)
+        fmeta = LeRobotDatasetMetadata(fin_ds, root=HF_LEROBOT_HOME / fin_ds)
+        same = lambda k: (k in fmeta.features and (features[k]["dtype"], list(features[k]["shape"]))   # noqa: E731
+                          == (fmeta.features[k]["dtype"], list(fmeta.features[k]["shape"])))
+        bad = [k for k in features if k.startswith(("observation.", "action")) and not same(k)]
+        if fin_rig != rig or bad:
+            sys.exit(f"⚠️ --finisher: trained on {fin_ds} (rig {fin_rig}); features {bad} differ from {train_ds}'s")
+        finisher, fpre, fpost, fcfg = load_policy(fin_path, device, fmeta, over)
+        fin_env = OBS_ENV_STATE in getattr(fcfg, "input_features", {})
+        print(f"finisher {fin_path} ({fcfg.type}, trained on {fin_ds}) takes over at the hand-over; box + cut point as "
+              f"numbers: {fin_env}", flush=True)
+
+    def act_of(pol, pre_, post_, wants, obs, env):
+        """One action of a trained policy (the approach policy, or the finisher) for this observation."""
+        frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
+        if wants:
+            frame[OBS_ENV_STATE] = env
+        with torch.inference_mode():
+            x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
+            return make_robot_action(post_(pol.select_action(pre_(x))), features)
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
     robot = SO101Mujoco(SO101MujocoConfig(
@@ -351,7 +388,10 @@ def main():
                         nb_hand = round(watch.max * 1000, 1)
                         st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
                         T2 = None
-                        if a.rejoin:
+                        if finisher is not None:         # --finisher: the trained finisher instead, empty queue
+                            finisher.reset()
+                            leg_hand = "finisher"
+                        elif a.rejoin:
                             try:
                                 leg_hand = "rejoin:" + T.rejoin(st_norm)
                             except tx.PlanError as e:
@@ -364,7 +404,7 @@ def main():
                                 T2.reset()
                             except tx.PlanError as e:
                                 replan_why = str(e)[:120]
-                        if a.rejoin:
+                        if finisher is not None or a.rejoin:
                             pass
                         elif T2 is not None:
                             T, leg_hand = T2, "replan:" + T2.legs[0].name
@@ -372,18 +412,14 @@ def main():
                             leg_hand = ("resync(replan failed: " + replan_why + "):" if a.replan else "") + \
                                 T.resync(st_norm, cut=False, released=False)
                         handed, t_hand, mm_hand = frames, round(robot.d.time - t0, 2), round(d_now * 1000, 1)
-                if handed is not None:
+                if handed is not None and finisher is not None:
+                    cmd = act_of(finisher, fpre, fpost, fin_env, obs, env)
+                elif handed is not None:
                     if T.done:
                         break
                     cmd = T.act([obs[f"{j}.pos"] for j in expert.arm_map.JOINTS])
                 else:
-                    frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
-                    if wants_env:
-                        frame[OBS_ENV_STATE] = env
-                    with torch.inference_mode():
-                        x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
-                        act = post(policy.select_action(pre(x)))
-                    cmd = make_robot_action(act, features)
+                    cmd = act_of(policy, pre, post, wants_env, obs, env)
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
@@ -478,13 +514,7 @@ def main():
             start = np.asarray(robot._present_norm(), float)
             watch, t0, moved = gt.Watch(robot), robot.d.time, 0.0
             while robot.d.time - t0 < HOLD_EVAL_S:
-                frame = build_dataset_frame(obs_feats, rop(obs), prefix=OBS_STR)
-                if wants_env:
-                    frame[OBS_ENV_STATE] = env
-                with torch.inference_mode():
-                    x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
-                    act = post(policy.select_action(pre(x)))
-                robot.send_action(make_robot_action(act, features))
+                robot.send_action(act_of(policy, pre, post, wants_env, obs, env))
                 obs = robot.get_observation()
                 watch.step()
                 moved = max(moved, float(np.abs(np.asarray(robot._present_norm(), float) - start).max()))
@@ -513,7 +543,9 @@ def main():
                            rig=rig, scenes=len(results), success=s, cut=sum(r["cut"] for r in results),
                            in_crate=sum(r["in_crate"] for r in results), seed_start=a.seed_start,
                            seeds_from=None if a.seeds_from is None else str(a.seeds_from),
-                           holds=len(holds), holds_ok=sum(r["success"] for r in holds))
+                           holds=len(holds), holds_ok=sum(r["success"] for r in holds), hybrid=a.hybrid,
+                           finisher=None if fin_path is None else str(fin_path),
+                           crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)])   # which world: the crate changes
             log.write(json.dumps(summary) + "\n")
             held = f"; holds {summary['holds_ok']}/{len(holds)}" if holds else ""
             print(f"\n{s}/{len(results)} successes, {summary['success_strict']} with neighbours within "
