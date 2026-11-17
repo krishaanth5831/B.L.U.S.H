@@ -30,6 +30,9 @@ teacher dry run solved:
 (2026-11-14: 20 of 53 scenes solved, seeds 9900006 to 9900052; its kept rows are sim/heldout_v3.jsonl. Unbalanced,
 as scenes come: 13 of the 20 targets hang in the first quarter of the row.) A success rate on them is "of the
 scenes the teacher solves", as S.H.E.A.R's "of teacher-feasible cuts".
+⚠️ heldout_v3.jsonl and heldout_v3b.jsonl are the OLD crate's scenes (truss_scene.CRATE_*, 23 x 22 cm until
+2026-11-17): with the bigger crate the same seeds draw other scenes. Rerun them from a checkout of dev 5c1cf28 (the
+last commit with the old crate; PYTHONPATH=<checkout>/sim/plugin, as the plugin puts the main checkout's sim/ first).
 --holds K adds K nothing-ready scenes (truss_scene.build hold, as the dataset's stay-home episodes) from
 --hold-seed-start: the policy runs HOLD_EVAL_S; success = generate_truss.judge_hold (nothing cut, no fruit off,
 nothing moved) and the arm stayed within HOLD_MOVE_NORM of where it started. Reported apart, not in the success count.
