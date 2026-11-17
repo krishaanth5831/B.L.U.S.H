@@ -38,6 +38,8 @@ IK, the carried-truss checker (CarryChecker), the release-pose fit (crate_poses 
 samples come from a fixed seed). Timing constants come from expert.py; the sag correction is expert.Plan's,
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
+import weakref
+
 import mujoco
 import numpy as np
 
@@ -120,15 +122,22 @@ HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade"
 
 
 def add_self_check(chk, prefix="arm/"):
-    """Make chk.hits (and so free / segment_free / path_ok) also report self-collisions of the arm. Returns chk."""
+    """Make chk.hits (and so free / segment_free / path_ok) also report self-collisions of the arm. Returns chk.
+    ⚠️ The wrapper holds chk only by a weak reference. Holding it strongly (the bound chk.hits, or chk itself in the
+    closure) made chk -> chk.hits -> chk a reference cycle, which only Python's rare full gc pass frees, so checkers
+    (a deepcopy of the scene's model + MjData, 64 MB each) outlived their teacher: in eval_truss --hybrid --record one
+    more stayed alive per planned scene (1 -> 5 over 5 scenes until a full gc) and a failed plan left 20-28 alive at
+    once (2026-11-16)."""
     m = chk.m
     body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
     arm = np.array([b.startswith(prefix) for b in body])
     hand = np.array([any(h in b for h in HAND_PARTS) for b in body])
-    orig = chk.hits
+    orig = type(chk).hits                         # unbound: rrt.Checker.hits or truss_expert.CarryChecker.hits
+    ref = weakref.ref(chk)
 
     def hits(q, **kw):
-        out = orig(q, **kw)                       # leaves chk.d at q, contacts current
+        chk = ref()
+        out = orig(chk, q, **kw)                  # leaves chk.d at q, contacts current
         for c in chk.d.contact[:chk.d.ncon]:
             a, b = c.geom1, c.geom2
             if (arm[a] and arm[b] and m.geom_bodyid[a] != m.geom_bodyid[b] and not (hand[a] and hand[b])
