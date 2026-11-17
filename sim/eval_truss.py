@@ -222,6 +222,13 @@ def main():
     ap.add_argument("--finisher", type=pathlib.Path, default=None,
                     help="--hybrid: at the hand-over this policy (a checkpoint's pretrained_model folder, the "
                          "last-stage finisher) takes over instead of the teacher")
+    # ⚠️ --n-action-steps / --ensemble set BOTH policies; these two set the finisher's alone, so the approach (and so
+    # the hand-over states) stays the same between finisher variants. 100 steps = 3.3 s played blind from the
+    # hand-over: the first finisher test (2026-11-17, 32 validation scenes) never cut in 17-22 of them.
+    ap.add_argument("--finisher-n-action-steps", type=int, default=None,
+                    help="--finisher: play this many actions of each chunk (default: as the approach policy)")
+    ap.add_argument("--finisher-ensemble", type=float, default=None,
+                    help="--finisher: temporal ensembling with this coefficient, a new chunk every frame")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -278,10 +285,17 @@ def main():
         bad = [k for k in features if k.startswith(("observation.", "action")) and not same(k)]
         if fin_rig != rig or bad:
             sys.exit(f"⚠️ --finisher: trained on {fin_ds} (rig {fin_rig}); features {bad} differ from {train_ds}'s")
-        finisher, fpre, fpost, fcfg = load_policy(fin_path, device, fmeta, over)
+        fover = dict(over)
+        if a.finisher_ensemble is not None:
+            fover.update(temporal_ensemble_coeff=a.finisher_ensemble if a.finisher_ensemble > 0 else None,
+                         n_action_steps=1 if a.finisher_ensemble > 0 else (a.finisher_n_action_steps or 100))
+        elif a.finisher_n_action_steps is not None:
+            fover.update(temporal_ensemble_coeff=None, n_action_steps=a.finisher_n_action_steps)
+        finisher, fpre, fpost, fcfg = load_policy(fin_path, device, fmeta, fover)
         fin_env = OBS_ENV_STATE in getattr(fcfg, "input_features", {})
         print(f"finisher {fin_path} ({fcfg.type}, trained on {fin_ds}) takes over at the hand-over; box + cut point as "
-              f"numbers: {fin_env}", flush=True)
+              f"numbers: {fin_env}; n_action_steps {getattr(fcfg, 'n_action_steps', None)}, temporal ensembling "
+              f"{getattr(fcfg, 'temporal_ensemble_coeff', None)}", flush=True)
 
     def act_of(pol, pre_, post_, wants, obs, env):
         """One action of a trained policy (the approach policy, or the finisher) for this observation."""
@@ -548,6 +562,8 @@ def main():
                            seeds_from=None if a.seeds_from is None else str(a.seeds_from),
                            holds=len(holds), holds_ok=sum(r["success"] for r in holds), hybrid=a.hybrid,
                            finisher=None if fin_path is None else str(fin_path),
+                           finisher_n_action_steps=None if fin_path is None else getattr(fcfg, "n_action_steps", None),
+                           finisher_ensemble=None if fin_path is None else fcfg.temporal_ensemble_coeff,
                            crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)])   # which world: the crate changes
             log.write(json.dumps(summary) + "\n")
             held = f"; holds {summary['holds_ok']}/{len(holds)}" if holds else ""
