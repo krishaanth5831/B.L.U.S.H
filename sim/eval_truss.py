@@ -66,6 +66,7 @@ still plans each scene first, only so the scenes are the ones its recordings and
         --handoff-mm 20 50 --handoff-from cue --finisher <finisher pretrained_model> --seeds-from heldout_v3b.jsonl
 """
 import argparse
+import gc
 import json
 import os
 import pathlib
@@ -356,6 +357,7 @@ def main():
                 n_tried += 1
             else:
                 seed = a.seed_start if a.same_seed else seed + 1
+            gc.collect()                               # teacher v5's search generator cycle (truss_teacher.close)
             robot.new_scene(seed, log=False)
             obs = robot.get_observation()              # the start frame: picks the target, like the episodes
             if robot._tgt_k is None:

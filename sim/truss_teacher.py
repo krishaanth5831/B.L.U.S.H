@@ -309,6 +309,13 @@ class TrussTeacher(tx.TrussPlanner):
         self._xcut_c, self._geom_c = {}, {}    # (u, tilt) -> the cut pose; (u, beta, tilt, fast) -> its IK
         self._std_blocked, self._c_count = {}, 0   # phase C: standoffs no route reached, per mode; its candidates
 
+    def close(self):
+        """End the search (next_plan can't go on after this). The suspended generator holds the teacher in a reference
+        cycle: without this (or a gc.collect()) a planned teacher and its checkers outlive the scene."""
+        if self._search is not None:
+            self._search.close()
+            self._search = None
+
     def _mode(self, mode):
         self.kw = dict(soft_clearance=MODES[mode][0], firm_clearance=MODES[mode][1])
 

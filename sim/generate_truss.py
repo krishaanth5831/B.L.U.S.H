@@ -33,6 +33,7 @@ Run in the lerobot env under the memory cap (README / CLAUDE.md):
       -p MemorySwapMax=0 python generate_truss.py ...
 """
 import argparse
+import gc
 import json
 import os
 import pathlib
@@ -412,6 +413,9 @@ def main():
     seed, attempts, t_start = a.seed_start - 1, 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
+            # ⚠️ teacher v5 keeps its search generator, a reference cycle with the teacher (its checkers, 64 MB each,
+            # and the frozen start frame): free the last seed's before the next (the 2026-11-16 leak's kind)
+            gc.collect()
             seed = seed_list[attempts] if seed_list else a.seed_start if a.one_layout else seed + 1
             attempts += 1
             rec = dict(seed=seed)
