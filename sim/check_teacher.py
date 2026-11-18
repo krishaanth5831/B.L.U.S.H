@@ -31,6 +31,7 @@ Run in the lerobot env under the memory cap:
 """
 import argparse
 import collections
+import gc
 import json
 import os
 import pathlib
@@ -93,6 +94,7 @@ def displace(robot, direction, metres):
 
 def run(robot, seed, push=None, realtime=False):
     """One scene with the teacher, judged. push: (leg, direction name, metres) or None."""
+    gc.collect()                                 # teacher v5's search generator cycle (truss_teacher.close)
     robot.new_scene(seed, log=False)
     robot.get_observation()                      # the start frame: picks the target (true box)
     out = dict(seed=seed)
@@ -169,6 +171,7 @@ def swing_truss(robot, k, metres, rng):
 
 def run_takeover(robot, seed, mode, arm_m, swing_m, rng):
     """The teacher's run with a takeover at TRIGGER_MM (see the module doc). mode: resync | replan."""
+    gc.collect()                                 # teacher v5's search generator cycle (truss_teacher.close)
     robot.new_scene(seed, log=False)
     robot.get_observation()
     k = robot._tgt_k

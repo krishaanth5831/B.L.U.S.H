@@ -89,6 +89,11 @@ class SO101Mujoco(Robot):
         self._session = time.strftime("%Y%m%d_%H%M%S")
         self._viewer = None
         self.extra = {}                       # per-scene notes a caller adds (scripted plan), into session.json
+        # Where along the target's cut zone the cue (the drawn cross + environment_state's cut point) sits: 0.5, its
+        # middle, unless the teacher cuts elsewhere (truss_teacher v5 meta cut_u; new_scene(cut_u=) / set_cut_u).
+        # ⚠️ Only the true cut point follows it: a cut point the truss YOLO detects (birdseye rig) stays where YOLO
+        # saw it.
+        self.cut_u = 0.5
 
     # --- features (callable while disconnected) ---
     @property
@@ -224,10 +229,12 @@ class SO101Mujoco(Robot):
             if not quiet:
                 print(f"[so101_mujoco] ✅ target truss in the crate (scene {self._gen})", flush=True)
 
-    def new_scene(self, seed, log=True, hold=False):
+    def new_scene(self, seed, log=True, hold=False, cut_u=0.5):
         """realtime=False: next scene with this seed, now. log=False drops its state log (a dry run).
-        hold: nothing ready to pick (truss_scene.build hold), for stay-home episodes."""
+        hold: nothing ready to pick (truss_scene.build hold), for stay-home episodes. cut_u: where the cue marks the
+        cut, along the target's cut zone (the teacher's meta cut_u; 0.5 = the middle)."""
         with self._lock:
+            self.cut_u = float(cut_u)
             self._save_log()
             if self._viewer is not None:
                 self._close_viewer(self._viewer)
@@ -324,7 +331,8 @@ class SO101Mujoco(Robot):
         with self._lock:
             if gen != self._gen:               # N was pressed meanwhile: this frame belongs to the old scene
                 return
-            info = ttg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids)
+            info = ttg.start_frame(self._cameras(), self.d, self.m, self.info, dets_birdseye, ids=ids,
+                                   cut_u=self.cut_u)
             if self.config.overlay == "true_box":
                 info["reason"] = "overlay=true_box"
             self._box_info, self._box = info, info["box"]
@@ -394,8 +402,8 @@ class SO101Mujoco(Robot):
             with self._lock:
                 if gen == self._gen:
                     k = self._tgt_k
-                    self._view = ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], self.cam_names[0]) \
-                        if k is not None else (None, None)
+                    self._view = ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], self.cam_names[0],
+                                                 u=self.cut_u) if k is not None else (None, None)
         box, cut = self._view if self._box_info is not None else (None, None)
         if self.config.overlay != "none" and box is not None:
             import cv2
@@ -408,6 +416,22 @@ class SO101Mujoco(Robot):
             if self.config.state_log_dir and gen == self._gen and self._log_on:
                 self._log.append(row + (json.dumps({"birdseye": dets}) if need_target else "",))
         return obs
+
+    def set_cut_u(self, u):
+        """Move the cue to u along the target's cut zone after the start frame picked the target (eval_truss: the
+        teacher plans after the start frame). The truss is where it hung at the start frame only if the physics hasn't
+        stepped since (realtime=False and no action sent yet)."""
+        with self._lock:
+            self.cut_u = float(u)
+            if self._box_info is None or self._tgt_k is None:
+                return
+            t = self.info["trusses"][self._tgt_k]
+            if self.config.rig == "base":
+                self._view = ttg.view_target(self._cameras(), self.d, self.m, t, self.cam_names[0], u=self.cut_u)
+            elif self._box_info.get("cut_source") == "true":
+                cut = ttg.cut_pixel(self._cameras(), self.d, self.m, t, u=self.cut_u)
+                self._box_info["cut"] = None if cut is None else [round(c, 1) for c in cut]
+            self._box_info["cut_u"] = self.cut_u
 
     def env_state(self):
         """The target truss's box + cut point as numbers (truss_target.ENV_NAMES); zeros before the start frame.

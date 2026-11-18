@@ -66,6 +66,7 @@ still plans each scene first, only so the scenes are the ones its recordings and
         --handoff-mm 20 50 --handoff-from cue --finisher <finisher pretrained_model> --seeds-from heldout_v3b.jsonl
 """
 import argparse
+import gc
 import json
 import os
 import pathlib
@@ -356,6 +357,7 @@ def main():
                 n_tried += 1
             else:
                 seed = a.seed_start if a.same_seed else seed + 1
+            gc.collect()                               # teacher v5's search generator cycle (truss_teacher.close)
             robot.new_scene(seed, log=False)
             obs = robot.get_observation()              # the start frame: picks the target, like the episodes
             if robot._tgt_k is None:
@@ -376,15 +378,15 @@ def main():
                 except tx.PlanError as e:
                     print(f"  seed {seed}: skip, --hybrid and the teacher has no plan ({e})", flush=True)
                     continue
-                if ds is not None and T.meta.get("cut_u") != 0.5:   # as generate_truss: the cue marks u 0.5
-                    print(f"  seed {seed}: skip, the teacher cuts at u {T.meta.get('cut_u')}, the cue marks 0.5",
-                          flush=True)
-                    continue
+                if T.meta.get("cut_u", 0.5) != 0.5:      # as generate_truss (v5): the cue marks the teacher's u
+                    robot.set_cut_u(T.meta["cut_u"])
+                    obs = robot.get_observation()      # the start frame again (no physics step since), cue moved
+                    env = robot.env_state()
             r_hand = (a.handoff_mm[0] if len(a.handoff_mm) == 1 else
                       float(np.random.default_rng([seed, 0x4A0F]).uniform(*a.handoff_mm))) / 1000
             nb_hand, n_rec = None, 0
             noise =gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
-            p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+            p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
             gid = robot.m.body("arm/gripper").id
             closest = closest_live = np.inf
@@ -399,7 +401,8 @@ def main():
                 t_f = time.time()
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                 if T is not None and handed is None and robot.cutters[k].cut_t is None:
-                    p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m)[0]
+                    p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m,
+                                                                                    robot.cut_u)[0]
                     d_now = float(np.linalg.norm(jaw_pt - p_ref))
                     if d_now < r_hand:                 # --hybrid: the teacher takes over on its leg nearest the arm
                         nb_hand = round(watch.max * 1000, 1)
@@ -442,7 +445,7 @@ def main():
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
                 # so successes showed 16 and 35 mm (2026-11-15). closest_live measures to where it hangs NOW.
                 if robot.cutters[k].cut_t is None:
-                    p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+                    p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)
                     closest_live = min(closest_live, float(np.linalg.norm(jaw_pt - p_now)))
                 if noise is not None and handed is None:
                     near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None
