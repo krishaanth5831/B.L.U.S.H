@@ -36,6 +36,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -87,6 +88,50 @@ NOISE_SHARE = 0.5                # share of teacher episodes with noise (post-mo
 # 0.3 s after the return); half on the slide (2 cm pushes there failed 4 of 18 in check_teacher.py push).
 NOISE_OFF = {"settle_at_stalk", "close_cut", "squeeze", "lower", "release", "drop", "return", "hold_end"}
 NOISE_SCALE = {"slide_in": 0.5}
+# --retries (teacher v5, 2026-11-18): a scene whose dry run fails gets the teacher's next plan (TrussTeacher.next_plan),
+# up to this many more dry runs. ⚠️ The teacher's model of where a dropped truss lands is off by 42-131 mm against the
+# 5-33 mm of room it plans for (post-mortem §6.11, 2026-11-17), so the dry run is the judge of a release: a truss that
+# lands outside, or loses a fruit while lowered or dropped, retries the same cut with the next release pose
+# (RELEASE_PHASES); any other failure the next candidate. A retry is not available to a finisher mid-episode: the
+# first plan's result is logged too (tries[0]).
+RETRIES = 6                      # guess: the release fallback's kept plans used alternates 1-3, at most 6 (2026-11-17)
+# Where a failure happened decides the retry: from the carry on (to_crate depends on the release pose too) the same cut
+# with the next release pose; before it, the next candidate with another approach (TrussTeacher.next_plan
+# avoid_approach: neighbour mode, approach angle and stalk tilt). ⚠️ Without that, 9900005 retried 5 candidates that
+# differed only in the cut point (1-2 mm apart) and moved the same neighbour fruit 62-68 mm each time (2026-11-18).
+RELEASE_PHASES = {"to_crate", "lower", "release", "drop", "return", "hold_end"}
+STALL_RAD_S = 0.05               # Watch: a joint slower than this counts as standing still (guess)
+# The post-mortem's data filter (§6.2: "drop episodes with collisions, forces over the limits, or jerky motion"),
+# judged since 2026-11-18. Limits about twice the worst of 59 clean teacher v5 dry runs on the held-out seeds (arm on
+# the greenhouse / crate / table: 0 N in all; a servo stalled at its force limit: at most 9 frames running; command
+# step 3.03 and change of step 2.93 norm units per frame at most), so they catch a collision, a stall or a jump, not
+# the teacher's normal motion.
+STRAIN_HARD_N = 2.0
+STRAIN_STALL_FRAMES = 15
+STRAIN_CMD_STEP = 6.0
+STRAIN_CMD_ACC = 6.0
+
+
+def strain_failure(watch):
+    """Why the run breaks the data filter (STRAIN_*), or None."""
+    st = watch.strain()
+    if st["hard_n"] > STRAIN_HARD_N:
+        return f"the arm pressed {st['hard_pair']} with {st['hard_n']:.1f} N"
+    if st["sat_run"] > STRAIN_STALL_FRAMES:
+        return f"{st['sat_joint']} stalled at its force limit {st['sat_run']} frames"
+    if st["cmd_step"] > STRAIN_CMD_STEP or st["cmd_acc"] > STRAIN_CMD_ACC:
+        return f"jerky command (step {st['cmd_step']}, change {st['cmd_acc']} norm per frame)"
+    return None
+
+
+def release_failure(why):
+    """A dry run's failure that the carry or the release decided (generate_truss.judge's reasons)."""
+    if "not (all) in the crate" in why:
+        return True
+    if why.startswith("fruit came off") or why.startswith("moved a neighbour"):
+        phases = re.findall(r" in (\w+)[')]", why)
+        return bool(phases) and all(ph in RELEASE_PHASES for ph in phases)
+    return False
 
 
 class Noise:
@@ -110,7 +155,13 @@ class Noise:
 
 
 class Watch:
-    """Per frame: how far every other truss's fruit has moved from where it hung at the first frame."""
+    """Per frame: how far every other truss's fruit has moved from where it hung at the first frame. And the strain
+    the post-mortem's data filter names (§6.2: "drop episodes with collisions, forces over the limits, or jerky
+    motion"; 2026-11-18, logged per run as strain(), not judged yet): the largest contact force between the arm and
+    the greenhouse / crate / table; the frames an arm servo sat at its force limit while its joint stood still (a
+    stall: pressing on something; at full speed a position servo sits at its limit too, 301 of 473 frames in a clean
+    run), the longest such run and its joint; and the largest step and change of step of the commanded arm joints
+    (norm units per frame; the label, what the dataset records)."""
 
     def __init__(self, robot):
         m, d, k = robot.m, robot.d, robot._tgt_k
@@ -119,16 +170,52 @@ class Watch:
         self.names = [f["tomato"] for j, t in enumerate(robot.info["trusses"]) if j != k for f in t["fruit"]]
         self.p0 = robot.d.xpos[self.ids].copy() if len(self.ids) else np.zeros((0, 3))
         self.max = 0.0
-        self.worst = None
-        self.d = d
+        self.worst, self.worst_t = None, None
+        self.d, self.m = d, m
+        body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
+        truss = {n for t in robot.info["trusses"] for n in t["geoms"] + [f["geom"] for f in t["fruit"]]}
+        self.arm = np.array([b.startswith("arm/") for b in body])
+        self.hard = np.array([not self.arm[g] and (m.geom(g).name or "") not in truss
+                              and bool(m.geom_contype[g] or m.geom_conaffinity[g]) for g in range(m.ngeom)])
+        q_ids, u_ids = scene.arm_ids(m)
+        self.u = u_ids[:5]
+        self.dof = np.array([m.jnt_dofadr[m.actuator_trnid[a, 0]] for a in self.u])
+        self.flim = np.abs(m.actuator_forcerange[self.u]).max(1)
+        self.hard_n, self.hard_pair, self.sat, self.sat_run, self.sat_max_run = 0.0, None, 0, 0, 0
+        self.sat_joint = np.zeros(5, int)
+        self.cmd = []
+        self._f6 = np.zeros(6)
 
-    def step(self):
-        if not len(self.ids):
-            return
-        dist = np.linalg.norm(self.d.xpos[self.ids] - self.p0, axis=1)
-        i = int(np.argmax(dist))
-        if dist[i] > self.max:
-            self.max, self.worst = float(dist[i]), self.names[i]
+    def step(self, cmd=None):
+        d, m = self.d, self.m
+        if len(self.ids):
+            dist = np.linalg.norm(d.xpos[self.ids] - self.p0, axis=1)
+            i = int(np.argmax(dist))
+            if dist[i] > self.max:
+                self.max, self.worst, self.worst_t = float(dist[i]), self.names[i], float(d.time)
+        for i in range(d.ncon):
+            c = d.contact[i]
+            if (self.arm[c.geom1] and self.hard[c.geom2]) or (self.arm[c.geom2] and self.hard[c.geom1]):
+                mujoco.mj_contactForce(m, d, i, self._f6)
+                if self._f6[0] > self.hard_n:
+                    self.hard_n = float(self._f6[0])
+                    self.hard_pair = f"{m.geom(c.geom1).name or c.geom1} / {m.geom(c.geom2).name or c.geom2}"
+        stall = (np.abs(d.actuator_force[self.u]) >= 0.98 * self.flim) & (np.abs(d.qvel[self.dof]) < STALL_RAD_S)
+        self.sat_joint += stall
+        at_lim = bool(stall.any())
+        self.sat += at_lim
+        self.sat_run = self.sat_run + 1 if at_lim else 0
+        self.sat_max_run = max(self.sat_max_run, self.sat_run)
+        if cmd is not None:
+            self.cmd.append([cmd[f"{j}.pos"] for j in expert.arm_map.JOINTS[:5]])
+
+    def strain(self):
+        q = np.array(self.cmd) if len(self.cmd) > 2 else np.zeros((3, 5))
+        return dict(hard_n=round(self.hard_n, 2), hard_pair=self.hard_pair, sat_frames=int(self.sat),
+                    sat_run=int(self.sat_max_run),
+                    sat_joint=expert.arm_map.JOINTS[int(np.argmax(self.sat_joint))] if self.sat else None,
+                    cmd_step=round(float(np.abs(np.diff(q, axis=0)).max()), 3),
+                    cmd_acc=round(float(np.abs(np.diff(q, 2, axis=0)).max()), 3))
 
 
 def phase_at(plan, t):
@@ -157,12 +244,16 @@ def judge(robot, plan, t0, watch):
     if off:
         return False, f"fruit came off {off}"
     if watch.max > NEIGHBOUR_MOVE_M:
-        return False, f"moved a neighbour {watch.max * 1000:.0f} mm ({watch.worst})"
+        where = phase_at(plan, watch.worst_t - t0)
+        return False, f"moved a neighbour {watch.max * 1000:.0f} mm ({watch.worst} in {where})"
     if not ts.in_crate(info, d, robot.m, k):
         return False, "target truss not (all) in the crate"
     o = float(np.abs(robot._present_norm()[:5] - np.asarray(scene.START_NORM)[:5]).max())
     if o > START_TOL_NORM:
         return False, f"arm {o:.1f} off the start pose"
+    bad = strain_failure(watch)
+    if bad:
+        return False, bad
     return True, "ok"
 
 
@@ -180,6 +271,9 @@ def judge_hold(robot, watch):
         return False, "a fruit came off"
     if watch.max > NEIGHBOUR_MOVE_M:
         return False, f"moved {watch.worst} {watch.max * 1000:.0f} mm"
+    bad = strain_failure(watch)
+    if bad:
+        return False, bad
     return True, "ok"
 
 
@@ -208,7 +302,7 @@ def play(robot, plan, on_frame=None, realtime=False, noise=None):
             sent = act                               # the label, not what was executed
         if on_frame is not None:
             obs = on_frame(sent)
-        watch.step()
+        watch.step(act)
         if realtime:
             time.sleep(max(0.0, 1 / expert.FPS - (time.time() - t_f)))
     return t0, watch
@@ -220,6 +314,10 @@ def main():
     ap.add_argument("--pilot", action="store_true", help="5 episodes into <repo-id>_pilot")
     ap.add_argument("--repo-id", default=DEFAULT_REPO)
     ap.add_argument("--seed-start", type=int, default=200000)
+    ap.add_argument("--seeds", type=pathlib.Path, default=None,
+                    help="seeds from a file instead of --seed-start upward: one per line, or jsonl rows with 'seed'")
+    ap.add_argument("--retries", type=int, default=0,
+                    help=f"--teacher: dry runs after a failed one, each with the teacher's next plan (v5: {RETRIES})")
     ap.add_argument("--watch", action="store_true",
                     help="MuJoCo window at real time: on the recording pass, or with --dry on the dry run itself")
     ap.add_argument("--dry", action="store_true", help="dry runs only: plan + judge, write no dataset")
@@ -235,7 +333,7 @@ def main():
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
     ap.add_argument("--balance", action="store_true", help="spread targets along the row (BALANCE_*)")
     ap.add_argument("--teacher", action="store_true",
-                    help="teacher v4 (truss_teacher.py; v3 until 2026-11-17) + DART noise instead of the v2 planner; "
+                    help="teacher v5 (truss_teacher.py; v4 until 2026-11-18) + DART noise instead of the v2 planner; "
                          "no misses")
     ap.add_argument("--noise", type=float, default=NOISE_NORM, help="--teacher: noise std per arm joint, norm units")
     ap.add_argument("--noise-share", type=float, default=NOISE_SHARE,
@@ -249,6 +347,11 @@ def main():
     a = ap.parse_args()
     if a.no_yolo:
         a.yolo_weights = None
+    seed_list = None
+    if a.seeds is not None:
+        seed_list = [int(json.loads(x)["seed"]) if x.strip().startswith("{") else int(x)
+                     for x in a.seeds.read_text().splitlines() if x.strip()]
+        a.max_attempts = len(seed_list) if a.max_attempts is None else min(a.max_attempts, len(seed_list))
     n_eps = 5 if a.pilot else a.episodes
     repo_id = a.repo_id + ("_pilot" if a.pilot else "")
 
@@ -309,7 +412,7 @@ def main():
     seed, attempts, t_start = a.seed_start - 1, 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
-            seed = a.seed_start if a.one_layout else seed + 1
+            seed = seed_list[attempts] if seed_list else a.seed_start if a.one_layout else seed + 1
             attempts += 1
             rec = dict(seed=seed)
             noise = None
@@ -360,30 +463,55 @@ def main():
                 rec.update(target=robot._box_info["target_name"], target_source=robot._box_info["source"],
                            cut_source=robot._box_info["cut_source"], miss=miss, env=robot.env_state().round(4).tolist())
                 fails, ok, plan = [], False, None
-                for k in range(1 if a.teacher else PLAN_TRIES):    # the teacher is deterministic: one try
-                    if k:
-                        robot.new_scene(seed, log=False)
-                        robot.get_observation()
+                if a.teacher:
+                    # teacher v5: deterministic, one plan search; a failed dry run takes its next plan (--retries).
+                    # The cue marks the u the plan cuts at (the recording pass passes it to new_scene).
+                    tries, k = [], 0
                     try:
-                        if a.teacher:
-                            plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
-                            # ⚠️ The cross + environment_state mark u = 0.5 (truss_target.cut_pixel); marking the
-                            # teacher's own u is generator v3 (step 2) work. Until then only scenes cut at 0.5.
-                            if plan.meta["cut_u"] != 0.5:
-                                fails.append(f"teacher cuts at u {plan.meta['cut_u']}, the cue marks 0.5")
-                                break
-                            noise = Noise(a.noise, NOISE_RHO, seed, attempts) if noisy else None
-                        else:
-                            plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
+                        plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
                     except tx.PlanError as e:
                         fails.append(f"no plan: {e}")
-                        break
-                    t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
-                    ok, why = judge(robot, plan, t0, watch)
-                    if ok:
-                        break
-                    fails.append(f"dry run: {why}")
-                rec["plan_tries"] = k + 1
+                    while plan is not None:
+                        if k:
+                            robot.new_scene(seed, log=False)
+                            robot.get_observation()
+                        noise = Noise(a.noise, NOISE_RHO, seed, attempts) if noisy else None
+                        t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
+                        ok, why = judge(robot, plan, t0, watch)
+                        m_ = plan.meta
+                        tries.append(dict(ok=ok, why=why, phase=m_.get("phase"), neighbours=m_["neighbours"],
+                                          cut_u=m_["cut_u"], beta=m_["approach_blend_deg"],
+                                          release=m_.get("release_fallback"), retreat=m_["retreat_option"],
+                                          strain=watch.strain()))
+                        if ok:
+                            break
+                        fails.append(f"dry run {k + 1}: {why}")
+                        k += 1
+                        if k > a.retries:
+                            break
+                        try:
+                            same = release_failure(why)
+                            plan.next_plan(same_candidate=same, avoid_approach=not same)
+                        except tx.PlanError as e:
+                            fails.append(f"no plan left ({str(e)[:60]})")
+                            break
+                    rec["tries"] = tries
+                else:
+                    for k in range(PLAN_TRIES):
+                        if k:
+                            robot.new_scene(seed, log=False)
+                            robot.get_observation()
+                        try:
+                            plan = tx.TrussPlanner(robot.m, robot.d, robot.info, robot._tgt_k).plan(rng, miss=miss)
+                        except tx.PlanError as e:
+                            fails.append(f"no plan: {e}")
+                            break
+                        t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
+                        ok, why = judge(robot, plan, t0, watch)
+                        if ok:
+                            break
+                        fails.append(f"dry run: {why}")
+                rec["plan_tries"] = len(tries) if a.teacher else k + 1
                 if noise is not None:
                     rec["noise"]["max_norm"] = round(noise.max, 2)
                 if not ok:
@@ -398,9 +526,9 @@ def main():
                           f"{', miss' if miss else ''}  [{time.time() - t_try:.0f} s wall]", flush=True)
                     continue
 
-            # --- recording pass: same seed, same plan ---
+            # --- recording pass: same seed, same plan; the cue at the u the plan cuts at ---
             robot.config.viewer = a.watch
-            robot.new_scene(seed, log=True, hold=hold)
+            robot.new_scene(seed, log=True, hold=hold, cut_u=0.5 if hold else plan.meta.get("cut_u", 0.5))
             t_ep = time.time()
             obs = robot.get_observation()
             if not hold and robot._box_info["target_name"] != rec["target"]:
@@ -426,6 +554,7 @@ def main():
             t0, watch = play(robot, plan, on_frame=frame,
                              noise=None if noise is None else Noise(a.noise, NOISE_RHO, seed, attempts))
             ok, why = judge_hold(robot, watch) if hold else judge(robot, plan, t0, watch)
+            rec["strain"] = watch.strain()
             if not ok:
                 ds.clear_episode_buffer()
                 skip(f"recording differs from the dry run: {why}"); continue
