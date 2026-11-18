@@ -2,7 +2,8 @@
 
 v5 (K7 2026-11-18: "a better teacher which has a success rate of at least 90 %"; v4 kept 80 of the 154 held-out
 scenes of the 23 x 28 crate world): v4's search unchanged (phases A and B: every scene v4 plans keeps its first plan,
-action for action), then phase C when they find nothing: finer cut points (CUT_U_V5), the stalk tilted in the jaw
+action for action, except that 8-fruit trusses are now carried at CARRY_SLOW_BIG of the pace), then phase C when they
+find nothing: finer cut points (CUT_U_V5), the stalk tilted in the jaw
 (TILT_DEG; the square cut pose can fold the arm into itself), position-only retreats (V5_RETREATS), more release poses
 (RELEASE_ALTERNATES_V5, RELAXED_*), longer standoffs (STANDOFF_M_V5), three more fixed via-poses (VIA_NORM_V5, found
 from offline RRT routes on scenes kept apart; RRT still never drives), the "push" neighbour mode, within PHASE_C_MAX.
@@ -55,6 +56,7 @@ samples come from a fixed seed). Timing constants come from expert.py; the sag c
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
 import copy
+import os
 import weakref
 
 import mujoco
@@ -197,6 +199,12 @@ CARRY_SLOW_BIG = 0.6
 # near-identical standoffs (guesses; deterministic: they depend only on the scene).
 PHASE_C_MAX = 150
 STD_MEMO_RAD = 0.02
+# What-if only, OFF unless BLUSH_TEACHER_RRT=1 (2026-11-18, for K7's decision; no recording uses it): phase D, after
+# phase C finds nothing, lets a seeded RRT-Connect route drive start -> standoff for the first RRT_D_MAX candidates
+# whose cut leg is clear. ⚠️ Reverses the post-mortem's rule 3 (RRT checks, it doesn't drive: its routes are
+# coin-flips the camera can't see, R2).
+RRT_D = os.environ.get("BLUSH_TEACHER_RRT") == "1"
+RRT_D_MAX, RRT_D_ITERS = 12, 4000
 # Retreats added in phase C, after v4's five (m: back along the approach, toward the aisle, up). Position only: the jaw
 # keeps the truss, its angle may turn (v4's retreat IK held the stalk's angle: "no IK for the retreat" in 15 of 154,
 # and 10 carries were blocked right where the arm pulls out of the plant, whatever the release pose, 2026-11-17).
@@ -330,14 +338,14 @@ class TrussTeacher(tx.TrussPlanner):
         """The next plan in the same fixed order, after one whose dry run failed (generate_truss --retries).
         same_candidate: it failed from the carry on (outside the crate, a fruit off or a neighbour moved carrying,
         lowering or dropping it), so the same cut and approach with the next release pose first; else the next
-        candidate. avoid_approach: it failed on the way in or out, so skip every later candidate with the same neighbour
-        mode, approach angle and stalk tilt (they differ only in the cut point, 1-2 mm apart). PlanError when none is
-        left."""
+        candidate. avoid_approach: it failed on the way in or out, so skip every later candidate with the same approach
+        angle and stalk tilt, in any neighbour mode (they differ only in the cut point, 1-2 mm apart, or reuse the same
+        route). PlanError when none is left."""
         if self._search is None:
             raise PlanError("plan() first")
         if avoid_approach and self.meta:
             m = self.meta
-            self._avoid.add((m["neighbours"], float(m["approach_blend_deg"]), float(m.get("tilt_deg", 0.0))))
+            self._avoid.add((float(m["approach_blend_deg"]), float(m.get("tilt_deg", 0.0))))
         self._skip = not same_candidate
         try:
             next(self._search)
@@ -403,30 +411,81 @@ class TrussTeacher(tx.TrussPlanner):
         if self._c_count >= PHASE_C_MAX:
             why3.append(f"budget: {PHASE_C_MAX} candidates")
         why.append("v5: " + " / ".join(why3))
+        if RRT_D:                              # what-if phase D (RRT_D), off by default
+            tried_d, n_d = [], 0
+            for u in (0.5,):
+                for mode, tilt in order:
+                    if not clear[mode] or n_d >= RRT_D_MAX:
+                        continue
+                    self._mode(mode)
+                    for beta in APPROACH_BLEND_DEG:
+                        if n_d >= RRT_D_MAX:
+                            break
+                        leg = self._cut_leg(u, beta, self.t["r"], tilt, fast=True)
+                        if isinstance(leg, str) or not leg["approaches"]:
+                            continue
+                        n_d += 1
+                        leg = dict(leg)
+                        xs, so = leg["approaches"][-1]
+                        self.jaw(tx.JAW_OPEN_DEG)
+                        import rrt
+                        path = rrt.plan(self.chk, q0, xs[0], np.random.default_rng([self._seed_d(), n_d]),
+                                        lo=self.lo, hi=self.hi, iters=RRT_D_ITERS, **self.kw)
+                        if path is None:
+                            tried_d.append("no RRT route")
+                            continue
+                        leg["approach"], leg["standoff_m"] = xs, so
+                        self._at_release = False
+                        for rest in self._rests("C", leg, self.t["r"], tried_d):
+                            self._parts = dict(leg=leg, rest=rest)
+                            self._build_legs(q0, path, leg, rest)
+                            self.meta = dict(teacher="v5", phase="D_rrt", neighbours=mode, cut_u=u,
+                                             approach_blend_deg=float(beta), tilt_deg=float(tilt),
+                                             slide_mm=round(leg["slide_m"] * 1000),
+                                             standoff_mm=round(leg["standoff_m"] * 1000),
+                                             detours=dict(to_standoff=f"rrt:{len(path) - 2}",
+                                                          to_crate=rest["detour_crate"], home=rest["detour_home"]),
+                                             retreat_option=rest["retreat_option"],
+                                             release_point=rest["release_point"], release_pitch=rest["release_pitch"],
+                                             crate_slack_mm=rest["crate_slack_mm"], target=self.t["name"],
+                                             n_fruit=self.t["n"], stalk_mm=round(self.t["r"] * 2000, 1),
+                                             tried=sorted(set(tried_d)), miss=False,
+                                             release_fallback=rest["release_fallback"])
+                            yield
+                            if self._skip:
+                                break
+            why.append("rrt what-if: " + ("; ".join(sorted(set(tried_d))) or "no candidate"))
         raise PlanError(" / ".join(why))
+
+    def _seed_d(self):
+        """The scene's seed for phase D's RRT (deterministic per scene)."""
+        return int(self.info.get("seed", 0)) % (2 ** 31)
 
     def _candidate(self, phase, mode, u, beta, tried, late, done, tilt=0.0):
         """Generator over one candidate's plans (cut point u, approach beta, neighbour mode, stalk tilt): the first,
         then (when next_plan asks for the same candidate) its other release poses. The cut leg and the route to the
         standoff are computed once per candidate and reused by the later phases."""
         r, key = self.t["r"], (mode, u, beta) if tilt == 0 else (mode, u, beta, tilt)
-        if (mode, float(beta), float(tilt)) in self._avoid:
+        if (float(beta), float(tilt)) in self._avoid:
             tried.append("approach failed its dry run")
             return
         if phase == "B":
             leg, to_std, detour = late[key]
         else:
-            if key not in self._legs_c:
-                self._legs_c[key] = self._cut_leg(u, beta, r, tilt, fast=phase == "C")
-            leg = self._legs_c[key]
+            # phase C's own legs (fast IK, STANDOFF_M_V5): reusing phase A's for the square cut at v4's cut points meant
+            # the longer standoffs were never tried for them (review, 2026-11-18)
+            ckey = key if phase != "C" else (*key, "C")
+            if ckey not in self._legs_c:
+                self._legs_c[ckey] = self._cut_leg(u, beta, r, tilt, fast=phase == "C")
+            leg = self._legs_c[ckey]
             if isinstance(leg, str):
                 tried.append(leg)
                 return
             if phase == "C":
                 self._c_count += 1             # PHASE_C_MAX
-            if key not in self._std_c:
-                self._std_c[key] = self._to_standoff(self.q0, leg)   # sets leg's approach + standoff_m
-            to_std, detour = self._std_c[key]
+            if ckey not in self._std_c:
+                self._std_c[ckey] = self._to_standoff(self.q0, leg)   # sets leg's approach + standoff_m
+            to_std, detour = self._std_c[ckey]
             if to_std is None and phase == "C" and VIA_NORM_V5:
                 leg = dict(leg)                # the cached one keeps v4's route (none)
                 to_std, detour = self._to_standoff(self.q0, leg, extra=True, memo=mode)
@@ -612,13 +671,19 @@ class TrussTeacher(tx.TrussPlanner):
         if ret is None:
             return
         self._at_release = True               # from here on it failed at the release or the carry
-        seen, gave = [], False                # grip points of this candidate's poses tried in a plan
+        seen, gave, first = [], False, None   # grip points of this candidate's poses tried in a plan
         n_alt = RELEASE_FALLBACK_N if phase in "AB" else RELEASE_ALTERNATES_V5
         if phase != "B":
             first = self._release(carry, cchk, r)
             if isinstance(first, str):
                 tried.append(first)
-                return
+                # ⚠️ only v4 (phase A) stops here (its alternates wait for phase B). Phase C stopping here too left the
+                # relaxed poses dead for exactly their case, an 8-fruit truss whose few fitting poses all hit (review,
+                # 2026-11-18: 9900044, 9930075)
+                if phase == "A":
+                    return
+                first = None
+        if first is not None:
             rest = self._via(first, ret, opt, cchk, r, None, extra=phase == "C")
             if isinstance(rest, str):
                 tried.append(rest)

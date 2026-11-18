@@ -401,7 +401,8 @@ def main():
                 t_f = time.time()
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                 if T is not None and handed is None and robot.cutters[k].cut_t is None:
-                    p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m)[0]
+                    p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m,
+                                                                                    robot.cut_u)[0]
                     d_now = float(np.linalg.norm(jaw_pt - p_ref))
                     if d_now < r_hand:                 # --hybrid: the teacher takes over on its leg nearest the arm
                         nb_hand = round(watch.max * 1000, 1)
@@ -444,7 +445,7 @@ def main():
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
                 # so successes showed 16 and 35 mm (2026-11-15). closest_live measures to where it hangs NOW.
                 if robot.cutters[k].cut_t is None:
-                    p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+                    p_now, _ = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)
                     closest_live = min(closest_live, float(np.linalg.norm(jaw_pt - p_now)))
                 if noise is not None and handed is None:
                     near = dist < NOISE_NEAR_M or robot.cutters[k].cut_t is not None

@@ -127,7 +127,7 @@ def strain_failure(watch):
 
 def release_failure(why):
     """A dry run's failure that the carry or the release decided (generate_truss.judge's reasons)."""
-    if "not (all) in the crate" in why:
+    if "not (all) in the crate" in why or "off the start pose" in why:   # the way home depends on the release pose
         return True
     if why.startswith("fruit came off") or why.startswith("moved a neighbour"):
         phases = re.findall(r" in (\w+)[')]", why)
@@ -172,6 +172,7 @@ class Watch:
         self.p0 = robot.d.xpos[self.ids].copy() if len(self.ids) else np.zeros((0, 3))
         self.max = 0.0
         self.worst, self.worst_t = None, None
+        self.over, self.over_t = None, None      # the first fruit past NEIGHBOUR_MOVE_M, and when
         self.d, self.m = d, m
         body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
         truss = {n for t in robot.info["trusses"] for n in t["geoms"] + [f["geom"] for f in t["fruit"]]}
@@ -194,6 +195,8 @@ class Watch:
             i = int(np.argmax(dist))
             if dist[i] > self.max:
                 self.max, self.worst, self.worst_t = float(dist[i]), self.names[i], float(d.time)
+            if self.over_t is None and dist[i] > NEIGHBOUR_MOVE_M:
+                self.over, self.over_t = self.names[i], float(d.time)
         for i in range(d.ncon):
             c = d.contact[i]
             if (self.arm[c.geom1] and self.hard[c.geom2]) or (self.arm[c.geom2] and self.hard[c.geom1]):
@@ -245,8 +248,10 @@ def judge(robot, plan, t0, watch):
     if off:
         return False, f"fruit came off {off}"
     if watch.max > NEIGHBOUR_MOVE_M:
-        where = phase_at(plan, watch.worst_t - t0)
-        return False, f"moved a neighbour {watch.max * 1000:.0f} mm ({watch.worst} in {where})"
+        # the leg that pushed it past the limit (the frame before Watch saw it), not the one of its peak swing: a bump
+        # in the retreat peaked in to_crate and was retried as a release failure (review, 2026-11-18)
+        where = phase_at(plan, (watch.over_t if watch.over_t is not None else watch.worst_t) - t0 - 0.5 / expert.FPS)
+        return False, f"moved a neighbour {watch.max * 1000:.0f} mm ({watch.over or watch.worst} in {where})"
     if not ts.in_crate(info, d, robot.m, k):
         return False, "target truss not (all) in the crate"
     o = float(np.abs(robot._present_norm()[:5] - np.asarray(scene.START_NORM)[:5]).max())
@@ -351,7 +356,8 @@ def main():
     seed_list = None
     if a.seeds is not None:
         seed_list = [int(json.loads(x)["seed"]) if x.strip().startswith("{") else int(x)
-                     for x in a.seeds.read_text().splitlines() if x.strip()]
+                     for x in a.seeds.read_text().splitlines()
+                     if x.strip() and (not x.strip().startswith("{") or "seed" in json.loads(x))]
         a.max_attempts = len(seed_list) if a.max_attempts is None else min(a.max_attempts, len(seed_list))
     n_eps = 5 if a.pilot else a.episodes
     repo_id = a.repo_id + ("_pilot" if a.pilot else "")
@@ -479,12 +485,15 @@ def main():
                         if k:
                             robot.new_scene(seed, log=False)
                             robot.get_observation()
-                        noise = Noise(a.noise, NOISE_RHO, seed, attempts) if noisy else None
-                        t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
+                        # ⚠️ the plan is chosen on CLEAN dry runs: with the noise in this loop the noise draw would
+                        # pick which plan gets recorded, a coin-flip the camera can't see (post-mortem R2; review
+                        # 2026-11-18). The noise comes after, on the chosen plan only.
+                        t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=None)
                         ok, why = judge(robot, plan, t0, watch)
                         m_ = plan.meta
                         tries.append(dict(ok=ok, why=why, phase=m_.get("phase"), neighbours=m_["neighbours"],
                                           cut_u=m_["cut_u"], beta=m_["approach_blend_deg"],
+                                          tilt=m_.get("tilt_deg", 0.0),
                                           release=m_.get("release_fallback"), retreat=m_["retreat_option"],
                                           strain=watch.strain()))
                         if ok:
@@ -499,6 +508,16 @@ def main():
                         except tx.PlanError as e:
                             fails.append(f"no plan left ({str(e)[:60]})")
                             break
+                    if ok and noisy:                   # the chosen plan once more, with the episode's noise
+                        robot.new_scene(seed, log=False)
+                        robot.get_observation()
+                        noise = Noise(a.noise, NOISE_RHO, seed, attempts)
+                        t0, watch = play(robot, plan, realtime=a.watch and a.dry, noise=noise)
+                        ok, why = judge(robot, plan, t0, watch)
+                        tries.append(dict(ok=ok, why=why, noisy=True, phase=plan.meta.get("phase"),
+                                          strain=watch.strain()))
+                        if not ok:
+                            fails.append(f"noisy run of the chosen plan: {why}")
                     rec["tries"] = tries
                 else:
                     for k in range(PLAN_TRIES):
@@ -538,6 +557,7 @@ def main():
             if not hold and robot._box_info["target_name"] != rec["target"]:
                 skip(f"recording picked another truss ({robot._box_info['target_name']})"); continue
             env = robot.env_state()
+            rec["env"] = env.round(4).tolist()          # the cue recorded (the plan's u), not the dry pass's u 0.5
             cur = {"obs": obs}
             # ⚠️ the box + cut point aren't robot observations: building the frame from all of ds.features looked
             # them up in the robot's dict (KeyError 'box_cx', pilot 2026-11-03); they're added below instead
