@@ -376,15 +376,15 @@ def main():
                 except tx.PlanError as e:
                     print(f"  seed {seed}: skip, --hybrid and the teacher has no plan ({e})", flush=True)
                     continue
-                if ds is not None and T.meta.get("cut_u") != 0.5:   # as generate_truss: the cue marks u 0.5
-                    print(f"  seed {seed}: skip, the teacher cuts at u {T.meta.get('cut_u')}, the cue marks 0.5",
-                          flush=True)
-                    continue
+                if T.meta.get("cut_u", 0.5) != 0.5:      # as generate_truss (v5): the cue marks the teacher's u
+                    robot.set_cut_u(T.meta["cut_u"])
+                    obs = robot.get_observation()      # the start frame again (no physics step since), cue moved
+                    env = robot.env_state()
             r_hand = (a.handoff_mm[0] if len(a.handoff_mm) == 1 else
                       float(np.random.default_rng([seed, 0x4A0F]).uniform(*a.handoff_mm))) / 1000
             nb_hand, n_rec = None, 0
             noise =gt.Noise(a.noise, gt.NOISE_RHO, seed, 1000 + len(results)) if a.noise > 0 else None
-            p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m)
+            p_cut, _ = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
             gid = robot.m.body("arm/gripper").id
             closest = closest_live = np.inf

@@ -65,9 +65,10 @@ def outline_box(cams, d, m, t, cam="birdseye"):
     return None if u is None else [max(0, u[0]), max(0, u[1]), min(W - 1, u[2]), min(H - 1, u[3])]
 
 
-def cut_pixel(cams, d, m, t, cam="birdseye"):
-    """The middle of the truss's cut zone (world, where it hangs now) in this camera's pixels, or None."""
-    p, _ = ts.cut_target_now(t, d, m)
+def cut_pixel(cams, d, m, t, cam="birdseye", u=0.5):
+    """The point at u along the truss's cut zone (world, where it hangs now; 0.5 = the middle, where the teacher cuts
+    unless it plans elsewhere, truss_teacher meta cut_u) in this camera's pixels, or None."""
+    p, _ = ts.cut_target_now(t, d, m, u)
     uv = cams.project(d, cam, p)[0]
     return None if np.isnan(uv).any() else (float(uv[0]), float(uv[1]))
 
@@ -86,7 +87,7 @@ def yolo_labels(cams, d, m, info, ids=None):
     return rows
 
 
-def view_target(cams, d, m, t, cam):
+def view_target(cams, d, m, t, cam, u=0.5):
     """The chosen target truss as another camera sees it (rig "base": the target is picked on the birdseye, the
     policy's camera gets its box + cut point from the sim's truth): (visible box or the outline box when hidden,
     cut pixel or None). Both None when the truss is out of that camera's view."""
@@ -96,7 +97,7 @@ def view_target(cams, d, m, t, cam):
     box = _union([b for b, _ in parts]) if sum(n for _, n in parts) >= MIN_PX else None
     if box is None:
         box = outline_box(cams, d, m, t, cam)
-    return (None if box is None else [int(v) for v in box]), cut_pixel(cams, d, m, t, cam)
+    return (None if box is None else [int(v) for v in box]), cut_pixel(cams, d, m, t, cam, u)
 
 
 def env_vector(box, cut):
@@ -110,7 +111,7 @@ def env_vector(box, cut):
     return v
 
 
-def start_frame(cams, d, m, info, dets, t_ready=T_READY_BIRDSEYE, ids=None, mask=None):
+def start_frame(cams, d, m, info, dets, t_ready=T_READY_BIRDSEYE, ids=None, mask=None, cut_u=0.5):
     mask = reach_mask(cams, d) if mask is None else mask
     boxes = truss_boxes(cams, d, m, info, ids)
     ready = info["ready"]
@@ -150,7 +151,7 @@ def start_frame(cams, d, m, info, dets, t_ready=T_READY_BIRDSEYE, ids=None, mask
             c = max(cuts, key=lambda x: x["conf"])["box"]
             cut, cut_source = ((c[0] + c[2]) / 2, (c[1] + c[3]) / 2), "yolo"
         else:
-            cut = cut_pixel(cams, d, m, info["trusses"][k])
+            cut = cut_pixel(cams, d, m, info["trusses"][k], u=cut_u)
             cut_source = "true" if cut is not None else "none"
     tb = None if k is None or boxes[k][0] is None else [int(v) for v in boxes[k][0]]
     out.update(target=k, target_name=name(k), source=source, reason=reason, box=box, true_box=tb,
