@@ -32,27 +32,42 @@ def cut_point_in_gripper(r):
     return np.array([PAD_FACE_X + r + 0.001, CUT_Y, CUT_Z])
 
 
+def tilt_axis(tilt_deg):
+    """The stalk's direction in the gripper frame for a cut with the stalk tilted tilt_deg about the jaw's closing
+    axis (gripper x): 0 = along gripper y (every teacher before v5). Tilted, it still lies in the plane between the
+    two fingers, so the closing jaw still squeezes it; only the angle at which it crosses the fingers changes."""
+    t = np.radians(tilt_deg)
+    return np.array([0.0, np.cos(t), np.sin(t)])
+
+
 class TrussIK(expert.ArmIK):
-    def _res_y(self, x, p, point, s):
+    def _res_y(self, x, p, point, s, v=None):
         # ⚠️ Written out: np.cross / np.r_ on 3-vectors were ~60 % of a truss scene's 40 s build (profile, 2026-11-04)
         o, R = self.fk(x)
         g = o + R @ point
-        y0, y1, y2 = R[0, 1], R[1, 1], R[2, 1]
+        if v is None:
+            y0, y1, y2 = R[0, 1], R[1, 1], R[2, 1]
+        else:                                            # teacher v5's tilted cut: the stalk along R @ v
+            y0, y1, y2 = R @ v
         return np.array([p[0] - g[0], p[1] - g[1], p[2] - g[2], W_DIR * (y1 * s[2] - y2 * s[1]),
                          W_DIR * (y2 * s[0] - y0 * s[2]), W_DIR * (y0 * s[1] - y1 * s[0])])
 
-    def solve(self, p, s, r, x0=None, iters=80):
+    def solve(self, p, s, r, x0=None, iters=80, tilt_deg=0.0):
+        """tilt_deg (teacher v5): the stalk crosses the jaw tilted this far about the closing axis (tilt_axis); 0 is
+        the same arithmetic as before v5."""
         s = np.asarray(s, float) / np.linalg.norm(s)
         point = cut_point_in_gripper(r)
+        v = None if tilt_deg == 0 else tilt_axis(tilt_deg)
         g = self.P + np.einsum("nij,j->ni", self.R, point)
-        cost = np.linalg.norm(g - p, axis=1) + W_DIR * (1 - np.einsum("ni,i->n", self.R[:, :, 1], s))
+        yv = self.R[:, :, 1] if v is None else np.einsum("nij,j->ni", self.R, v)
+        cost = np.linalg.norm(g - p, axis=1) + W_DIR * (1 - np.einsum("ni,i->n", yv, s))
         cost += 0.05 * (self.R[:, 2, 2] < DOWN_MIN)      # prefer fingers-down starts
         starts = ([np.asarray(x0, float)] if x0 is not None else []) + [self.Q[i] for i in np.argsort(cost)[:N_STARTS]]
         best = None
         for x in starts:
-            x, e = self._lm_y(x.copy(), p, point, s, iters)
+            x, e = self._lm_y(x.copy(), p, point, s, iters, v)
             _, R = self.fk(x)
-            ok = np.linalg.norm(e[:3]) < 0.002 and R[:, 1] @ s > 0.995
+            ok = np.linalg.norm(e[:3]) < 0.002 and (R[:, 1] if v is None else R @ v) @ s > 0.995
             if ok and R[2, 2] >= DOWN_MIN:               # gripper +z up = fingers (-z) pointing down
                 if best is None or R[2, 2] > best[1]:
                     best = (x, R[2, 2])
@@ -60,8 +75,20 @@ class TrussIK(expert.ArmIK):
                     break
         return None if best is None else best[0]
 
-    def _lm_y(self, x, p, point, s, iters):
-        e = self._res_y(x, p, point, s)
+    def solve_from(self, p, s, r, x0, tilt_deg=0.0, iters=80):
+        """Teacher v5's line IK: Levenberg-Marquardt from x0 alone, the pose continuing x0's arm branch, or None. ⚠️
+        solve(x0=) falls back to 24 other starts when x0 doesn't converge: along a line that can jump to another arm
+        branch mid-slide, and a dead end costs 25 solves (315 of 354 s of a scene's v5 search, 2026-11-18)."""
+        s = np.asarray(s, float) / np.linalg.norm(s)
+        point = cut_point_in_gripper(r)
+        v = None if tilt_deg == 0 else tilt_axis(tilt_deg)
+        x, e = self._lm_y(np.asarray(x0, float).copy(), p, point, s, iters, v)
+        _, R = self.fk(x)
+        ok = np.linalg.norm(e[:3]) < 0.002 and (R[:, 1] if v is None else R @ v) @ s > 0.995 and R[2, 2] >= DOWN_MIN
+        return x if ok else None
+
+    def _lm_y(self, x, p, point, s, iters, v=None):
+        e = self._res_y(x, p, point, s, v)
         lam = 1e-3
         for _ in range(iters):
             if np.linalg.norm(e) < 2e-4:
@@ -70,10 +97,10 @@ class TrussIK(expert.ArmIK):
             for k in range(5):
                 dx = np.zeros(5)
                 dx[k] = 1e-5
-                J[:, k] = (self._res_y(x + dx, p, point, s) - e) / 1e-5
+                J[:, k] = (self._res_y(x + dx, p, point, s, v) - e) / 1e-5
             H, gr = J.T @ J, J.T @ e
             xn = np.clip(x - np.linalg.solve(H + lam * np.diag(np.diag(H) + 1e-9), gr), self.lo, self.hi)
-            en = self._res_y(xn, p, point, s)
+            en = self._res_y(xn, p, point, s, v)
             if np.linalg.norm(en) < np.linalg.norm(e):
                 x, e, lam = xn, en, max(lam / 3, 1e-7)
             else:
