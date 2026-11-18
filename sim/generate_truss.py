@@ -235,7 +235,8 @@ def main():
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
     ap.add_argument("--balance", action="store_true", help="spread targets along the row (BALANCE_*)")
     ap.add_argument("--teacher", action="store_true",
-                    help="teacher v3 (truss_teacher.py) + DART noise instead of the v2 planner; no misses")
+                    help="teacher v4 (truss_teacher.py; v3 until 2026-11-17) + DART noise instead of the v2 planner; "
+                         "no misses")
     ap.add_argument("--noise", type=float, default=NOISE_NORM, help="--teacher: noise std per arm joint, norm units")
     ap.add_argument("--noise-share", type=float, default=NOISE_SHARE,
                     help="--teacher: share of episodes with noise, drawn per seed (step 1 used 1.0)")

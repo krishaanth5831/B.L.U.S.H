@@ -114,18 +114,24 @@ ensembling, 100k steps, a checkpoint every 10k into `outputs/train/act_truss_v1`
 loads, loss falls), `act-full`, `merge <real_ds>`, `pi05-smoke`, `pi05-full`; the script header says what each
 does. SmolVLA was tried on the truss episodes and removed with its recipes on 2026-11-08.
 
-## Teacher v3 pipeline (the post-mortem ladder, November 2026)
+## Teacher pipeline (the post-mortem ladder, November 2026)
 
 The scripted planner's episodes held coin-flips the camera can't see, so the policy data now comes from a
 deterministic closed-loop teacher (`truss_teacher.py`), half of the episodes with noise on the executed action and
 the teacher's clean action as the label. Plan and results: vault note "BLUSH + SHEAR Policy Post-Mortem".
 
+Teacher v4 since 2026-11-17 (K7): v3 plus a release fallback (when no plan is found, a second pass retries with the
+next-ranked release poses; every scene v3 plans keeps its plan). The crate grew to 23 x 28 cm the same day, so every
+seed now draws a different scene: the `*_teacher_v3*` datasets and `heldout_v3*.jsonl` belong to the old crate
+(rerun those scenes from dev 5c1cf28).
+
 | Step | What | State |
 |---|---|---|
 | 0 | teacher + its three tests (`check_teacher.py`) | done: solves 73 of 200 scenes |
 | 1 | one layout, 50 episodes, ACT: the pipeline check | passed at 40k steps (18 of 19 noisy rollouts) |
-| 2 | dataset v3 | done: `krish5831/blush_sim_teacher_v3`, 610 episodes (525 cuts, 85 stay-home), local only |
-| 3 | ACT on v3, a test at every 5k checkpoint | set up, not started |
+| 2 | dataset v3 | done: `krish5831/blush_sim_teacher_v3`, 610 episodes (525 cuts, 85 stay-home), private on the Hub |
+| 3 | ACT on v3, a test at every 5k checkpoint | done (100k steps): alone 13-15 of the 63 held-out scenes the teacher solves; hybrid (`eval_truss.py --hybrid --rejoin`: the policy approaches, the teacher finishes from 20-50 mm) 52 of 63 |
+| finisher | the last stage learned from the hybrid's teacher finishes (`eval_truss.py --record`) | data: `krish5831/blush_sim_teacher_v3_finisher`, 201 episodes. ACT on it (step 3's recipe, 50k steps; 30k picked on 32 validation scenes, 10 of 32): with the policy approaching (`--hybrid --finisher`), 17 of 63 (strict 11), against 12 (10) for the policy alone and 50 (48) for the teacher finishing (same session, old crate). After the hand-over it never cut in 33 of 56, and on 30 of its own training scenes it succeeds only 13 times: it hasn't learned to capture the stalk. Videos: after a miss it plays the rest of the teacher's routine anyway (over the crate, home); its data never shows a miss. Re-planning more often (`--finisher-n-action-steps 25`, `--finisher-ensemble`) made it worse (1 and 3 of 32). The teacher stays the finisher (2026-11-17) |
 
 ```bash
 python check_teacher.py solve --scenes 1 --seed-start 9100003 --watch     # watch the teacher do one scene
@@ -142,6 +148,9 @@ python pick_checkpoint.py ../outputs/train/act_teacher_v3 --watch --until 100000
     --no-yolo --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 20 --holds 5
 python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrained_model --no-dr --no-yolo \
     --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 3            # watch a checkpoint in the windows
+python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrained_model --headless --no-dr --no-yolo \
+    --n-action-steps 100 --seeds-from heldout_v3.jsonl --scenes 10 --video ../outputs/videos/<name>
+                                                                             # or one video per scene (slow CPU, busy GPU)
 ```
 
 `heldout_v3.jsonl`: the step-3 test set, 20 scenes from seed 9900000 on (outside every recorded range) that a
@@ -302,7 +311,8 @@ blades off it). Truss scenes use the same shape near-rigid (`scene.RIGID_FINGER_
 - **Camera intrinsics + lens distortion** (`lens.py`, guessed from the spec), the **birdseye mast pose** (the
   generator's design pose; the mast isn't printed yet) and the **base camera's bracket pose** (design guess,
   nothing printed). The claw camera is on the stock SO-101 wrist mount, which the sim already uses.
-- **The crate's exact spot and size** (`truss_scene.CRATE_CENTRE`, `CRATE_SIZE`): "on the robot's right" is K7's; the numbers are a guess.
+- **The crate's exact spot and size** (`truss_scene.CRATE_CENTRE`, `CRATE_SIZE`): "on the robot's right" is K7's, and so
+  is "make the crate bigger" (23 x 28 cm since 2026-11-17, grown toward the row); the numbers are a guess.
 - **Contact and plant constants**: break force, stalk size and stiffness, finger stiffness and friction.
 - **Filament colours** (`PLA_RGBA`, `TPU_RGBA`).
 - Checked by K7 with the leader (2026-10-20): joint directions and poses (`arm_map.SIGN`).

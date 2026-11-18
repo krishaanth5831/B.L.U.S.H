@@ -6,6 +6,7 @@
     python check_teacher.py push --seed 9100000 --watch          #    the same in a MuJoCo window at real time
     python check_teacher.py solve --scenes 200                   # 3. solve rate on 200 scenes + why the rest fail
     python check_teacher.py solve --scenes 1 --seed-start 9100003 --watch   # watch one scene
+    python check_teacher.py takeover --seeds-from heldout_v3b.jsonl         # 4. taking over near the stalk (below)
 
 Scenes as generate_truss.py builds them (rig base, settle 1 s), but domain randomisation OFF: visual randomisation
 stays off until the sim reaches 50 % (post-mortem §6.2), and the teacher is judged on the plain scene. The target
@@ -16,6 +17,13 @@ The push (test 2): at a fixed frame of a leg the arm is displaced, not pushed wi
 offset so the gripper moves PUSH_MM in the given direction (damped least squares on the gripper's Jacobian), joint
 velocities zeroed. The teacher must steer back from where the arm now is. The displacement actually reached is
 printed; legs: to_standoff (free move), approach (standoff -> pre-cut), slide_in (onto the stalk).
+
+The takeover (test 4, 2026-11-16, for the last-stage finisher): the teacher's own run, stopped the first time the jaw
+comes within TRIGGER_MM of where the cut point hangs now; there the arm is displaced --arm-mm in a random direction
+and/or the truss swung so its cut point moves --swing-mm (as the policy leaves things at a hybrid hand-over), and
+the teacher goes on by re-entering its start-frame plan's nearest leg (resync, what eval_truss --hybrid did), by
+planning afresh from the arm and truss as they are now (replan), or by TrussTeacher.rejoin (back out if needed,
+back to the plan's standoff, the plan's own cut). Judged like the episodes.
 
 Writes only the solve log ~/.cache/blush_sim/teacher/solve_<stamp>.jsonl (and nothing for repeat / push).
 Run in the lerobot env under the memory cap:
@@ -38,6 +46,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+import truss_ik  # noqa: E402
+import truss_scene as ts  # noqa: E402
 import truss_teacher as tt  # noqa: E402
 
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "teacher"
@@ -117,6 +127,131 @@ def run(robot, seed, push=None, realtime=False):
     out["actions"] = np.array(acts)
     out["qpos_end"] = robot.d.qpos.copy()
     return out
+
+
+TRIGGER_MM = 30.0               # takeover: the finisher's start region (the policy reaches 2 cm in 81 % of scenes)
+
+
+def swing_truss(robot, k, metres, rng):
+    """Turn the target truss about its knuckle so the cut point moves about `metres` (a random horizontal axis), as a
+    nudge would; velocities zeroed. ⚠️ The truss is its own free body welded to the knuckle (truss.truss_xml), not
+    the knuckle's child: both are turned, or the weld snaps the truss back (2026-11-16: turning only the knuckle
+    moved the cut point 0.0 mm). Returns the cut point's move reached."""
+    m, d, t = robot.m, robot.d, robot.info["trusses"][k]
+    jk = m.joint(f"{t['name']}_knuckle_ball").id
+    bt = m.body(t["body"]).id
+    jt = m.body_jntadr[bt]                              # the truss's freejoint
+    kadr = m.jnt_qposadr[jk]
+    p0, _ = ts.cut_target_now(t, d, m)
+    pivot = d.xpos[m.body(f"{t['name']}_knuckle").id].copy()
+    arm = float(np.linalg.norm(p0 - pivot))
+    a = rng.uniform(0, 2 * np.pi)
+    axis = np.array([np.cos(a), np.sin(a), 0.0])
+    q = np.zeros(4)
+    mujoco.mju_axisAngle2Quat(q, axis, metres / max(arm, 1e-3))
+    R = np.zeros(9)
+    mujoco.mju_quat2Mat(R, q)
+    R = R.reshape(3, 3)
+    out = np.zeros(4)
+    mujoco.mju_mulQuat(out, q, d.qpos[kadr:kadr + 4].copy())
+    d.qpos[kadr:kadr + 4] = out
+    free = [jt] + [m.body_jntadr[m.body(f["tomato"]).id] for f in t["fruit"]]   # the tomatoes are free bodies
+    for j in free:                                                                  # welded to their pedicels too
+        adr = m.jnt_qposadr[j]
+        d.qpos[adr:adr + 3] = pivot + R @ (d.qpos[adr:adr + 3] - pivot)
+        mujoco.mju_mulQuat(out, q, d.qpos[adr + 3:adr + 7].copy())
+        d.qpos[adr + 3:adr + 7] = out
+        d.qvel[m.jnt_dofadr[j]:m.jnt_dofadr[j] + 6] = 0.0
+    d.qvel[m.jnt_dofadr[jk]:m.jnt_dofadr[jk] + 3] = 0.0
+    mujoco.mj_forward(m, d)
+    return float(np.linalg.norm(ts.cut_target_now(t, d, m)[0] - p0))
+
+
+def run_takeover(robot, seed, mode, arm_m, swing_m, rng):
+    """The teacher's run with a takeover at TRIGGER_MM (see the module doc). mode: resync | replan."""
+    robot.new_scene(seed, log=False)
+    robot.get_observation()
+    k = robot._tgt_k
+    out = dict(seed=seed, mode=mode, arm_mm=round(arm_m * 1000), swing_mm=round(swing_m * 1000))
+    if k is None:
+        return dict(out, solved=False, stage="target", reason="no target")
+    t = robot.info["trusses"][k]
+    try:
+        T = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
+    except tt.PlanError as e:
+        return dict(out, solved=False, stage="plan", reason=str(e)[:150])
+    gid = robot.m.body("arm/gripper").id
+    grip = truss_ik.cut_point_in_gripper(t["r"])
+    watch = gt.Watch(robot)
+    t0, took = robot.d.time, None
+    while not T.done:
+        if took is None and robot.cutters[k].cut_t is None:
+            jaw = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
+            if np.linalg.norm(jaw - ts.cut_target_now(t, robot.d, robot.m)[0]) < TRIGGER_MM / 1000:
+                took = dict(t=round(robot.d.time - t0, 2), leg=T.leg)
+                if arm_m > 0:
+                    v = rng.normal(size=3)
+                    took["arm_reached_mm"] = round(displace(robot, v / np.linalg.norm(v), arm_m) * 1000, 1)
+                if swing_m > 0:
+                    took["swing_reached_mm"] = round(swing_truss(robot, k, swing_m, rng) * 1000, 1)
+                T2 = None
+                if mode == "rejoin":
+                    try:
+                        took["entered"] = "rejoin:" + T.rejoin(robot._present_norm())
+                        took.update(T.meta.get("rejoined", {}))
+                    except tt.PlanError as e:
+                        took["rejoin_failed"] = str(e)[:150]
+                        took["entered"] = "resync:" + T.resync(robot._present_norm(), cut=False, released=False)
+                elif mode == "replan":
+                    try:
+                        T2 = tt.TrussTeacher(robot.m, robot.d, robot.info, k).plan()
+                        T2.reset()
+                    except tt.PlanError as e:
+                        took["replan_failed"] = str(e)[:150]
+                if mode == "rejoin":
+                    pass
+                elif T2 is not None:
+                    T = T2
+                    took.update(entered="replan:" + T.legs[0].name, cut_u=T.meta["cut_u"],
+                                standoff_mm=T.meta["standoff_mm"])
+                else:
+                    took["entered"] = "resync:" + T.resync(robot._present_norm(), cut=False, released=False)
+        robot.send_action(T.act(robot._present_norm()))
+        watch.step()
+    ok, why = gt.judge(robot, T, t0, watch)
+    return dict(out, solved=ok, stage="dry run", reason=why, took=took, seconds=round(robot.d.time - t0, 2),
+                neighbour_mm=round(watch.max * 1000, 1))
+
+
+def cmd_takeover(a):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    seeds = [json.loads(ln)["seed"] for ln in a.seeds_from.expanduser().read_text().splitlines()
+             if ln.strip() and json.loads(ln).get("kept") is True and not json.loads(ln).get("hold")]
+    seeds = seeds[a.shard::a.shards]
+    path = LOG_DIR / f"takeover_{time.strftime('%Y%m%d_%H%M%S')}_s{a.shard}of{a.shards}.jsonl"
+    print(f"log {path}; {len(seeds)} seeds; modes {a.modes}; arm mm {a.arm_mm}; swing mm {a.swing_mm}", flush=True)
+    robot = make_robot(a.watch)
+    res = collections.defaultdict(lambda: [0, 0])
+    try:
+        with path.open("w") as log:
+            for seed in seeds:
+                for arm_mm in a.arm_mm:
+                    for swing_mm in a.swing_mm:
+                        for mode in a.modes:
+                            rng = np.random.default_rng([seed, int(arm_mm), int(swing_mm)])   # same push, both modes
+                            r = run_takeover(robot, seed, mode, arm_mm / 1000, swing_mm / 1000, rng)
+                            log.write(json.dumps(r, default=float) + "\n")
+                            log.flush()
+                            key = (mode, arm_mm, swing_mm)
+                            res[key][0] += r["solved"]
+                            res[key][1] += 1
+                            print(f"  seed {seed} {mode:6s} arm {arm_mm:4.0f} mm swing {swing_mm:3.0f} mm: "
+                                  f"{'ok' if r['solved'] else 'FAIL ' + r['reason'][:80]}  {r.get('took')}", flush=True)
+    finally:
+        robot.disconnect()
+    for (mode, arm_mm, swing_mm), (k_, n_) in sorted(res.items()):
+        print(f"{mode:6s} arm {arm_mm:4.0f} mm swing {swing_mm:3.0f} mm: {k_}/{n_}")
+    return 0
 
 
 def cmd_repeat(a):
@@ -236,13 +371,20 @@ def main():
     p.add_argument("--legs", nargs="+", default=list(PUSH_FRAME))
     p.add_argument("--dirs", nargs="+", default=list(PUSH_DIRS), choices=list(PUSH_DIRS))
     p.add_argument("--mm", nargs="+", type=float, default=list(PUSH_MM))
+    p = sub.add_parser("takeover", help="test 4: the teacher taking over near the stalk (resync or replan)")
+    p.add_argument("--seeds-from", type=pathlib.Path, required=True)
+    p.add_argument("--modes", nargs="+", default=["resync", "rejoin"], choices=["resync", "replan", "rejoin"])
+    p.add_argument("--arm-mm", nargs="+", type=float, default=[0.0, 20.0])
+    p.add_argument("--swing-mm", nargs="+", type=float, default=[0.0, 5.0])
+    p.add_argument("--shard", type=int, default=0)
+    p.add_argument("--shards", type=int, default=1)
     p = sub.add_parser("solve", help="test 3: solve rate on random scenes")
     p.add_argument("--scenes", type=int, default=200)
     p.add_argument("--seed-start", type=int, default=SEED_START)
     for p in sub.choices.values():
         p.add_argument("--watch", action="store_true", help="MuJoCo window at real time")
     a = ap.parse_args()
-    sys.exit({"repeat": cmd_repeat, "push": cmd_push, "solve": cmd_solve}[a.cmd](a))
+    sys.exit({"repeat": cmd_repeat, "push": cmd_push, "solve": cmd_solve, "takeover": cmd_takeover}[a.cmd](a))
 
 
 if __name__ == "__main__":

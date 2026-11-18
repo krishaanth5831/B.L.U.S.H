@@ -1,4 +1,9 @@
-"""Teacher v3: the scripted truss picker as a closed-loop teacher (post-mortem §6.1, K7 approved 2026-11-09).
+"""Teacher v4: the scripted truss picker as a closed-loop teacher (post-mortem §6.1, K7 approved 2026-11-09).
+
+v4 (K7 2026-11-17: "do the teacher v4"): v3 + the release fallback (RELEASE_FALLBACK_N): when no plan is found, a
+second pass retries the candidates that failed at the release or the carry with the next-ranked release poses. Every
+scene v3 plans keeps its plan, action for action. Datasets named *_teacher_v3* were recorded by v3 with the old crate
+(truss_scene.CRATE_*, changed the same day): v4 data is a new dataset version.
 
     teacher = TrussTeacher(robot.m, robot.d, robot.info, k).plan()      # after the start frame; PlanError if none
     while not teacher.done:
@@ -38,6 +43,9 @@ IK, the carried-truss checker (CarryChecker), the release-pose fit (crate_poses 
 samples come from a fixed seed). Timing constants come from expert.py; the sag correction is expert.Plan's,
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
+import weakref
+
+import mujoco
 import numpy as np
 
 import arm_map
@@ -96,6 +104,38 @@ STALL_NORM, STALL_FRAMES = 0.05, 8         # ...or the arm moved less than this 
 SEARCH_BACK = 0.5                          # projection window: this many leads behind the last projection...
 SEARCH_AHEAD = 6.0                         # ...and this many ahead (keeps it from jumping where a path folds back)
 MAX_S = 45.0                               # done after this long whatever happens (a stuck leg can't loop forever)
+# --- rejoin (2026-11-16): taking over from a state the teacher didn't drive to (hybrid hand-over, DAgger) ---
+ESCAPE_M = (0.02, 0.04, 0.06)              # back out along the slide line this far, the first that is clear (guess)
+ESCAPE_STEPS = 8                           # IK points along that line
+# ⚠️ With the arm pushed 2 cm in a random direction the slide-line escape found no clear pose in 11 of 126 runs
+# (2026-11-16): then also straight back along the gripper's own finger axis, then straight up (position only).
+ESCAPE_DIRS = ("slide", "back", "up")
+ESCAPE_STALL_FRAMES = 30                   # an escape that stops moving for 1 s is over: go on from there (guess)
+# ⚠️ No wait at the standoff. A hold there until the stalk hung still (3 mm, 10 mm/s, at most 3 s) was tried for the
+# 5 of 18 hard takeovers that escaped and then slid onto empty air (2026-11-16): it fixed none of the 18, and on the
+# 10 seeds that changed between rejoin versions it caused 5 failures (neighbours nudged to 15-17 mm, a drop) against
+# 2 it prevented (check_teacher takeover, deterministic, same 40 runs with and without it). Removed.
+# --- release fallback (teacher v4, K7 2026-11-17; measured first as a what-if, ~/.cache/vinea_research/step3_night/
+# agents/release) ---
+# ⚠️ _release keeps ONE pose (the clear one with most room to the walls) and the carry is planned to it alone: when the
+# carry there or the way home from it is blocked, the candidate (cut point, approach) is dropped, though a lower-ranked
+# pose may clear. Seed 9900001 (stock crate, strict, u 0.5, straight in): the chosen pose's carry hit s0t0's peduncle
+# and its way home was blocked too, the 4th-ranked pose cleared both (2026-11-17). With the bigger crate A all 50
+# release calls of seed 9900029 returned the same pose and every carry to it was blocked (agents/crate, 2026-11-16).
+# ⚠️ That one this doesn't fix: its carry hits s1t0's fruit 10 % of the way out of the retreat end, whatever the
+# pose (all 330 alternates blocked, 2026-11-17). Where the block sits at the retreat end, the retreat is the lever.
+# So plan() makes a second pass, only when the first found no plan at all: every scene that plans keeps its plan,
+# action for action. ⚠️ A fallback inside each candidate could change at least 4 of the 63 solved held-out plans
+# (seeds 9900048, 085, 130, 134: a carry blocked at one approach, solved at a later one; meta "tried" lists only the
+# winning mode's failures). The second pass retries only the candidates that got as far as the release, with the
+# next-ranked distinct clear poses after the first choice (which failed), ranked past _release's first
+# RELEASE_SAMPLES // 4 too. Measured on the 154 held-out seeds, stock crate (agents/release, 2026-11-17): 63 -> 67
+# kept, none lost; every first-pass plan kept its release point and result (actions compared on 8: identical).
+RELEASE_FALLBACK_N = 10                    # alternates per candidate (guess, between 10 and 20; 9900029 crate A had 9
+#                                            clear poses of 24 that fit, 9900001 stock 4 of 4; the kept plans it found
+#                                            used alternates 1-3, the highest used 6, 2026-11-17)
+RELEASE_DISTINCT_M = 0.03                  # an alternate's grip point this far from every clear pose before it (guess,
+#                                            "a few cm"; the clear poses of those two seeds lay 2.4-23 cm apart)
 
 
 # ⚠️ Self-collision (2026-11-09): rrt.Checker skips every contact between two arm parts, so neither the v2 expert's
@@ -108,15 +148,22 @@ HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade"
 
 
 def add_self_check(chk, prefix="arm/"):
-    """Make chk.hits (and so free / segment_free / path_ok) also report self-collisions of the arm. Returns chk."""
+    """Make chk.hits (and so free / segment_free / path_ok) also report self-collisions of the arm. Returns chk.
+    ⚠️ The wrapper holds chk only by a weak reference. Holding it strongly (the bound chk.hits, or chk itself in the
+    closure) made chk -> chk.hits -> chk a reference cycle, which only Python's rare full gc pass frees, so checkers
+    (a deepcopy of the scene's model + MjData, 64 MB each) outlived their teacher: in eval_truss --hybrid --record one
+    more stayed alive per planned scene (1 -> 5 over 5 scenes until a full gc) and a failed plan left 20-28 alive at
+    once (2026-11-16)."""
     m = chk.m
     body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
     arm = np.array([b.startswith(prefix) for b in body])
     hand = np.array([any(h in b for h in HAND_PARTS) for b in body])
-    orig = chk.hits
+    orig = type(chk).hits                         # unbound: rrt.Checker.hits or truss_expert.CarryChecker.hits
+    ref = weakref.ref(chk)
 
     def hits(q, **kw):
-        out = orig(q, **kw)                       # leaves chk.d at q, contacts current
+        chk = ref()
+        out = orig(chk, q, **kw)                  # leaves chk.d at q, contacts current
         for c in chk.d.contact[:chk.d.ncon]:
             a, b = c.geom1, c.geom2
             if (arm[a] and arm[b] and m.geom_bodyid[a] != m.geom_bodyid[b] and not (hand[a] and hand[b])
@@ -131,8 +178,9 @@ class Leg:
     """One piece of the motion: a joint path (norm units, (n, 5)) or a hold, the jaw command, the pace."""
 
     def __init__(self, name, W=None, hold=None, jaw=None, jaw_to=None, lead=FREE_LEAD, servo=False, frames=None,
-                 checker_ok=True):
+                 checker_ok=True, until=None):
         self.name, self.lead, self.servo, self.frames = name, lead, servo, frames
+        self.until = until                          # a hold leg: also done once until() is true
         self.W = None if W is None else np.asarray(W, float)
         self.hold = None if hold is None else np.asarray(hold, float)
         self.jaw, self.jaw_to = jaw, jaw_to         # jaw: fixed command; jaw_to: (from, to) ramped over the leg
@@ -179,16 +227,28 @@ class TrussTeacher(tx.TrussPlanner):
     # --- planning (once, at the start frame) ---
     def plan(self):
         why = []
+        self._late = None                      # release fallback: None in the first pass
+        late = {}                              # (mode, u, beta) -> (leg, to_std, detour): failed at the release / carry
         for mode in tx.NEIGHBOUR_CLEAR:
             self.kw = dict(soft_clearance=tx.NEIGHBOUR_CLEAR[mode], firm_clearance=tx.OWN_FRUIT_CLEAR[mode])
             try:
-                self._plan(mode)
+                self._plan(mode, late)
                 return self
             except PlanError as e:
                 why.append(f"{mode}: {e}")
+        if late:                               # release fallback: the second pass (RELEASE_FALLBACK_N)
+            self._late, why2 = late, []
+            for mode in [m for m in tx.NEIGHBOUR_CLEAR if any(key[0] == m for key in late)]:
+                self.kw = dict(soft_clearance=tx.NEIGHBOUR_CLEAR[mode], firm_clearance=tx.OWN_FRUIT_CLEAR[mode])
+                try:
+                    self._plan(mode, late)
+                    return self
+                except PlanError as e:
+                    why2.append(f"{mode}: {e}")
+            why.append("release fallback: " + " / ".join(why2))
         raise PlanError(" / ".join(why))
 
-    def _plan(self, mode):
+    def _plan(self, mode, late):
         tried = []
         r = self.t["r"]
         q0 = self.q_now()
@@ -197,20 +257,29 @@ class TrussTeacher(tx.TrussPlanner):
             raise PlanError("start pose not clear")
         for u in CUT_U:
             for beta in APPROACH_BLEND_DEG:
-                leg = self._cut_leg(u, beta, r)
-                if isinstance(leg, str):
-                    tried.append(leg)
-                    continue
-                to_std, detour = self._to_standoff(q0, leg)
-                if to_std is None:
-                    tried.append("start -> standoff blocked, detour too")
-                    continue
+                if self._late is not None:     # release fallback: only the candidates that reached the release
+                    if (mode, u, beta) not in late:
+                        continue
+                    leg, to_std, detour = late[(mode, u, beta)]
+                else:
+                    leg = self._cut_leg(u, beta, r)
+                    if isinstance(leg, str):
+                        tried.append(leg)
+                        continue
+                    to_std, detour = self._to_standoff(q0, leg)
+                    if to_std is None:
+                        tried.append("start -> standoff blocked, detour too")
+                        continue
+                self._at_release = False
                 rest = self._after_cut(leg, r)
                 if isinstance(rest, str):
                     tried.append(rest)
+                    if self._at_release and self._late is None:
+                        late[(mode, u, beta)] = (leg, to_std, detour)
                     continue
+                self._parts = dict(leg=leg, rest=rest)   # for rejoin: the cut and after, on the start-frame scene
                 self._build_legs(q0, to_std, leg, rest)
-                self.meta = dict(teacher="v3", neighbours=mode, cut_u=u, approach_blend_deg=float(beta),
+                self.meta = dict(teacher="v4", neighbours=mode, cut_u=u, approach_blend_deg=float(beta),
                                  slide_mm=round(leg["slide_m"] * 1000), standoff_mm=round(leg["standoff_m"] * 1000),
                                  detours=dict(to_standoff=detour, to_crate=rest["detour_crate"],
                                               home=rest["detour_home"]),
@@ -218,6 +287,8 @@ class TrussTeacher(tx.TrussPlanner):
                                  release_pitch=rest["release_pitch"], crate_slack_mm=rest["crate_slack_mm"],
                                  target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(r * 2000, 1),
                                  tried=sorted(set(tried)), miss=False)
+                if self._late is not None:
+                    self.meta["release_fallback"] = rest["release_fallback"]
                 return
         raise PlanError("; ".join(sorted(set(tried))) or "no candidate")
 
@@ -317,31 +388,38 @@ class TrussTeacher(tx.TrussPlanner):
             break
         if ret is None:
             return why
-        rel = self._release(carry, cchk, r)
-        if isinstance(rel, str):
-            return rel
-        x_rel, x_above, lower, p, pitch, slack = rel
-        to_crate, detour_crate = None, None
-        for clear in (tx.CARRY_CLEAR_M, tx.CARRY_CLEAR_MIN_M):   # the retreat can end closer than 2 cm to a neighbour
-            to_crate, detour_crate = self.free_move(ret[-1], x_above, cchk, r, soft_clearance=clear)
-            if to_crate is not None:
-                break
-        if to_crate is None:
-            return "retreat -> crate blocked, via-pose too"
-        self.jaw(tx.JAW_OPEN_DEG)
-        q_start = self.fm.norm_to_rad(self.q_home)[:5]
-        home, detour_home = self.free_move(lower[-1], q_start, self.chk, r, ignore=self.target_all, firm=False,
-                                           **self.kw)
-        if home is None:
-            return "crate -> start blocked, via-pose too"
-        return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home,
-                    detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
-                    release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1))
+        self._at_release = True               # release fallback: from here on it failed at the release or the carry
+        # the first pass: _release's one pose; the second: the alternates after it (RELEASE_FALLBACK_N)
+        rels = [self._release(carry, cchk, r)] if self._late is None else self._release_alternates(carry, cchk, r)
+        why = "release fallback: no other clear pose"
+        for j, rel in enumerate(rels):
+            if isinstance(rel, str):
+                return rel
+            x_rel, x_above, lower, p, pitch, slack = rel
+            to_crate, detour_crate = None, None
+            for clear in (tx.CARRY_CLEAR_M, tx.CARRY_CLEAR_MIN_M):   # the retreat can end < 2 cm from a neighbour
+                to_crate, detour_crate = self.free_move(ret[-1], x_above, cchk, r, soft_clearance=clear)
+                if to_crate is not None:
+                    break
+            if to_crate is None:
+                why = "retreat -> crate blocked, via-pose too"
+                continue
+            self.jaw(tx.JAW_OPEN_DEG)
+            q_start = self.fm.norm_to_rad(self.q_home)[:5]
+            home, detour_home = self.free_move(lower[-1], q_start, self.chk, r, ignore=self.target_all, firm=False,
+                                               **self.kw)
+            if home is None:
+                why = "crate -> start blocked, via-pose too"
+                continue
+            return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home,
+                        detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
+                        release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1),
+                        release_fallback=None if self._late is None else dict(alternate=j + 1, rank=self._rel_rank))
+        return why
 
-    def _release(self, carry, cchk, r):
-        """The release pose: TrussPlanner._after_cut's fit (seen from above every carried fruit and the stalk inside
-        the walls, also laid flat; most room to the walls first), deterministic. Returns (x_rel, x_above, lower,
-        grip point, pitch, slack) or why not."""
+    def _release_fit(self, carry, r):
+        """Every sampled pose over the crate (tx.crate_poses) the carried truss fits at, most room to the walls first:
+        (their indices, slack, Qs, Os, Rs, grip point in the gripper frame)."""
         (cx, cy), (sx, sy, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
         point = truss_ik.cut_point_in_gripper(r)
         radii = np.array([fr["radius"] for fr in self.t["fruit"]])
@@ -362,21 +440,59 @@ class TrussTeacher(tx.TrussPlanner):
         high_z = (G[:, :, 2] + radii).max(1) - h
         ok = np.flatnonzero((slack >= tx.RELEASE_SLACK_M) & (low_z >= scene.CRATE_WALL + 0.01 - h)
                             & (low_z <= tx.RELEASE_ABOVE_M[1] + 0.04) & (high_z <= tx.ABOVE_RIM_MAX_M))
-        for i in ok[np.argsort(-slack[ok], kind="stable")][:tx.RELEASE_SAMPLES // 4]:
-            xr = np.asarray(Qs[i])
+        return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point
+
+    def _release_pose(self, fit, i, cchk):
+        """Pose i of _release_fit's: (x_rel, x_above, lower, grip point, pitch, slack), or None if it hits."""
+        _, slack, Qs, Os, Rs, point = fit
+        ikf = self.ik_free
+        xr = np.asarray(Qs[i])
+        p = Os[i] + Rs[i] @ point
+        pitch = np.degrees(np.arcsin(np.clip(Rs[i][2, 2], -1, 1)))
+        tilt = np.degrees(np.arcsin(np.clip(Rs[i][2, 0], -1, 1)))
+        if cchk.hits(xr, soft_clearance=tx.CARRY_CLEAR_M):
+            return None
+        low = [ikf.solve(p + [0, 0, tx.ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
+               for v in np.linspace(0, 1, 6)]
+        if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=tx.CARRY_CLEAR_M):
+            low = [xr]                         # no straight drop for this pose: the carry goes to it directly
+        else:
+            low[-1] = xr
+        return xr, low[0], low, p, pitch, float(slack[i])
+
+    def _release(self, carry, cchk, r):
+        """The release pose: TrussPlanner._after_cut's fit (seen from above every carried fruit and the stalk inside
+        the walls, also laid flat; most room to the walls first), deterministic. Returns (x_rel, x_above, lower,
+        grip point, pitch, slack) or why not."""
+        fit = self._release_fit(carry, r)
+        for i in fit[0][:tx.RELEASE_SAMPLES // 4]:
+            rel = self._release_pose(fit, i, cchk)
+            if rel is not None:
+                return rel
+        return f"no release pose: {len(fit[0])} of {len(fit[2])} poses over the crate fit the truss"
+
+    def _release_alternates(self, carry, cchk, r):
+        """Release fallback (plan()'s second pass): after _release's choice, which failed, the next clear poses in the
+        same order, each RELEASE_DISTINCT_M or more from every clear pose before it (that choice too), at most
+        RELEASE_FALLBACK_N, past its first RELEASE_SAMPLES // 4 too. Yields what _release returns (rank in
+        self._rel_rank)."""
+        fit = self._release_fit(carry, r)
+        order, _, Qs, Os, Rs, point = fit
+        seen, n = [], 0
+        for rank, i in enumerate(order):
             p = Os[i] + Rs[i] @ point
-            pitch = np.degrees(np.arcsin(np.clip(Rs[i][2, 2], -1, 1)))
-            tilt = np.degrees(np.arcsin(np.clip(Rs[i][2, 0], -1, 1)))
-            if cchk.hits(xr, soft_clearance=tx.CARRY_CLEAR_M):
+            if any(np.linalg.norm(p - q) < RELEASE_DISTINCT_M for q in seen):
                 continue
-            low = [ikf.solve(p + [0, 0, tx.ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
-                   for v in np.linspace(0, 1, 6)]
-            if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=tx.CARRY_CLEAR_M):
-                low = [xr]                     # no straight drop for this pose: the carry goes to it directly
-            else:
-                low[-1] = xr
-            return xr, low[0], low, p, pitch, float(slack[i])
-        return f"no release pose: {len(ok)} of {len(Qs)} poses over the crate fit the truss"
+            if cchk.hits(np.asarray(Qs[i]), soft_clearance=tx.CARRY_CLEAR_M):
+                continue
+            seen.append(p)
+            if len(seen) == 1 and rank < tx.RELEASE_SAMPLES // 4:
+                continue                       # _release's own choice: it failed in the first pass
+            self._rel_rank = rank
+            yield self._release_pose(fit, i, cchk)
+            n += 1
+            if n >= RELEASE_FALLBACK_N:
+                return
 
     def _build_legs(self, q0, to_std, leg, rest):
         fm = self.fm
@@ -467,15 +583,86 @@ class TrussTeacher(tx.TrussPlanner):
             moved = np.inf if self.q_prev is None else float(np.abs(q - self.q_prev).max())
             self.stall = self.stall + 1 if moved < STALL_NORM else 0
             self.q_prev = q
-            at_end = self.s + g.lead >= g.L
+            at_end = self.s + g.lead >= g.L or (g.name == "escape" and self.stall >= ESCAPE_STALL_FRAMES)
             close = float(np.abs(q - end).max()) < END_TOL["servo" if g.servo else "free"]
             if at_end and (close or self.stall >= STALL_FRAMES):
                 self._next_leg()
-        elif self.n_in_leg >= g.frames:
+        elif self.n_in_leg >= g.frames or (g.until is not None and g.until()):
             self._next_leg()
         if not self.done and self.n_total >= MAX_S * FPS:
             self.meta.update(frames=self.n_total, seconds=round(self.n_total / FPS, 2), timed_out=True)
         return {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, a)}
+
+    def rejoin(self, state_norm):
+        """Take over from a state the teacher didn't drive to, before the cut (a hybrid hand-over, a DAgger
+        takeover), keeping the start-frame plan's cut: if the arm is in among the plant, back out along the slide
+        line to the first clear pose (ESCAPE_M), then a free move to the plan's standoff, then the plan's own approach,
+        slide, cut, carry and return. The cut and everything after it stay planned on the start-frame scene, where
+        the stalk hangs again once the arm has let go of it. Evidence (check_teacher takeover, 63 held-out scenes,
+        2026-11-16): re-entering the old plan's nearest leg (resync) failed 29 % with the arm 2 cm off; planning
+        afresh on the live scene failed 37 % with the stalk swung 5 mm (it springs back to where the old plan aims)
+        and found no cut pose for a tilted stalk. Returns the first leg's name; raises PlanError."""
+        leg, rest = self._parts["leg"], self._parts["rest"]
+        r = self.t["r"]
+        q = self.fm.norm_to_rad(np.r_[np.asarray(state_norm, float)[:5], 0.0])[:5]
+        self.jaw(tx.JAW_OPEN_DEG)
+        esc, how_out = [], None
+        if not self.chk.free(q, **self.kw):
+            p_now, R_now = self.ik.frame(q, r)
+            for how_out in ESCAPE_DIRS:
+                for back in ESCAPE_M:
+                    # position only: the slide line's IK (stalk-aligned) turned the wrist inside the plant on its
+                    # first point and the arm jammed there until MAX_S (seed 9900089, 2026-11-16)
+                    v = {"slide": -leg["f"], "back": R_now[:, 2], "up": np.array([0.0, 0.0, 1.0])}[how_out]
+                    xs = self._move_point(q, v * back, ESCAPE_STEPS)     # fingers run along gripper -z
+                    if xs is not None and self.chk.free(xs[-1], **self.kw):
+                        esc = [q] + xs
+                        break
+                if esc:
+                    break
+            else:
+                raise PlanError("rejoin: no clear pose backing out (slide line, finger axis or up)")
+        start = esc[-1] if esc else q
+        path, how = self.free_move(start, leg["approach"][0], self.chk, r, **self.kw)
+        if path is None:
+            raise PlanError("rejoin: no free move to the standoff")
+        self._build_legs(start, path, leg, rest)
+        if esc:
+            fm = self.fm
+            W = np.array([fm.rad_to_norm(np.r_[x, 0])[:5] for x in esc])
+            L = float(np.linalg.norm(np.diff(W, axis=0), axis=1).sum())
+            g_now = float(fm.rad_to_norm(np.r_[np.zeros(5), self.d.qpos[self.g_adr]])[5])
+            self.legs[0].jaw, self.legs[0].jaw_to = self.g_open, None
+            self.legs.insert(0, Leg("escape", W, jaw_to=(g_now, self.g_open), servo=True,
+                                    lead=max(L / max(back / CART_M_S * FPS, 1.0), 1e-3)))
+        self.meta.update(rejoined=dict(escape_mm=round(back * 1000) if esc else 0, escape_dir=how_out if esc else None,
+                                       to_standoff_via=how))
+        self.reset()
+        return self.legs[0].name
+
+    def _move_point(self, q, delta, n):
+        """Joint poses (rad) moving the gripper by `delta` (world, m) in n steps, orientation free: damped least
+        squares on the planning copy (self.chk), so the live scene isn't touched. None if it can't follow."""
+        m, d = self.chk.m, self.chk.d
+        b = m.body("arm/gripper").id
+        dadr = [m.jnt_dofadr[m.joint("arm/" + j).id] for j in arm_map.JOINTS[:5]]
+        d.qpos[self.chk.adr] = q
+        mujoco.mj_fwdPosition(m, d)
+        p0, x, xs = d.xpos[b].copy(), np.asarray(q, float).copy(), []
+        for u in np.linspace(0, 1, n + 1)[1:]:
+            goal = p0 + np.asarray(delta) * u
+            for _ in range(5):
+                jacp = np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, d, jacp, None, b)
+                J = jacp[:, dadr]
+                dq = J.T @ np.linalg.solve(J @ J.T + 1e-6 * np.eye(3), goal - d.xpos[b])
+                x = np.clip(x + dq, self.lo, self.hi)
+                d.qpos[self.chk.adr] = x
+                mujoco.mj_fwdPosition(m, d)
+            if np.linalg.norm(goal - d.xpos[b]) > 0.003:
+                return None
+            xs.append(x.copy())
+        return xs
 
     def resync(self, state_norm, cut, released):
         """Re-enter from a state the teacher didn't drive to (a DAgger takeover): the eligible leg whose path passes

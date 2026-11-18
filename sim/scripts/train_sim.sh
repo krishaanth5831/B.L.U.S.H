@@ -18,7 +18,7 @@ PI05=(--policy.type=pi05 --policy.pretrained_path=lerobot/pi05_base
       --policy.dtype=bfloat16 --policy.device=cuda)
 case "${1:-}" in
   act-smoke)
-    DS=${2:-$HF_USER/blush_sim_truss_v2}
+    DS=${2:-$HF_USER/blush_sim_scripted_v2}
     lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
       --policy.push_to_hub=false --batch_size=8 --steps=500 --save_freq=500 \
       --output_dir=$OUT/act_sim_smoke --job_name=act_sim_smoke --wandb.enable=false ;;
@@ -28,7 +28,7 @@ case "${1:-}" in
     # 23 mm): base + claw cameras, the target box + cut point as numbers (observation.environment_state, read by ACT
     # automatically) and temporal ensembling 0.01. Batch 8,
     # 100k steps, a checkpoint every 10k (pick by graded rollouts, not loss).
-    DS=${2:-$HF_USER/blush_sim_truss_v2}
+    DS=${2:-$HF_USER/blush_sim_scripted_v2}
     lerobot-train --dataset.repo_id="$DS" --policy.type=act --policy.device=cuda \
       --policy.push_to_hub=false --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1 \
       --batch_size=${BATCH:-8} --steps=${STEPS:-100000} --save_freq=10000 --log_freq=50 --num_workers=8 \
@@ -50,7 +50,7 @@ case "${1:-}" in
     # optimizer_lr_backbone is 1e-5 too. Warmup 1000 = pi0's value (guess, unverified). EMA=1 adds lerobot's weight
     # average (pretrained_model_ema per checkpoint); AMP=1 trains in mixed precision.
     #   RUN=act_teacher_v3 sim/scripts/train_sim.sh act-teacher $HF_USER/blush_sim_teacher_v3     step 3
-    DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_onelayout_v1}
+    DS=${2:?dataset, e.g. $HF_USER/blush_sim_teacher_v3}
     SCHED=()
     if [[ "${LR_SCHED:-cosine}" == cosine ]]; then
       SCHED=(--use_policy_training_preset=false --optimizer.type=adamw --optimizer.lr=1e-5 --optimizer.weight_decay=1e-4

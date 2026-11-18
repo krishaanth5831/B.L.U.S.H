@@ -65,7 +65,7 @@ into picking a green fruit.
 | Released ripeness weights (`best.pt`, a few MB) + results | **this repo**, `ripeness/models/` | Small, and they need to be versioned with the data they came from |
 | Public pretraining sets (Laboro, Mendeley, tomatOD) | local only, gitignored, `ripeness/data/public/` | Two are non-commercial. The repo holds the download notes, not the images. |
 | LeRobot episode datasets (video) | **Hugging Face Hub**, listed in [`harvest/datasets.md`](harvest/datasets.md) | Hundreds of MB of video. GitHub rejects files over 100 MB. |
-| Sim episode datasets (`blush_sim_truss_v2`) | `~/.cache/huggingface/lerobot/krish5831/` + the Hub, same manifest | Same reason |
+| Sim episode datasets (`blush_sim_teacher_v3`, naming in `harvest/datasets.md`) | the Hub only (private); lerobot caches what it needs in `~/.cache/huggingface/lerobot/krish5831/` | Same reason |
 | Policy checkpoints | `outputs/train/` (local) or the Hub, same manifest | Same reason |
 | Training runs (`runs/`, `outputs/`) | local only, gitignored | Scratch |
 
