@@ -189,9 +189,10 @@ STANDOFF_M_V5 = STANDOFF_M + (0.06, 0.08, 0.10)
 # (2026-11-18). The fruit count shows in the picture, so the pace varies with what the camera sees (R2).
 BIG_TRUSS_N = 8
 CARRY_SLOW_BIG = 0.6
-# Phase C's order and budget: cut point, then stalk tilt, then neighbour mode, then approach angle, so the tilts and
-# the push mode come early and the long tail of cut points last (every phase-C plan kept on the tuning set so far cut
-# at u 0.5, 2026-11-18). At most PHASE_C_MAX candidates past their cut leg per scene, and a standoff within
+# Phase C's order and budget: cut point, then (strict and brush first, each at every stalk tilt, then push at every
+# tilt) approach angle, so a clean tilted cut comes before pressing neighbours, and the long tail of cut points
+# comes last (every phase-C plan kept on the tuning set so far cut at u 0.5, 2026-11-18). At most PHASE_C_MAX
+# candidates past their cut leg per scene, and a standoff within
 # STD_MEMO_RAD of one no route reached counts as blocked: a scene with no plan took 600 s, most of it routes to
 # near-identical standoffs (guesses; deterministic: they depend only on the scene).
 PHASE_C_MAX = 150
@@ -374,17 +375,16 @@ class TrussTeacher(tx.TrussPlanner):
             self.jaw(tx.JAW_OPEN_DEG)
             clear[mode] = self.chk.free(q0, **self.kw)
         self._c_count = 0
+        order = [(mode, tilt) for mode in ("strict", "brush") for tilt in TILT_DEG]
+        order = sorted(order, key=lambda mt: TILT_DEG.index(mt[1])) + [("push", tilt) for tilt in TILT_DEG]
         for u in CUT_U_V5:
-            for tilt in TILT_DEG:
-                for mode in MODES:
-                    if not clear[mode]:
-                        continue
-                    self._mode(mode)
-                    for beta in APPROACH_BLEND_DEG:
-                        if ((mode, u, beta) if tilt == 0 else (mode, u, beta, tilt)) not in done:
-                            yield from self._candidate("C", mode, u, beta, tried3[mode], late, done, tilt)
-                        if self._c_count >= PHASE_C_MAX:
-                            break
+            for mode, tilt in order:
+                if not clear[mode]:
+                    continue
+                self._mode(mode)
+                for beta in APPROACH_BLEND_DEG:
+                    if ((mode, u, beta) if tilt == 0 else (mode, u, beta, tilt)) not in done:
+                        yield from self._candidate("C", mode, u, beta, tried3[mode], late, done, tilt)
                     if self._c_count >= PHASE_C_MAX:
                         break
                 if self._c_count >= PHASE_C_MAX:
