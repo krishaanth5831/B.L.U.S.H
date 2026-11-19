@@ -37,4 +37,4 @@ for KIND in ${ONLY:-alone hybrid}; do
       $REPO/outputs/train/$RUN --watch --from-step $FROM --until $STEPS --cpu -- $ARGS \
       > $REPO/outputs/watch_${RUN}_$KIND.log 2>&1"
 done
-echo "started $U, $U-alone, $U-hybrid; logs in $REPO/outputs/"
+echo "started ${ONLY:+only }$( [[ -z ${ONLY:-} ]] && echo "$U, ")$(for K in ${ONLY:-alone hybrid}; do printf "%s " "$U-$K"; done); logs in $REPO/outputs/"
