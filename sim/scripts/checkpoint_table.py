@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """One table of every checkpoint test of a training run (K7 2026-11-19: "always after each test create a table").
 Reads the summary row of each outputs/eval/<run>_<step>_*.jsonl that pick_checkpoint.py --watch wrote (the alone and
-hybrid tests of train_and_test.sh) and prints a Markdown table, one row per step.
-    python3 sim/scripts/checkpoint_table.py act_teacher_v5                 the table now
+hybrid tests of train_and_test.sh) and prints two Markdown tables, one row per step.
+    python3 sim/scripts/checkpoint_table.py act_teacher_v5                 the tables now
     python3 sim/scripts/checkpoint_table.py act_teacher_v5 --wait 35000    wait until both tests of step 35000 are in
-Plain python3, no env needed. Columns: the policy alone (+ the holds it should leave), the policy + teacher v5
-stepping in only when it fails (rescue.Gate), how often the teacher stepped in, how many of its takeovers ended in the
-crate, how many scenes the policy finished by itself, and what made the teacher step in."""
+Plain python3, no env needed. Policy only: the policy drives every frame, no teacher anywhere (+ the holds it should
+leave alone). Hybrid: the policy drives and teacher v5 steps in only when it is failing (rescue.Gate); how often it
+stepped in, how many takeovers ended in the crate, how many scenes the policy finished by itself, and why it stepped in.
+"""
 import argparse
 import collections
 import json
@@ -37,25 +38,32 @@ def load(run):
 
 
 def table(run):
+    """Two tables (K7 2026-11-19: "one test which is purely just the policy without the teacher stepping in anywhere
+    and one hybrid"): the policy-only test, then the hybrid test, each on the same held-out scenes."""
     t = load(run)
-    lines = ["| Step | Alone | Holds left | Policy + teacher | Teacher stepped in | Takeovers that worked "
-             "| Policy alone (in hybrid) | Why it stepped in |",
-             "|---|---|---|---|---|---|---|---|"]
+    pol = ["**Policy only** (no teacher anywhere)", "",
+           "| Step | Success | Clean (neighbours ≤ 15 mm) | Cut | In crate | Closest to cut point (median) "
+           "| Holds left alone |", "|---|---|---|---|---|---|---|"]
+    hyb = ["**Hybrid** (policy drives, teacher steps in only when it is failing)", "",
+           "| Step | Success | Teacher stepped in | Takeovers that worked | Policy finished by itself "
+           "| Why it stepped in |", "|---|---|---|---|---|---|"]
     for step in sorted(t):
         a, h = t[step].get("alone"), t[step].get("hybrid")
-        cell = lambda s, k: "…" if s is None else s.get(k)
-        alone = "…" if a is None else f"{a['success']}/{a['scenes']}"
-        holds = "…" if a is None else f"{a['holds_ok']}/{a['holds']}"
-        if h is None:
-            hy = st = ok = own = why = "…"
+        if a is None:
+            pol.append(f"| {step // 1000}k | … | … | … | … | … | … |")
         else:
-            hy = f"{h['success']}/{h['scenes']}"
-            st = f"{h['rescued']}/{h['scenes']}" + (f" ({t[step]['after_cut']} after the cut)" if t[step]['after_cut'] else "")
-            ok = f"{h['rescued_ok']}/{h['rescued']}"
-            own = f"{h['on_its_own_ok']}/{h['on_its_own']}"
-            why = ", ".join(f"{k} {v}" for k, v in t[step]["why"].most_common())
-        lines.append(f"| {step // 1000}k | {alone} | {holds} | {hy} | {st} | {ok} | {own} | {why} |")
-    return "\n".join(lines)
+            n = a["scenes"]
+            pol.append(f"| {step // 1000}k | {a['success']}/{n} | {a['success_strict']}/{n} | {a['cut']}/{n} "
+                       f"| {a['in_crate']}/{n} | {a['closest_mm_median']} mm | {a['holds_ok']}/{a['holds']} |")
+        if h is None:
+            hyb.append(f"| {step // 1000}k | … | … | … | … | … |")
+        else:
+            n, after = h["scenes"], t[step]["after_cut"]
+            why = ", ".join(f"{k} {v}" for k, v in t[step]["why"].most_common()) or "-"
+            hyb.append(f"| {step // 1000}k | {h['success']}/{n} | {h['rescued']}/{n}"
+                       + (f" ({after} after the cut)" if after else "")
+                       + f" | {h['rescued_ok']}/{h['rescued']} | {h['on_its_own_ok']}/{h['on_its_own']} | {why} |")
+    return "\n".join(pol + [""] + hyb)
 
 
 if __name__ == "__main__":
