@@ -187,6 +187,15 @@ scenes from seeds 9970000-9970063 and 9975000-9975060 (never recorded, tuned on 
 dry run with `--retries 6` solved (100 of 125 tried), as scenes come: `generate_truss.py --teacher --no-dr --no-yolo
 --dry --noise-share 0 --retries 6 --seed-start 9970000 --episodes 50 --max-attempts 400` (and 9975000).
 `--holds 5` adds nothing-ready scenes, where the arm must stay home; they're reported apart.
+
+ACT on dataset v5 (2026-11-19, K7's go): `sim/scripts/train_and_test.sh act_teacher_v5 krish5831/blush_sim_teacher_v5`
+trains 100k steps (step 3's recipe) and tests every 5k checkpoint from 20k on 25 scenes of `heldout_v5.jsonl`, twice:
+the policy alone (+ 5 holds), and the hybrid in which the teacher steps in only when the policy is failing
+(`eval_truss.py --hybrid --rejoin --trigger failing`, `rescue.py`; K7: "the teacher should only jump in if the robot
+is failing ... basically like dagger"). Before the cut the gate fires on harm (a neighbour swung past 15 mm, the arm
+pressing the rig, a stalled servo), no progress toward the cut point for 4 s, or 1.5 x the teacher's planned cut
+time + 5 s; after it only on lateness. Checked on the teacher itself (`--teacher-drives`, 20 scenes): nothing
+fired before the cut, and the teacher's real cut and crate times stay well inside the late limits.
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
 

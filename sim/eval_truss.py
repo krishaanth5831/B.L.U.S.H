@@ -58,6 +58,16 @@ one. Seeds: use a range no dataset or test uses (step 2 recorded 9300000-9722070
         --handoff-mm 20 50 --handoff-from cue --seed-start 9800000 --scenes 400 --episodes 10 \
         --record krish5831/blush_sim_teacher_v3_finisher_pilot
 
+--trigger failing (with --hybrid --rejoin; K7 2026-11-19: "the teacher should only jump in if the robot is failing,
+if it is actually on track to getting the truss then the teacher should not jump in, basically like dagger"): the
+policy drives every scene and rescue.Gate decides each frame whether it is failing (harm to the plant or the rig,
+no progress toward the cut point for 4 s, or well behind the teacher's own timing); only then the teacher takes over
+and finishes. The summary splits the scenes: done by the policy on its own, rescued by the teacher, and how many
+rescues succeeded. With --record only the rescues are recorded (HG-DAgger data). --teacher-drives is the gate's
+false-alarm check: the teacher plays every scene and the gate only logs when it would have fired.
+    python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --hybrid --rejoin \
+        --trigger failing --seeds-from heldout_v5.jsonl --scenes 25
+
 --finisher PATH (with --hybrid; K7 2026-11-17: "make the finisher policy take over at the end"): at the hand-over a
 second trained policy, the last-stage finisher (trained on --record's data), takes over instead of the teacher. Same
 trigger as its recordings (--handoff-mm 20 50 --handoff-from cue), the start frame's box + cut point as
@@ -87,6 +97,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+import rescue  # noqa: E402
 import truss_ik  # noqa: E402
 import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
@@ -208,6 +219,13 @@ def main():
     ap.add_argument("--handoff-mm", type=float, nargs="+", default=[50.0],
                     help="--hybrid: hand over when the jaw point is this close to where the cut point hangs now "
                          "(the teacher's slide is 45 mm long); two values: a radius per scene drawn between them")
+    ap.add_argument("--trigger", choices=("distance", "failing"), default="distance",
+                    help="--hybrid: when the teacher takes over: at --handoff-mm from the cut point (every scene), or "
+                         "only once the policy is failing (rescue.Gate; DAgger-style, K7 2026-11-19), so a scene the "
+                         "policy does on its own is never touched")
+    ap.add_argument("--teacher-drives", action="store_true",
+                    help="--trigger failing's false-alarm check: the teacher plays every scene from the start and the "
+                         "gate only logs when it would have fired (it must not, on the teacher)")
     ap.add_argument("--handoff-from", choices=("live", "cue"), default="live",
                     help="--hybrid: measure the hand-over distance to where the cut point hangs now (live, "
                          "privileged) or to where it hung at the start frame (cue: what a real arm knows)")
@@ -237,6 +255,10 @@ def main():
     a = ap.parse_args()
     if a.record and not (a.hybrid and a.rejoin):
         sys.exit("--record needs --hybrid --rejoin (it records the teacher's finish)")
+    if a.trigger == "failing" and not (a.hybrid and a.rejoin) or a.teacher_drives and a.trigger != "failing":
+        sys.exit("--trigger failing needs --hybrid --rejoin; --teacher-drives needs --trigger failing")
+    if a.finisher is not None and a.trigger == "failing":
+        sys.exit("--trigger failing hands over to the teacher, not to --finisher")
     if len(a.handoff_mm) not in (1, 2):
         sys.exit("--handoff-mm takes one radius or two (a range)")
     if a.finisher is not None and (not a.hybrid or a.rejoin or a.replan or a.record):
@@ -394,6 +416,8 @@ def main():
             closest = closest_live = np.inf
             frames = 0
             watch = gt.Watch(robot)
+            gate = rescue.Gate(robot, k, T, watch) if a.trigger == "failing" else None
+            why_fail, t_fail, false_alarm = None, None, None
             t0, t_crate, gave_up = robot.d.time, None, False
             vid = None
             if a.video is not None:
@@ -402,7 +426,9 @@ def main():
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
-                if T is not None and handed is None and robot.cutters[k].cut_t is None:
+                if gate is not None:
+                    pass                               # --trigger failing: the gate, after watch.step()
+                elif T is not None and handed is None and robot.cutters[k].cut_t is None:
                     p_ref = p_cut if a.handoff_from == "cue" else ts.cut_target_now(t_info, robot.d, robot.m,
                                                                                     robot.cut_u)[0]
                     d_now = float(np.linalg.norm(jaw_pt - p_ref))
@@ -436,7 +462,7 @@ def main():
                         handed, t_hand, mm_hand = frames, round(robot.d.time - t0, 2), round(d_now * 1000, 1)
                 if handed is not None and finisher is not None:
                     cmd = act_of(finisher, fpre, fpost, fin_env, obs, env)
-                elif handed is not None:
+                elif handed is not None or a.teacher_drives:
                     if T.done:
                         break
                     cmd = T.act([obs[f"{j}.pos"] for j in expert.arm_map.JOINTS])
@@ -462,6 +488,29 @@ def main():
                 frames += 1
                 obs = robot.get_observation()
                 watch.step()
+                if gate is not None and handed is None and false_alarm is None:
+                    why = gate.step(robot.d.time - t0, robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip)
+                    if why is not None and a.teacher_drives:
+                        false_alarm = dict(why=why, t=round(robot.d.time - t0, 2))   # logged, nothing switches
+                        print(f"  ⚠️ the gate would have fired on the teacher at {false_alarm['t']} s: {why}", flush=True)
+                    elif why is not None:              # failing: the teacher takes over from here and finishes
+                        why_fail, t_fail = why, round(robot.d.time - t0, 2)
+                        st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
+                        nb_hand = round(watch.max * 1000, 1)
+                        if robot.cutters[k].cut_t is None:
+                            try:
+                                leg_hand = "rejoin:" + T.rejoin(st_norm)
+                            except tx.PlanError as e:
+                                replan_why = str(e)[:120]
+                                leg_hand = f"resync(rejoin failed: {replan_why}):" + T.resync(st_norm, cut=False,
+                                                                                            released=False)
+                        else:                          # after the cut: the teacher's nearest carry leg
+                            T.reset()
+                            leg_hand = "resync:" + T.resync(st_norm, cut=True, released=False)
+                        handed, t_hand = frames, t_fail
+                        mm_hand = round(float(np.linalg.norm(robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3)
+                                                             @ grip - p_cut)) * 1000, 1)
+                        print(f"  🛟 the teacher steps in at {t_fail} s ({leg_hand}): {why}", flush=True)
                 t = robot.d.time - t0
                 if t_crate is None and ts.in_crate(robot.info, robot.d, robot.m, k):
                     t_crate = t
@@ -498,7 +547,13 @@ def main():
                        handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed)
             if a.hybrid:
                 rec.update(handoff_radius_mm=round(r_hand * 1000, 1), handoff_from=a.handoff_from,
-                           neighbours_at_handoff_mm=nb_hand)
+                           neighbours_at_handoff_mm=nb_hand, trigger=a.trigger)
+            if gate is not None:
+                rec.update(rescued=handed is not None and not a.teacher_drives, rescue_why=why_fail,
+                           rescue_t=t_fail, teacher_drives=a.teacher_drives, false_alarm=false_alarm,
+                           plan_cut_s=None if gate.plan_cut_s is None else round(gate.plan_cut_s, 2),
+                           plan_drop_s=None if gate.plan_drop_s is None else round(gate.plan_drop_s, 2),
+                           cut_t=None if gate.t_cut is None else round(gate.t_cut, 2))
             if ds is not None:
                 # ⚠️ judge's fruit-off message names legs by T.phases, which restart at the hand-over: the leg named
                 # can be wrong there; the verdict isn't
@@ -569,9 +624,20 @@ def main():
                            finisher=None if fin_path is None else str(fin_path),
                            finisher_n_action_steps=None if fin_path is None else getattr(fcfg, "n_action_steps", None),
                            finisher_ensemble=None if fin_path is None else fcfg.temporal_ensemble_coeff,
-                           crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)])   # which world: the crate changes
+                           crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)],   # which world: the crate changes
+                           trigger=a.trigger if a.hybrid else None, teacher_drives=a.teacher_drives)
+            if a.hybrid and a.trigger == "failing":    # DAgger-style: who did the work
+                alone_ok = [r for r in results if not r.get("rescued")]
+                resc = [r for r in results if r.get("rescued")]
+                summary.update(rescued=len(resc), rescued_ok=sum(r["success"] for r in resc),
+                               on_its_own=len(alone_ok), on_its_own_ok=sum(r["success"] for r in alone_ok),
+                               false_alarms=sum(r.get("false_alarm") is not None for r in results))
             log.write(json.dumps(summary) + "\n")
             held = f"; holds {summary['holds_ok']}/{len(holds)}" if holds else ""
+            if "rescued" in summary:
+                held += (f"; the teacher stepped in {summary['rescued']} times ({summary['rescued_ok']} then "
+                         f"succeeded), the policy alone {summary['on_its_own_ok']}/{summary['on_its_own']}"
+                         + (f", gate false alarms on the teacher {summary['false_alarms']}" if a.teacher_drives else ""))
             print(f"\n{s}/{len(results)} successes, {summary['success_strict']} with neighbours within "
                   f"{gt.NEIGHBOUR_MOVE_M * 1000:.0f} mm (target cut in {summary['cut']}, in the crate in "
                   f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm{held}).  "

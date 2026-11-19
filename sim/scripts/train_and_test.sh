@@ -6,8 +6,10 @@
 # Starts three systemd user units (they survive a Claude Code restart; the laptop doesn't sleep while training):
 #   blush-<run>         training on the GPU, a checkpoint every 5k (12 GB RAM fuse; step 3 peaked at 8.4 GB)
 #   blush-<run>-alone   pick_checkpoint.py --watch on the CPU: the policy alone, TEST_SCENES held-out scenes + 5 holds
-#   blush-<run>-hybrid  the same scenes, the policy approaches and teacher v5 finishes from 20-50 mm (--hybrid
-#                       --rejoin, the teacher stays the finisher, K7 2026-11-18)
+#   blush-<run>-hybrid  the same scenes, the policy drives and teacher v5 steps in only when it is failing
+#                       (--hybrid --rejoin --trigger failing, rescue.Gate; K7 2026-11-19: "the teacher should only
+#                       jump in if the robot is failing ... basically like dagger")
+# ONLY=hybrid (or alone) starts just that tester for a run already training.
 # Both watchers keep going after training ends until the last checkpoint is tested. Rankings:
 # outputs/eval/<run>_ranking.json; logs: outputs/train_<run>.log, outputs/watch_<run>_{alone,hybrid}.log.
 # ⚠️ A test of 20 scenes + 5 holds took ~40 min on the CPU (step 3, 2026-11-14), the same as the gap between two
@@ -18,16 +20,18 @@ RUN=${1:?run name, e.g. act_teacher_v5}; DS=${2:?dataset, e.g. krish5831/blush_s
 STEPS=${3:-100000}; FROM=${4:-20000}
 SEEDS=${SEEDS:-heldout_v5.jsonl}; N=${TEST_SCENES:-25}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-[[ -e $REPO/outputs/train/$RUN ]] && { echo "$REPO/outputs/train/$RUN exists"; exit 1; }
 U=blush-$(echo "$RUN" | tr '_' '-')
 ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot"
-systemd-run --user --unit="$U" --collect -q -p MemoryMax=12G -p MemorySwapMax=0 \
-  systemd-inhibit --what=sleep:idle --why="B.L.U.S.H training $RUN" \
-  bash -c "$ENV && cd $REPO && env RUN=$RUN STEPS=$STEPS SAVE=5000 sim/scripts/train_sim.sh act-teacher $DS \
-    > outputs/train_$RUN.log 2>&1"
+if [[ -z ${ONLY:-} ]]; then
+  [[ -e $REPO/outputs/train/$RUN ]] && { echo "$REPO/outputs/train/$RUN exists"; exit 1; }
+  systemd-run --user --unit="$U" --collect -q -p MemoryMax=12G -p MemorySwapMax=0 \
+    systemd-inhibit --what=sleep:idle --why="B.L.U.S.H training $RUN" \
+    bash -c "$ENV && cd $REPO && env RUN=$RUN STEPS=$STEPS SAVE=5000 sim/scripts/train_sim.sh act-teacher $DS \
+      > outputs/train_$RUN.log 2>&1"
+fi
 COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from $SEEDS --scenes $N"
-for KIND in alone hybrid; do
-  if [[ $KIND == alone ]]; then ARGS="$COMMON --holds 5"; else ARGS="$COMMON --hybrid --rejoin --handoff-mm 20 50 --handoff-from cue"; fi
+for KIND in ${ONLY:-alone hybrid}; do
+  if [[ $KIND == alone ]]; then ARGS="$COMMON --holds 5"; else ARGS="$COMMON --hybrid --rejoin --trigger failing"; fi
   systemd-run --user --unit="$U-$KIND" --collect -q -p MemoryMax=7G -p MemorySwapMax=0 \
     bash -c "$ENV && cd $REPO/sim && export MUJOCO_GL=egl OMP_NUM_THREADS=2 && python -u pick_checkpoint.py \
       $REPO/outputs/train/$RUN --watch --from-step $FROM --until $STEPS --cpu -- $ARGS \
