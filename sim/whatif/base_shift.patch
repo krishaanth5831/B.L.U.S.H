@@ -1,0 +1,336 @@
+diff --git a/sim/scene.py b/sim/scene.py
+index be87833..991a4e3 100644
+--- a/sim/scene.py
++++ b/sim/scene.py
+@@ -12,6 +12,7 @@ its mast behind row R0, "base" low off the arm's base (always in the model; its
+ ⚠️ The arm model needs the SO-ARM100 files: run ./fetch_so101.sh once (sim/assets/so101 is gitignored).
+ """
+ import json
++import os
+ import pathlib
+ 
+ import mujoco
+@@ -33,7 +34,13 @@ CAM_W, CAM_H = 640, 480         # config/hardware.env: what the gate and the pol
+ 
+ # --- greenhouse (greenhouse_lasercut.py) ---
+ T = 0.006                        # ply thickness
+-HOUSE_L = 0.740                  # inner length between end frames
++# ⚠️ What-if (agents/shift, 2026-11-17, not on dev): BLUSH_BASE_DX (m, read at import) moves the robot along the row:
++# the arm base, the base camera + its bracket and the crate (truss_scene.CRATE_CENTRE: it rides on the robot). The
++# plant layout stays the one drawn at dx = 0 (truss_scene.build). For dx > 0 the far end frame moves out by dx too,
++# or the crate (x to 0.7325) would run through it (0.740): a real row with a rail is longer than this greenhouse.
++BASE_DX = float(os.environ.get("BLUSH_BASE_DX") or 0.0)
++HOUSE_L_STOCK = 0.740
++HOUSE_L = HOUSE_L_STOCK + max(BASE_DX, 0.0)   # inner length between end frames (0.740 stock)
+ ROWS = (0.400, 0.0, -0.400)
+ POST_W = 0.060
+ BAND = (0.500, 0.590)            # crop tie band in the end frames
+@@ -47,7 +54,8 @@ PLY_RGBA = "0.82 0.70 0.52 1"    # birch ply, guess (unverified; Tier 1 swaps in
+ # --- arm ---
+ # Shoulder at (370, +-200, 117) mm in the generator. The base sits on the table at (0.37, 0.2, 0);
+ # the 117 mm is the URDF shoulder_lift height above the base (checked: upper_arm body at z 0.117).
+-ARM_BASE = (0.370, 0.200, 0.0)
++ARM_BASE_STOCK = (0.370, 0.200, 0.0)
++ARM_BASE = (ARM_BASE_STOCK[0] + BASE_DX, ARM_BASE_STOCK[1], ARM_BASE_STOCK[2])
+ # K7 (2026-10-20): the base faces the vine row, i.e. turned 90 deg left from facing down the aisle
+ # (+x, away from the mast), so shoulder_pan 0 points at R1 (+y). Facing down the aisle the arm
+ # reached a third of the tomatoes (sampled IK, seed 3); facing the row, every ripe one (3 mm IK check).
+@@ -255,6 +263,11 @@ def base_cam_pos():
+     return np.asarray(ARM_BASE, float) + np.asarray(BASE_CAM_OFFSET, float)
+ 
+ 
++def base_cam_aim():
++    """BASE_CAM_AIM moved with the base (the bracket is rigid on the base plate; BLUSH_BASE_DX what-if)."""
++    return np.asarray(BASE_CAM_AIM, float) + np.asarray(ARM_BASE, float) - np.asarray(ARM_BASE_STOCK, float)
++
++
+ def _look_xyaxes(pos, aim):
+     """MuJoCo xyaxes for a camera at pos looking at aim, image up as close to world up as it gets (a camera looks
+     down its own -z)."""
+@@ -268,7 +281,7 @@ def _look_xyaxes(pos, aim):
+ 
+ def base_cam_xml():
+     p = base_cam_pos()
+-    x, y, _ = _look_xyaxes(p, BASE_CAM_AIM)
++    x, y, _ = _look_xyaxes(p, base_cam_aim())
+     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
+     return f'<camera name="base" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
+ 
+@@ -278,7 +291,7 @@ def base_mount_xml():
+     avoids it like the rest of the scenery). Only in rig "base" scenes (truss_scene.build base_mount), so scenes of the
+     birdseye rig are unchanged."""
+     p = base_cam_pos()
+-    x, y, f = _look_xyaxes(p, BASE_CAM_AIM)
++    x, y, f = _look_xyaxes(p, base_cam_aim())
+     c = p - f * (MAST_LENS_GAP + CAM_BOARD[2] / 2)
+     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
+     grey = "0.25 0.25 0.27 1"
+diff --git a/sim/truss_scene.py b/sim/truss_scene.py
+index a38ec5d..80eddb7 100644
+--- a/sim/truss_scene.py
++++ b/sim/truss_scene.py
+@@ -19,6 +19,10 @@ Greenhouse, cameras, arm base and start pose from scene.py. Compared with the si
+ - the crate is bigger: a truss is ~10-15 cm long;
+ - trusses hanging into the arm at its start pose are left out (START_CLEAR_M).
+ """
++import contextlib
++import os
++import re
++
+ import mujoco
+ import numpy as np
+ 
+@@ -52,7 +56,8 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
+ # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
+ # IK scan: reachable over x 0.56-0.62, y 0.06-0.26. ⚠️ Toward the aisle: at y 0.17 the arm reaching over the crate
+ # passed through trusses hanging out from the row (seed 200000, 2026-11-03). x max 0.73 < the end frame at 0.74.
+-CRATE_CENTRE = (0.6175, 0.14)
++STOCK_CRATE_CENTRE = (0.6175, 0.14)
++CRATE_CENTRE = (STOCK_CRATE_CENTRE[0] + scene.BASE_DX, STOCK_CRATE_CENTRE[1])   # rides on the robot (scene.BASE_DX)
+ # 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
+ # found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
+ # As big as the spot allows: x 0.50-0.735 (end frame tie at 0.74), y 0.03-0.25 (aisle anchor rail to 0.025). ⚠️ A
+@@ -199,7 +204,225 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
+                                  # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
+ 
+ 
++# --- base shift what-if (scene.BASE_DX; agents/shift 2026-11-17, not on dev) ---
++# The layout (trusses kept, the start-pose clearance drop, cut_ik / approach_ok, the ready draw, ripeness, the settle)
++# is drawn and judged exactly as at dx = 0 (_stock_world), then the model is composed again with the robot (arm, base
++# camera bracket, crate) moved and the settled state copied over. BLUSH_BASE_RECOMPOSE=1 does that at dx = 0 too
++# (a check that the recompose alone changes nothing).
++_STOCK_CACHE = {}
++_LAST_LAYOUT = None
++
++
++@contextlib.contextmanager
++def _stock_world():
++    """scene / crate / IK caches as at dx = 0 while the layout is drawn; the shifted ones again afterwards. The stock
++    IK caches are kept apart (_STOCK_CACHE) so neither phase ever sees the other's."""
++    global CRATE_CENTRE
++    import expert
++    import truss_expert
++    keep = (scene.ARM_BASE, scene.HOUSE_L, CRATE_CENTRE, truss_ik._IK, expert._IK, truss_expert._CRATE_POSES)
++    scene.ARM_BASE, scene.HOUSE_L, CRATE_CENTRE = scene.ARM_BASE_STOCK, scene.HOUSE_L_STOCK, STOCK_CRATE_CENTRE
++    truss_ik._IK, expert._IK, truss_expert._CRATE_POSES = (_STOCK_CACHE.get("ik"), _STOCK_CACHE.get("ik_free"),
++                                                           _STOCK_CACHE.get("crate_poses"))
++    try:
++        yield
++    finally:
++        _STOCK_CACHE.update(ik=truss_ik._IK, ik_free=expert._IK, crate_poses=truss_expert._CRATE_POSES)
++        scene.ARM_BASE, scene.HOUSE_L, CRATE_CENTRE = keep[:3]
++        truss_ik._IK, expert._IK, truss_expert._CRATE_POSES = keep[3:]
++
++
++# Variant B (BLUSH_SHIFT_CLEAR=1): the generator's own start-pose rule (_touching_arm on the fresh model, before the
++# settle, as _build_once) applied at the moved base; those trusses are left out, plus any named in SHIFT_DROP_EXTRA
++# (set by the runner: a dx = 0 run on a shifted run's thinned scene). BLUSH_NO_BRACKET=1: no base camera bracket (it
++# rides on the robot and stands in the plants once moved +x). State, colours, ctrl copied by name (nq changes).
++SHIFT_DROP_EXTRA = set()
++# Variant R (set by the runner): the target's name; every other truss whose knuckle is further along the row (+x, the
++# crate side) than the target's is left out. At dx 0 that asks: is it the plants on the crate side that block?
++CLEAR_RIGHT_OF = None
++
++
++def _keys(m, kind):
++    """A stable key per joint / geom / equality / actuator: (owner body name, k-th of that kind on it)."""
++    seen, out = {}, []
++    for i in range(getattr(m, {"jnt": "njnt", "geom": "ngeom", "eq": "neq", "act": "nu"}[kind])):
++        if kind == "jnt":
++            k = (m.body(m.jnt_bodyid[i]).name,)
++        elif kind == "geom":
++            k = (m.body(m.geom_bodyid[i]).name,)
++        elif kind == "eq":
++            k = (m.eq(i).name, int(m.eq_obj1id[i]) >= 0 and m.body(m.eq_obj1id[i]).name)
++        else:
++            k = (m.actuator(i).name,)
++        seen[k] = seen.get(k, -1) + 1
++        out.append(k + (seen[k],))
++    return out
++
++
++def _copy_by_name(m, d, m2, d2):
++    nq = {0: 7, 1: 4, 2: 1, 3: 1}
++    nv = {0: 6, 1: 3, 2: 1, 3: 1}
++    # Keys missing from m are variant C's row copies: their joints stay at the model's initial pose (they settle in
++    # the plugin's settle), their colours come from the truss they copy (body name without the "r").
++    src = {k: i for i, k in enumerate(_keys(m, "jnt"))}
++    for j2, k in enumerate(_keys(m2, "jnt")):
++        if k not in src:
++            continue
++        j = src[k]
++        assert m.jnt_type[j] == m2.jnt_type[j2]
++        a, a2, n = m.jnt_qposadr[j], m2.jnt_qposadr[j2], nq[int(m.jnt_type[j])]
++        d2.qpos[a2:a2 + n] = d.qpos[a:a + n]
++        v, v2, n = m.jnt_dofadr[j], m2.jnt_dofadr[j2], nv[int(m.jnt_type[j])]
++        d2.qvel[v2:v2 + n] = d.qvel[v:v + n]
++        d2.qacc_warmstart[v2:v2 + n] = d.qacc_warmstart[v:v + n]
++    src = {k: i for i, k in enumerate(_keys(m, "geom"))}
++    for g2, k in enumerate(_keys(m2, "geom")):
++        if k in src:
++            m2.geom_rgba[g2] = m.geom_rgba[src[k]]
++        elif k[0].startswith("r") and (k[0][1:],) + k[1:] in src:
++            m2.geom_rgba[g2] = m.geom_rgba[src[(k[0][1:],) + k[1:]]]
++    src = {k: i for i, k in enumerate(_keys(m, "eq"))}
++    for e2, k in enumerate(_keys(m2, "eq")):
++        if k in src:
++            d2.eq_active[e2] = d.eq_active[src[k]]
++    src = {k: i for i, k in enumerate(_keys(m, "act"))}
++    for u2, k in enumerate(_keys(m2, "act")):
++        d2.ctrl[u2] = d.ctrl[src[k]]
++    assert m.na == 0 and m.nmocap == 0
++    d2.time = d.time
++
++
++def _row_copy(vines, parts, trusses, L):
++    """Variant C (BLUSH_ROW_COPY=L): the same plants again L m further along the row (+x), so a base moved +x has
++    plants on its crate side too (the 0.74 m greenhouse's row ends at the last stem, x <= 0.48). Names get an "r"
++    (s0t1 -> rs0t1, stem0 -> stemr0); each XML piece sits in a <frame> moved by L."""
++    import copy as _copy
++    import re
++    ren = lambda s: re.sub(r'"(s\d+t\d+)', r'"r\1', s)   # noqa: E731
++    fr = lambda s: f'<frame pos="{L} 0 0">{s}</frame>'   # noqa: E731
++    vines_c = [fr(re.sub(r'name="stem(\d+)"', r'name="stemr\1"', v)) for v in vines]
++    parts_c = [(fr(ren(p[0])), fr(ren(p[1])), fr(ren(p[2])), ren(p[3]), ren(p[4])) for p in parts]
++    sh = np.array([L, 0.0, 0.0])
++    T = []
++    for t in trusses:
++        c = _copy.deepcopy(t)
++        c.update(name="r" + t["name"], knuckle=t["knuckle"] + sh, peduncle_end=t["peduncle_end"] + sh,
++                 rachis_end=t["rachis_end"] + sh, cut_zone=[p + sh for p in t["cut_zone"]],
++                 geoms=["r" + g for g in t["geoms"]], weld="r" + t["weld"], body="r" + t["body"],
++                 stem=100 + t["stem"])
++        for f in c["fruit"]:
++            f.update(tomato="r" + f["tomato"], pedicel="r" + f["pedicel"], eq="r" + f["eq"], geom="r" + f["geom"],
++                     pos=f["pos"] + sh, truss=c["name"])
++        T.append(c)
++    return vines_c, parts_c, T
++
++
++def _copies_clear(orig, copies):
++    """Indices of the copies that keep the generator's rules against the plants already there: no fruit within
++    another's fruit or stalk (truss.truss_xml avoid), nothing over the moved crate's keep-out (_over_crate)."""
++    placed = [(f["pos"], f["radius"]) for t in orig for f in t["fruit"]] + [s for t in orig for s in _stalk_spheres(t)]
++    ok = []
++    for k, c in enumerate(copies):
++        mine = [(f["pos"], f["radius"]) for f in c["fruit"]]
++        clash = any(np.linalg.norm(p - q) < r + s for p, r in mine for q, s in placed)
++        clash |= any(np.linalg.norm(p - f["pos"]) < r + f["radius"] for p, r in _stalk_spheres(c)
++                     for t in orig for f in t["fruit"])
++        if not clash and not _over_crate(c):
++            ok.append(k)
++    return ok
++
++
++def _recompose_b(m, d, info):
++    vines, parts, base_mount = _LAST_LAYOUT
++    if os.environ.get("BLUSH_NO_BRACKET") == "1":
++        base_mount = False
++    static = vines + ([scene.base_mount_xml()] if base_mount else [])
++    trusses = info["trusses"]
++    drop = set(SHIFT_DROP_EXTRA)
++    if CLEAR_RIGHT_OF is not None:
++        kx = next(t["knuckle"][0] for t in trusses if t["name"] == CLEAR_RIGHT_OF)
++        drop |= {t["name"] for t in trusses if t["name"] != CLEAR_RIGHT_OF and t["knuckle"][0] > kx}
++    if os.environ.get("BLUSH_SHIFT_CLEAR") == "1":
++        m1, d1 = _compose(static, parts, True)
++        _start_pose(m1, d1)
++        drop |= {trusses[k]["name"] for k in _touching_arm(m1, d1, trusses)}
++    keep = [k for k, t in enumerate(trusses) if t["name"] not in drop]
++    parts2, T = [parts[k] for k in keep], [trusses[k] for k in keep]
++    copies, row_L = [], None
++    if os.environ.get("BLUSH_ROW_COPY"):
++        # BLUSH_ROW_COPY = "L1,L2,..." (or ":"-separated): the first offset that leaves a copy hanging on the crate side of the base
++        # within NEAR_M (as the stock scenes have 1-2 trusses 3-10 cm right of the base), else the one leaving most
++        best = None
++        near_m = 0.12
++        for L in (float(v) for v in os.environ["BLUSH_ROW_COPY"].replace(":", ",").split(",")):
++            vc, pc, tc = _row_copy(vines, parts, trusses, L)
++            # only copies on the crate side of the base: the target's own side keeps the stock layout. Copy stems
++            # too: right of the base and STEM_GAP from every original stem (else a copy stem lands between the target
++            # and the base, a hard obstacle to the planner)
++            sx = [float(re.search(r'fromto="([-0-9.]+)', v).group(1)) for v in vines]
++            stems_ok = {i for i, x in enumerate(sx) if x + L > scene.ARM_BASE[0]
++                        and all(abs(x + L - x2) >= STEM_GAP for x2 in sx)}
++            vc = [v for i, v in enumerate(vc) if i in stems_ok]
++            ok = [k for k in _copies_clear(T, tc) if tc[k]["knuckle"][0] > scene.ARM_BASE[0]
++                  and tc[k]["stem"] - 100 in stems_ok]
++            m1, d1 = _compose(static + vc, parts2 + [pc[k] for k in ok], True)
++            _start_pose(m1, d1)
++            bad = {tc[ok[i - len(T)]]["name"] for i in _touching_arm(m1, d1, T + [tc[k] for k in ok])
++                   if i >= len(T)}
++            ok = [k for k in ok if tc[k]["name"] not in bad]
++            near = sum(0 < tc[k]["knuckle"][0] - scene.ARM_BASE[0] <= near_m for k in ok)
++            if best is None or (near > 0 and best[0] == 0) or (best[0] == 0 and near == 0 and len(ok) > len(best[4])):
++                best = (near, L, vc, pc, ok, tc)
++            if near > 0:
++                break
++        _, row_L, vc, pc, ok, tc = best
++        static, parts2 = static + vc, parts2 + [pc[k] for k in ok]
++        copies = [tc[k] for k in ok]
++    m2, d2 = _compose(static, parts2, True)
++    _copy_by_name(m, d, m2, d2)
++    mujoco.mj_forward(m2, d2)
++    new = {k: i for i, k in enumerate(keep)}
++    T = T + copies
++    info = dict(info, trusses=T, fruit=[f for t in T for f in t["fruit"]],
++                ready=[new[k] for k in info["ready"] if k in new],
++                reachable=[new[k] for k in info["reachable"] if k in new], crate=(CRATE_CENTRE, CRATE_SIZE),
++                base_dx=scene.BASE_DX, shift_dropped=sorted(drop), bracket=bool(base_mount),
++                row_copies=[c["name"] for c in copies], row_copy_L=row_L)
++    return m2, d2, info
++
++
++def _recompose(m, d, info):
++    """The dx = 0 scene (m, d, info) with the robot where scene.ARM_BASE / CRATE_CENTRE put it: same vines, same
++    trusses, same colours, the settled state copied."""
++    if (os.environ.get("BLUSH_SHIFT_CLEAR") == "1" or os.environ.get("BLUSH_NO_BRACKET") == "1" or SHIFT_DROP_EXTRA
++            or os.environ.get("BLUSH_ROW_COPY") or CLEAR_RIGHT_OF is not None):
++        return _recompose_b(m, d, info)
++    vines, parts, base_mount = _LAST_LAYOUT
++    m2, d2 = _compose(vines + ([scene.base_mount_xml()] if base_mount else []), parts, True)
++    for a in ("nq", "nv", "nu", "na", "nbody", "njnt", "ngeom", "neq", "nmocap"):
++        assert getattr(m2, a) == getattr(m, a), (a, getattr(m2, a), getattr(m, a))
++    names = lambda mm: [mm.geom(i).name for i in range(mm.ngeom)]   # noqa: E731
++    assert names(m2) == names(m), "geoms differ"
++    m2.geom_rgba[:] = m.geom_rgba                     # the ripeness colours build() set
++    for f in ("qpos", "qvel", "act", "ctrl", "qacc_warmstart", "eq_active", "mocap_pos", "mocap_quat"):
++        getattr(d2, f)[:] = getattr(d, f)
++    d2.time = d.time
++    mujoco.mj_forward(m2, d2)
++    info = dict(info, crate=(CRATE_CENTRE, CRATE_SIZE), base_dx=scene.BASE_DX)
++    return m2, d2, info
++
++
+ def build(seed=0, arm=True, hold=False, base_mount=False):
++    """See _build. With scene.BASE_DX (or BLUSH_BASE_RECOMPOSE=1) the layout comes from the dx = 0 world and the
++    robot is moved afterwards (_recompose)."""
++    if not (arm and (scene.BASE_DX != 0.0 or os.environ.get("BLUSH_BASE_RECOMPOSE") == "1")):
++        return _build(seed, arm, hold, base_mount)
++    with _stock_world():
++        m, d, info = _build(seed, arm, hold, base_mount)
++    return _recompose(m, d, info)
++
++
++def _build(seed=0, arm=True, hold=False, base_mount=False):
+     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
+     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model, not in the XML.
+     The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
+@@ -214,7 +437,9 @@ def build(seed=0, arm=True, hold=False, base_mount=False):
+ 
+ 
+ def _build_once(seed, arm, rng, hold=False, base_mount=False):
++    global _LAST_LAYOUT
+     static, parts, trusses = vines_xml(rng)
++    vines = static
+     if base_mount:
+         static = static + [scene.base_mount_xml()]
+     m, d = _compose(static, parts, arm)
+@@ -225,6 +450,7 @@ def _build_once(seed, arm, rng, hold=False, base_mount=False):
+             parts = [p for k, p in enumerate(parts) if k not in bad]
+             trusses = [t for k, t in enumerate(trusses) if k not in bad]
+             m, d = _compose(static, parts, arm)
++    _LAST_LAYOUT = (vines, parts, base_mount)
+     ik = truss_ik.truss_ik()
+     if arm:
+         # ⚠️ Settle first, then judge reach where the trusses really hang. Cut poses sit at the reach edge: a 0.4 mm /

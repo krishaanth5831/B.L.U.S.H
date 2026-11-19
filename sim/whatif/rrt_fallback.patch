@@ -1,0 +1,125 @@
+diff --git a/sim/truss_teacher.py b/sim/truss_teacher.py
+index 572e028..6367d48 100644
+--- a/sim/truss_teacher.py
++++ b/sim/truss_teacher.py
+@@ -38,11 +38,14 @@ IK, the carried-truss checker (CarryChecker), the release-pose fit (crate_poses
+ samples come from a fixed seed). Timing constants come from expert.py; the sag correction is expert.Plan's,
+ applied to the cross-track error so the lead itself doesn't wind it up.
+ """
++import zlib
++
+ import mujoco
+ import numpy as np
+ 
+ import arm_map
+ import expert
++import rrt
+ import scene
+ import truss_expert as tx
+ import truss_ik
+@@ -76,6 +79,14 @@ VIA_NORM = ((-59.0, -44.0, 8.0, -34.0, 6.0),     # grip (0.27, 0.29, 0.46): high
+             (-90.0, -19.0, 41.0, -56.0, 22.0))   # gripper (0.18, 0.21, 0.23): the arm raised in place over its base
+ # ⚠️ 12 of those 15 scenes had no single clear via in 75 RRT way-points: their routes needed two. So the last
+ # fallback chains two vias (up out of the start, then over: §6.1's "up, across, down"), pairs in a fixed order.
++# Coverage (2026-11-16): the teacher had a plan for 63 of 154 held-out scenes; in about 30 of the 91 others the move
++# start -> standoff was blocked for the template and every via, in about 19 the carry to the crate. So when no
++# candidate works with the templates, plan() tries once more with an RRT route as the last fallback of every free
++# move (rrt.plan, shortcut). Seeded from the move's two end poses, so it depends only on the scene. Scenes the
++# templates solve are planned exactly as before (the second pass never runs for them). ⚠️ An RRT route is a less
++# predictable motion for the policy to learn (post-mortem R2); it only appears in scenes that had no plan at all.
++RRT_ITERS = 1500                           # per route (rrt.MAX_ITERS is 4000; guess, to keep hopeless scenes short)
++RRT_MAX_CALLS = 12                         # RRT routes tried per plan() before giving up (guess, unverified)
+ # --- timing: fixed, the middle of v2's ranges ---
+ CLOSE_S = 0.65                             # v2 0.5-0.8
+ SQUEEZE_S = 0.75                           # v2 0.6-0.9 (the cut lands ~0.45 s into the close)
+@@ -188,17 +199,24 @@ class TrussTeacher(tx.TrussPlanner):
+         self.legs, self.phases, self.meta = [], [], {}
+         self.q_home = np.asarray(scene.START_NORM, float)
+         self._vias = []
++        self.use_rrt, self.rrt_calls = False, 0
+ 
+     # --- planning (once, at the start frame) ---
+-    def plan(self):
++    def plan(self, rrt_fallback=True):
++        """Templates only (strict, then brush); if neither works and rrt_fallback, both again with an RRT route as the
++        last fallback of every free move (RRT_ITERS, RRT_MAX_CALLS)."""
+         why = []
+-        for mode in tx.NEIGHBOUR_CLEAR:
+-            self.kw = dict(soft_clearance=tx.NEIGHBOUR_CLEAR[mode], firm_clearance=tx.OWN_FRUIT_CLEAR[mode])
+-            try:
+-                self._plan(mode)
+-                return self
+-            except PlanError as e:
+-                why.append(f"{mode}: {e}")
++        for use_rrt in (False, True) if rrt_fallback else (False,):
++            for mode in tx.NEIGHBOUR_CLEAR:
++                # ⚠️ the RRT budget per mode: shared, strict used it all and brush never tried a route (2026-11-16)
++                self.use_rrt, self.rrt_calls = use_rrt, 0
++                self.kw = dict(soft_clearance=tx.NEIGHBOUR_CLEAR[mode], firm_clearance=tx.OWN_FRUIT_CLEAR[mode])
++                try:
++                    self._plan(mode)
++                    self.meta["rrt"] = use_rrt
++                    return self
++                except PlanError as e:
++                    why.append(f"{mode}{' + rrt' if use_rrt else ''}: {e}")
+         raise PlanError(" / ".join(why))
+ 
+     def _plan(self, mode):
+@@ -278,10 +296,10 @@ class TrussTeacher(tx.TrussPlanner):
+             self._vias = [self.fm.norm_to_rad(np.r_[v, 0.0])[:5] for v in VIA_NORM]
+         return self._vias
+ 
+-    def free_move(self, xa, xb, chk, r, **kw):
++    def free_move(self, xa, xb, chk, r, allow_rrt=True, **kw):
+         """The template (one straight joint line xa -> xb), else the detour over a fixed via-pose (VIA_NORM, nearest
+-        xb first), else two of them chained. Returns (way-points, 0 for the line, the via's number from 1, or
+-        10 * first + second for a chain) or (None, None)."""
++        xb first), else two of them chained, else (plan()'s second pass, allow_rrt) an RRT route. Returns (way-points,
++        0 for the line, the via's number from 1, 10 * first + second for a chain, or "rrt") or (None, None)."""
+         if chk.path_ok([xa, xb], **kw):
+             return [xa, xb], 0
+         vias = self.vias()
+@@ -294,16 +312,25 @@ class TrussTeacher(tx.TrussPlanner):
+         for i, j in pairs:
+             if chk.path_ok([xa, vias[i], vias[j], xb], **kw):
+                 return [xa, vias[i], vias[j], xb], 10 * (i + 1) + j + 1
++        if allow_rrt and self.use_rrt and self.rrt_calls < RRT_MAX_CALLS:   # plan()'s second pass only
++            self.rrt_calls += 1
++            rng = np.random.default_rng(zlib.crc32(np.round(np.r_[xa, xb], 3).tobytes()))
++            path = rrt.plan(chk, xa, xb, rng, lo=self.lo, hi=self.hi, iters=RRT_ITERS, **kw)
++            if path is not None:
++                return path, "rrt"
+         return None, None
+ 
+     def _to_standoff(self, q0, leg):
+         """The first standoff (STANDOFF_M order) the arm can get to from the start; sets leg approach/standoff_m."""
+         self.jaw(tx.JAW_OPEN_DEG)
+-        for xs, so in leg["approaches"]:
+-            path, how = self.free_move(q0, xs[0], self.chk, self.t["r"], **self.kw)
+-            if path is not None:
+-                leg["approach"], leg["standoff_m"] = xs, so
+-                return path, how
++        # templates to every standoff first; an RRT route (second pass) only to the first one: the standoffs sit
++        # 2 cm apart, so one route search, not three
++        for allow_rrt in (False, True) if self.use_rrt else (False,):
++            for xs, so in leg["approaches"][:1] if allow_rrt else leg["approaches"]:
++                path, how = self.free_move(q0, xs[0], self.chk, self.t["r"], allow_rrt=allow_rrt, **self.kw)
++                if path is not None:
++                    leg["approach"], leg["standoff_m"] = xs, so
++                    return path, how
+         return None, None
+ 
+     def _after_cut(self, leg, r):
+@@ -336,8 +363,10 @@ class TrussTeacher(tx.TrussPlanner):
+             return rel
+         x_rel, x_above, lower, p, pitch, slack = rel
+         to_crate, detour_crate = None, None
+-        for clear in (tx.CARRY_CLEAR_M, tx.CARRY_CLEAR_MIN_M):   # the retreat can end closer than 2 cm to a neighbour
+-            to_crate, detour_crate = self.free_move(ret[-1], x_above, cchk, r, soft_clearance=clear)
++        # the retreat can end closer than 2 cm to a neighbour; an RRT route (second pass) only at the smaller clearance
++        for clear, allow_rrt in ((tx.CARRY_CLEAR_M, False), (tx.CARRY_CLEAR_MIN_M, True)):
++            to_crate, detour_crate = self.free_move(ret[-1], x_above, cchk, r, allow_rrt=allow_rrt,
++                                                    soft_clearance=clear)
+             if to_crate is not None:
+                 break
+         if to_crate is None:

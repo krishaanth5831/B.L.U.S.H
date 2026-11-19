@@ -61,7 +61,7 @@ CRATE_CENTRE = (0.6175, 0.17)
 # the plant row (R1 at y 0.40), to y 0.03-0.31; the -y side stays at 0.03 (aisle anchor rail to 0.025). What-if on
 # the 27 held-out seeds whose plan failed at the crate (same scenes, keep-out pinned to the old crate): 13 solved
 # against 0, 16 with teacher v4's release fallback; 1 of 9 solved controls lost (9900035 rolled 35 mm past +x); 6- and
-# 7-fruit trusses gain, 8-fruit barely (~/.cache/vinea_research/step3_night/agents/crate, 2026-11-16). ⚠️ The +y edge
+# 7-fruit trusses gain, 8-fruit barely (sim/whatif/crate.patch, 2026-11-16). ⚠️ The +y edge
 # sits 9 cm from the row, under trusses hanging out of it, past the reach scan's y 0.26 above: _over_crate keeps
 # trusses out of the bigger crate, so every seed draws a different scene than before, and the held-out sets
 # heldout_v3*.jsonl (and every *_teacher_v3* dataset) belong to the old crate.

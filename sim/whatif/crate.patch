@@ -1,0 +1,72 @@
+diff --git a/sim/scene.py b/sim/scene.py
+index be87833..05a9c18 100644
+--- a/sim/scene.py
++++ b/sim/scene.py
+@@ -214,15 +214,19 @@ def _box(name, lo, hi, rgba=PLY_RGBA, collide=True):
+             f'size="{h[0]:.4f} {h[1]:.4f} {h[2]:.4f}" rgba="{rgba}"{col}/>')
+ 
+ 
+-def greenhouse_xml():
++def greenhouse_xml(crate=None):
++    """crate: (centre, size) or None. What-if (agents/crate 2026-11-16, not for the repo): a crate reaching past the
++    far end frame (x > HOUSE_L) drops that frame's floor tie, which would otherwise be a 3 cm rib across its floor."""
+     g = []
+     yo = max(abs(r) for r in ROWS) + POST_W / 2
+     apex = BAND[1] + yo * np.tan(np.radians(ROOF_DEG))
++    past_far = crate is not None and crate[0][0] + crate[1][0] / 2 > HOUSE_L
+     for k, x0 in enumerate((-T, HOUSE_L)):           # end frames: posts, base tie, crop band, rafters
+         x1 = x0 + T
+         for j, r in enumerate(ROWS):
+             g.append(_box(f"ef{k}_post{j}", (x0, r - POST_W / 2, 0), (x1, r + POST_W / 2, BAND[1])))
+-        g.append(_box(f"ef{k}_tie", (x0, -yo - EAR, 0), (x1, yo + EAR, BASE_H)))
++        if not (k == 1 and past_far):
++            g.append(_box(f"ef{k}_tie", (x0, -yo - EAR, 0), (x1, yo + EAR, BASE_H)))
+         g.append(_box(f"ef{k}_band", (x0, -yo, BAND[0]), (x1, yo, BAND[1])))
+         g.append(_box(f"ef{k}_king", (x0, -POST_W / 4, BAND[1]), (x1, POST_W / 4, apex)))
+         for s in (1, -1):
+@@ -349,7 +353,7 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
+     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}"
+             xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
+     {base_cam_xml()}
+-    {greenhouse_xml() if scenery else ''}
++    {greenhouse_xml(crate) if scenery else ''}
+     {crate_xml(*crate) if scenery and crate else ''}
+     {static}
+     {tomatoes}
+diff --git a/sim/truss_scene.py b/sim/truss_scene.py
+index a38ec5d..c0d0e07 100644
+--- a/sim/truss_scene.py
++++ b/sim/truss_scene.py
+@@ -19,6 +19,8 @@ Greenhouse, cameras, arm base and start pose from scene.py. Compared with the si
+ - the crate is bigger: a truss is ~10-15 cm long;
+ - trusses hanging into the arm at its start pose are left out (START_CLEAR_M).
+ """
++import os
++
+ import mujoco
+ import numpy as np
+ 
+@@ -58,6 +60,14 @@ CRATE_CENTRE = (0.6175, 0.14)
+ # As big as the spot allows: x 0.50-0.735 (end frame tie at 0.74), y 0.03-0.25 (aisle anchor rail to 0.025). ⚠️ A
+ # 6-8 fruit truss lying flat is up to ~20 cm long: at 20 x 18 cm no release pose fit 2 of 3 seeds (2026-11-03).
+ CRATE_SIZE = (0.23, 0.22, 0.05)
++# What-if (agents/crate 2026-11-16, not for the repo): CRATE_WHATIF=A|B swaps in a bigger crate.
++#   A 0.23 x 0.28: x as today, grown 6 cm toward the aisle (y 0.03-0.31); fits between the end frames.
++#   B 0.30 x 0.28: near corner (0.5025, 0.03) kept, x to 0.8025 past the far end frame (scene drops its floor tie).
++# The keep-out at build (_over_crate) stays on the stock crate so every seed builds the same scene as the baseline.
++STOCK_CRATE = (CRATE_CENTRE, CRATE_SIZE)
++_WHATIF = {"A": ((0.6175, 0.17), (0.23, 0.28, 0.05)), "B": ((0.6525, 0.17), (0.30, 0.28, 0.05))}
++if os.environ.get("CRATE_WHATIF"):
++    CRATE_CENTRE, CRATE_SIZE = _WHATIF[os.environ["CRATE_WHATIF"]]
+ 
+ 
+ IN_CRATE_TOP_M = 0.03            # a fruit may sit this far over the rim: the truss leans on a wall, still inside
+@@ -98,7 +108,7 @@ CRATE_KEEP_OUT_M = 0.04
+ 
+ 
+ def _over_crate(t):
+-    (cx, cy), (sx, sy, _) = CRATE_CENTRE, CRATE_SIZE
++    (cx, cy), (sx, sy, _) = STOCK_CRATE               # what-if: the stock crate's keep-out (scenes paired)
+     pts = [f["pos"] for f in t["fruit"]] + [t["peduncle_end"], t["rachis_end"]]
+     return any(abs(p[0] - cx) < sx / 2 + CRATE_KEEP_OUT_M and abs(p[1] - cy) < sy / 2 + CRATE_KEEP_OUT_M for p in pts)
+ 

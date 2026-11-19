@@ -125,6 +125,28 @@ next-ranked release poses; every scene v3 plans keeps its plan). The crate grew 
 seed now draws a different scene: the `*_teacher_v3*` datasets and `heldout_v3*.jsonl` belong to the old crate
 (rerun those scenes from dev 5c1cf28).
 
+Teacher v5 since 2026-11-18 (K7: "a better teacher which has a success rate of at least 90 %" before re-recording;
+v4 solved 80 of the 154 held-out scenes in the 23 x 28 crate world). v4's search runs unchanged first, so every scene
+v4 solves keeps its first plan, action for action. When that finds nothing, phase C tries, in this order per cut
+point: the stalk tilted in the jaw (the square cut pose is the only one a 5-joint arm has and can fold the wrist
+camera into the shoulder), more cut points, position-only retreats, more and lower release poses, longer standoffs,
+three more fixed via-poses (found from offline RRT routes on 60 separate scenes; the teacher still never drives an
+RRT route), then pressing neighbours by up to 6 mm. A plan that fails its dry run is followed by the next one in the
+same fixed order (`generate_truss.py --retries`): after a failure from the carry on, the same cut with the next
+release pose, lowest first; else another approach. Plans are chosen on clean dry runs; the chosen one then gets one
+noisy run. 8-fruit trusses are carried at 0.6 of the pace. The cue (cross + `observation.environment_state`) marks
+the cut point the plan uses. Every episode is also judged by the post-mortem's data filter (the arm on the
+greenhouse / crate / table, a servo stalled at its limit, a jerky command).
+
+| Scenes | v4 | v5 |
+|---|---|---|
+| tuning set, 9900000-9900066 | | 59 of 67 (88 %) |
+| gate, 9930000-9930199, never used while tuning | 113 of 200 (57 %) | 163 of 200 (82 %): 6 fruit 97/117, 7 fruit 44/53, 8 fruit 22/29 |
+
+Short of the 90 % asked for; K7 chose to record with v5 as it is (2026-11-18). What's left is mostly scenes with no
+plan at all (crowded routes, the slide into the stalk hits fruit). Picking another ready truss when the visible
+one has no plan would add about 4 more of the 36 failed gate scenes (`other_ready.py` what-if, not built).
+
 | Step | What | State |
 |---|---|---|
 | 0 | teacher + its three tests (`check_teacher.py`) | done: solves 73 of 200 scenes |
@@ -132,6 +154,7 @@ seed now draws a different scene: the `*_teacher_v3*` datasets and `heldout_v3*.
 | 2 | dataset v3 | done: `krish5831/blush_sim_teacher_v3`, 610 episodes (525 cuts, 85 stay-home), private on the Hub |
 | 3 | ACT on v3, a test at every 5k checkpoint | done (100k steps): alone 13-15 of the 63 held-out scenes the teacher solves; hybrid (`eval_truss.py --hybrid --rejoin`: the policy approaches, the teacher finishes from 20-50 mm) 52 of 63 |
 | finisher | the last stage learned from the hybrid's teacher finishes (`eval_truss.py --record`) | data: `krish5831/blush_sim_teacher_v3_finisher`, 201 episodes. ACT on it (step 3's recipe, 50k steps; 30k picked on 32 validation scenes, 10 of 32): with the policy approaching (`--hybrid --finisher`), 17 of 63 (strict 11), against 12 (10) for the policy alone and 50 (48) for the teacher finishing (same session, old crate). After the hand-over it never cut in 33 of 56, and on 30 of its own training scenes it succeeds only 13 times: it hasn't learned to capture the stalk. Videos: after a miss it plays the rest of the teacher's routine anyway (over the crate, home); its data never shows a miss. Re-planning more often (`--finisher-n-action-steps 25`, `--finisher-ensemble`) made it worse (1 and 3 of 32). The teacher stays the finisher (2026-11-17) |
+| v5 data | dataset v5, teacher v5 in the 23 x 28 crate world | done 2026-11-19: `krish5831/blush_sim_teacher_v5`, 800 episodes (736 cuts, 64 stay-home, 355 noisy), 32 parts of 25, merged; `replay_check.py` 5/5 clean reproduce, 5/5 noisy pass on their labels. ACT on it waits for K7's go |
 
 ```bash
 python check_teacher.py solve --scenes 1 --seed-start 9100003 --watch     # watch the teacher do one scene
@@ -141,6 +164,9 @@ python generate_truss.py --teacher --no-dr --no-yolo --balance --hold-share 0.10
     --seed-start 9700000 --episodes 20 --max-attempts 900 --repo-id krish5831/blush_sim_teacher_v3_w_p00
 python merge_parts.py krish5831/blush_sim_teacher_v3 krish5831/blush_sim_teacher_v3_s krish5831/blush_sim_teacher_v3_w
 python replay_check.py ~/.cache/blush_sim/truss/blush_sim_teacher_v3_w_p*.jsonl --n 10    # clean episodes must reproduce
+# dataset v5 (2026-11-18): the same, teacher v5 with retries, 32 parts of 25, seeds 10000000 + 1000 * part
+python generate_truss.py --teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 --retries 6 \
+    --seed-start 10000000 --episodes 25 --max-attempts 900 --repo-id krish5831/blush_sim_teacher_v5_p00
 # step 3 (from the repo root): cosine learning-rate decay, a checkpoint every 5k
 RUN=act_teacher_v3 sim/scripts/train_sim.sh act-teacher krish5831/blush_sim_teacher_v3
 # ... and in a second shell, a test of every checkpoint as it lands, on the CPU (the GPU stays with training)
@@ -156,7 +182,20 @@ python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrain
 `heldout_v3.jsonl`: the step-3 test set, 20 scenes from seed 9900000 on (outside every recorded range) that a
 clean teacher dry run solved (20 of 53 tried). A success rate on it is "of the scenes the teacher solves". ⚠️ As
 scenes come, not balanced like the dataset: 13 of the 20 targets hang in the first quarter of the row.
+`heldout_v5.jsonl` (2026-11-19): the test set for policies trained on dataset v5, in the 23 x 28 crate world: 100
+scenes from seeds 9970000-9970063 and 9975000-9975060 (never recorded, tuned on or gated on) that a clean teacher-v5
+dry run with `--retries 6` solved (100 of 125 tried), as scenes come: `generate_truss.py --teacher --no-dr --no-yolo
+--dry --noise-share 0 --retries 6 --seed-start 9970000 --episodes 50 --max-attempts 400` (and 9975000).
 `--holds 5` adds nothing-ready scenes, where the arm must stay home; they're reported apart.
+
+ACT on dataset v5 (2026-11-19, K7's go): `sim/scripts/train_and_test.sh act_teacher_v5 krish5831/blush_sim_teacher_v5`
+trains 100k steps (step 3's recipe) and tests every 5k checkpoint from 20k on 25 scenes of `heldout_v5.jsonl`, twice:
+the policy alone (+ 5 holds), and the hybrid in which the teacher steps in only when the policy is failing
+(`eval_truss.py --hybrid --rejoin --trigger failing`, `rescue.py`; K7: "the teacher should only jump in if the robot
+is failing ... basically like dagger"). Before the cut the gate fires on harm (a neighbour swung past 15 mm, the arm
+pressing the rig, a stalled servo), no progress toward the cut point for 4 s, or 1.5 x the teacher's planned cut
+time + 5 s; after it only on lateness. Checked on the teacher itself (`--teacher-drives`, 20 scenes): nothing
+fired before the cut, and the teacher's real cut and crate times stay well inside the late limits.
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
 

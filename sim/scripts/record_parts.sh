@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# record_parts.sh: one worker of a dataset recorded as parts of 25 episodes (how dataset v5 was recorded,
+# 2026-11-18: 3 workers, 32 parts, 7.4 h). One process per part, because a recorder's memory is only released when
+# its process ends and a lerobot dataset is only readable after its finalize; a part killed before that (no parquet
+# footer) is redone with the same seeds, a finished one is kept. Run W workers as parts w, w+W, w+2W, ...:
+#   for w in 0 1 2; do nohup sim/scripts/record_parts.sh krish5831/blush_sim_teacher_v6 11000000 $w 3 32 & done
+#   python sim/merge_parts.py krish5831/blush_sim_teacher_v6 krish5831/blush_sim_teacher_v6_p   # then the Hub
+# Seeds of part P: SEED_BASE + 1000 P (pick a range nothing else uses; sim/README.md lists the used ones).
+# ⚠️ RAM (K7 2026-11-18): each part peaked at ~4.4 GB; at most 3 workers, keep 8 GB free (`free -g` first).
+# Extra generate_truss.py flags: GEN_ARGS (default: dataset v5's recipe).
+set -uo pipefail
+REPO_ID=${1:?repo id, e.g. krish5831/blush_sim_teacher_v6}; SEED_BASE=${2:?first seed}
+P=${3:?first part}; STRIDE=${4:?workers}; END=${5:?parts}
+SIM=$(cd "$(dirname "$0")/.." && pwd)
+LOGS=$SIM/../outputs/record_$(basename "$REPO_ID"); mkdir -p "$LOGS"
+GEN_ARGS=${GEN_ARGS:---teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 --retries 6 --max-attempts 900}
+source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+RUN="systemd-inhibit --what=sleep:idle --why=blush_record systemd-run --user --scope -q -p MemoryMax=7G -p MemorySwapMax=0"
+while [ "$P" -lt "$END" ]; do
+  N=$(printf %02d "$P")
+  D=~/.cache/huggingface/lerobot/${REPO_ID}_p$N
+  if [ -d "$D" ]; then
+    if python -c "import pyarrow.parquet as pq,glob,sys; [pq.ParquetFile(f) for f in glob.glob(sys.argv[1]+'/data/*/*.parquet')] or sys.exit(1)" "$D" 2>/dev/null
+    then P=$((P + STRIDE)); continue; else rm -rf "$D"; fi
+  fi
+  cd "$SIM"
+  # shellcheck disable=SC2086
+  $RUN python -u generate_truss.py $GEN_ARGS --seed-start $((SEED_BASE + P * 1000)) --episodes 25 \
+    --repo-id "${REPO_ID}_p$N" > "$LOGS/p$N.log" 2>&1
+  echo "part $N exit $? at $(date +%H:%M): $(grep -c '✅ episode' "$LOGS/p$N.log") kept" >> "$LOGS/workers.log"
+  P=$((P + STRIDE))
+done

@@ -1,5 +1,9 @@
 # SO-101 test greenhouse — fully printed
 
+> ⚠️ **Superseded (2026-11-19):** the current rig is the wooden knock-down pipe-rail rig in
+> [`pipe_rail_rig/`](pipe_rail_rig/README.md) (Gamma parts, two SO-101s on a cart). Laser cutting was dropped as too
+> expensive. The printed and laser-cut designs below are kept for reference.
+>
 > ⚠️ **Superseded for the frame (2026-10-10):** the greenhouse is now laser-cut from 6 mm plywood, see
 > [`lasercut/ASSEMBLY.md`](lasercut/ASSEMBLY.md). The birdseye camera mast below is still 3D-printed.
 

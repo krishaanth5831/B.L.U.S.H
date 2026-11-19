@@ -17,7 +17,8 @@ the median closest approach. Writes ../outputs/eval/<run>_ranking.json and print
 --watch (K7 2026-11-14: a test every 5k steps while training): keeps going while lerobot-train writes checkpoints,
 evaluating each one once it is finished (lerobot points `checkpoints/last` at a checkpoint only after it is fully
 written, lerobot_train.py), until the checkpoint --until is ranked, or the training process --pid is gone and
-nothing new has landed. --cpu runs the rollouts with CUDA_VISIBLE_DEVICES="" so training keeps the GPU to itself.
+nothing new has landed. --from-step skips the early checkpoints. --cpu runs the rollouts with
+CUDA_VISIBLE_DEVICES="" so training keeps the GPU to itself.
 Run as eval_truss.py is run (lerobot env, outside the Claude sandbox, under systemd-run MemoryMax).
 """
 import argparse
@@ -84,6 +85,8 @@ def main():
     ap.add_argument("--until", type=int, default=None, help="--watch: stop once this step's checkpoint is ranked")
     ap.add_argument("--pid", type=int, default=None, help="--watch: stop when this (training) process is gone")
     ap.add_argument("--cpu", action="store_true", help="rollouts on the CPU (CUDA_VISIBLE_DEVICES empty)")
+    ap.add_argument("--from-step", type=int, default=0,
+                    help="skip checkpoints before this step (K7 2026-11-19: tests every 5k from 20k on)")
     a = ap.parse_args(argv[:argv.index("--")] if "--" in argv else argv)
     out = HERE.parent / "outputs" / "eval" / f"{a.run.name}_ranking.json"
     ranked = json.loads(out.read_text()) if out.exists() else {}
@@ -94,6 +97,7 @@ def main():
         cks = finished(a.run, a.watch)
         if a.only:
             cks = [p for p in cks if p.name in a.only]
+        cks = [p for p in cks if int(p.name) >= a.from_step]
         for ck in cks:
             tag = f"{ck.name} | {key}"
             if tag in ranked or tag in failed:
