@@ -8,7 +8,7 @@
     python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --holds 5 \
         --seeds-from heldout_v3.jsonl                                  # step 3: the 20 held-out scenes
     python eval_truss.py <policy> --headless --no-dr --no-yolo --n-action-steps 100 --seeds-from heldout_v3.jsonl \
-        --scenes 10 --video ../outputs/videos/<name>                   # one .mp4 per scene, when a live window can't keep up
+        --scenes 10 --video ../outputs/videos/<name>                   # one .mp4 per scene (no live window needed)
 
 Windows: the MuJoCo viewer (third person, mouse to orbit) and one per camera showing exactly what the policy gets
 (truss-YOLO overlay, green target box + cut-point cross, as in the recorded episodes). Keys in a camera window:
@@ -213,7 +213,8 @@ def main():
                     help="save every scene as <dir>/scene_NN_seed_<seed>.mp4 (third person + the policy's cameras); "
                          "works with --headless, plays at sim speed however slow the rollout ran")
     ap.add_argument("--hybrid", action="store_true",
-                    help="the policy brings the jaw near the stalk, then the scripted teacher (truss_teacher) finishes: "
+                    help="the policy brings the jaw near the stalk, then the scripted teacher (truss_teacher) "
+                         "finishes: "
                          "slide in, cut and hold, carry, release, home. The bar for any learned last stage "
                          "(S.H.E.A.R's eval_onecut --hybrid, 2026-11-16)")
     ap.add_argument("--handoff-mm", type=float, nargs="+", default=[50.0],
@@ -234,7 +235,8 @@ def main():
                          "(the finisher's data); kept only if judged clean, see the top of the file")
     ap.add_argument("--episodes", type=int, default=None, help="--record: stop once this many are kept")
     ap.add_argument("--rejoin", action="store_true",
-                    help="--hybrid: at the hand-over TrussTeacher.rejoin (back out if needed, back to its standoff, its "
+                    help="--hybrid: at the hand-over TrussTeacher.rejoin (back out if needed, back to its standoff, "
+                         "its "
                          "start-frame cut), else its nearest leg (resync)")
     ap.add_argument("--replan", action="store_true",
                     help="--hybrid: at the hand-over the teacher plans afresh from where the arm and the truss are NOW "
@@ -250,6 +252,21 @@ def main():
                     help="--finisher: play this many actions of each chunk (default: as the approach policy)")
     ap.add_argument("--finisher-ensemble", type=float, default=None,
                     help="--finisher: temporal ensembling with this coefficient, a new chunk every frame")
+    ap.add_argument("--log-dir", type=pathlib.Path, default=None,
+                    help="where the result .jsonl goes (default ../outputs/eval; diagnostics belong elsewhere, "
+                         "scripts/checkpoint_table.py reads every log in ../outputs/eval)")
+    ap.add_argument("--cue-shift", type=float, nargs=2, default=None, metavar=("DU", "DV"),
+                    help="diagnostic: move the target cue this many base-camera pixels (what the policy is told, "
+                         "not the truss): does the arm follow the cue?")
+    ap.add_argument("--cue-shift-what", choices=("both", "numbers", "overlay"), default="both",
+                    help="--cue-shift moves the numbers (observation.environment_state), the drawn box + cross, "
+                         "or both")
+    ap.add_argument("--img-shift", nargs=3, action="append", default=[], metavar=("CAM", "DX", "DY"),
+                    help="diagnostic: the policy sees this camera's frame moved DX, DY pixels (black where empty); "
+                         "repeatable. Does the arm follow what it sees?")
+    ap.add_argument("--trace", type=pathlib.Path, default=None,
+                    help="one jsonl row per frame: the gripper's command and position, and where the "
+                         "target truss is (rescue.truss_where). For finding when and why a carried truss drops")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
@@ -331,7 +348,23 @@ def main():
             x = prepare_observation_for_inference(frame, device, gt.TASK, robot.name)
             return make_robot_action(post_(pol.select_action(pre_(x))), features)
 
+    def shifted(obs):
+        """--img-shift: the observation with those cameras' frames moved (black where empty), else obs itself."""
+        if not a.img_shift:
+            return obs
+        o = dict(obs)
+        for cam, dx, dy in a.img_shift:
+            dx, dy = int(dx), int(dy)
+            img = np.zeros_like(o[cam])
+            h, w = img.shape[:2]
+            xs, xd = (slice(0, w - dx), slice(dx, w)) if dx >= 0 else (slice(-dx, w), slice(0, w + dx))
+            ys, yd = (slice(0, h - dy), slice(dy, h)) if dy >= 0 else (slice(-dy, h), slice(0, h + dy))
+            img[yd, xd] = o[cam][ys, xs]
+            o[cam] = img
+        return o
+
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
+    trace = None if a.trace is None else open(a.trace, "w", buffering=1)
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
         fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
@@ -364,7 +397,7 @@ def main():
                                    image_writer_threads=4)
         rec_obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
         print(f"recording the teacher's finish into {HF_LEROBOT_HOME / a.record}", flush=True)
-    out_dir = HERE.parent / "outputs" / "eval"
+    out_dir = a.log_dir if a.log_dir is not None else HERE.parent / "outputs" / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
     name = policy_path.parent.name if policy_path.name == "pretrained_model" else policy_path.name
     run = policy_path.parents[2].name if policy_path.name == "pretrained_model" else ""
@@ -406,6 +439,16 @@ def main():
                     robot.set_cut_u(T.meta["cut_u"])
                     obs = robot.get_observation()      # the start frame again (no physics step since), cue moved
                     env = robot.env_state()
+            if a.cue_shift is not None and robot._view[0] is not None:   # diagnostic: tell the policy a moved target
+                (bx0, by0, bx1, by1), cut0 = robot._view
+                du, dv = a.cue_shift
+                box1 = [bx0 + du, by0 + dv, bx1 + du, by1 + dv]
+                cut1 = None if cut0 is None else (cut0[0] + du, cut0[1] + dv)
+                if a.cue_shift_what in ("both", "overlay"):
+                    robot._view = ([int(round(v)) for v in box1], cut1)
+                    obs = robot.get_observation()      # the start frame again (no physics step since), cue redrawn
+                if a.cue_shift_what in ("both", "numbers"):
+                    env = ttg.env_vector(box1, cut1)
             r_hand = (a.handoff_mm[0] if len(a.handoff_mm) == 1 else
                       float(np.random.default_rng([seed, 0x4A0F]).uniform(*a.handoff_mm))) / 1000
             nb_hand, n_rec = None, 0
@@ -414,10 +457,15 @@ def main():
             grip = truss_ik.cut_point_in_gripper(t_info["r"])
             gid = robot.m.body("arm/gripper").id
             closest = closest_live = np.inf
+            # where the jaw is aimed (2026-11-19 post-mortem): the stalk's cut point as it hangs now, seen from the
+            # jaw's cut point, in the world and in the gripper's frame; kept at the closest frame, at the first
+            # closing of the jaw (gripper below 10 after it was above 20) and at the last frame before the cut
+            aim_prev = aim_close = aim_cut = aim_closest = None
+            aim_best_d, grip_open = np.inf, False
             frames = 0
             watch = gt.Watch(robot)
             gate = rescue.Gate(robot, k, T, watch) if a.trigger == "failing" else None
-            why_fail, t_fail, false_alarm = None, None, None
+            why_fail, t_fail, false_alarm, where_hand = None, None, None, None
             t0, t_crate, gave_up = robot.d.time, None, False
             vid = None
             if a.video is not None:
@@ -426,6 +474,23 @@ def main():
             while robot.d.time - t0 < EPISODE_S:
                 t_f = time.time()
                 jaw_pt = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
+                if robot.cutters[k].cut_t is None:
+                    p_live, u_live = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)
+                    Rg, g_now = robot.d.xmat[gid].reshape(3, 3), float(obs["gripper.pos"])
+                    aim = dict(t=round(robot.d.time - t0, 2), gripper=round(g_now, 1),
+                               teacher=handed is not None or a.teacher_drives,
+                               jaw_mm=(jaw_pt * 1000).round(1).tolist(),
+                               off_world_mm=((p_live - jaw_pt) * 1000).round(1).tolist(),
+                               off_grip_mm=(Rg.T @ (p_live - jaw_pt) * 1000).round(1).tolist(),
+                               stalk_dir_grip=(Rg.T @ u_live).round(3).tolist())
+                    if float(np.linalg.norm(p_live - jaw_pt)) < aim_best_d:
+                        aim_best_d, aim_closest = float(np.linalg.norm(p_live - jaw_pt)), aim
+                    grip_open = grip_open or g_now > 20
+                    if aim_close is None and grip_open and g_now < 10:
+                        aim_close = aim
+                    aim_prev = aim
+                elif aim_cut is None:
+                    aim_cut = aim_prev
                 if gate is not None:
                     pass                               # --trigger failing: the gate, after watch.step()
                 elif T is not None and handed is None and robot.cutters[k].cut_t is None:
@@ -467,7 +532,7 @@ def main():
                         break
                     cmd = T.act([obs[f"{j}.pos"] for j in expert.arm_map.JOINTS])
                 else:
-                    cmd = act_of(policy, pre, post, wants_env, obs, env)
+                    cmd = act_of(policy, pre, post, wants_env, shifted(obs), env)
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
@@ -488,13 +553,28 @@ def main():
                 frames += 1
                 obs = robot.get_observation()
                 watch.step()
+                if trace is not None:
+                    j_now = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
+                    w_now = rescue.truss_where(robot, k, j_now)
+                    w_now["jaw_mm"] = (j_now * 1000).round(1).tolist()
+                    if robot.cutters[k].cut_t is None:
+                        w_now["stalk_mm"] = (ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)[0]
+                                             * 1000).round(1).tolist()
+                    trace.write(json.dumps(dict(seed=seed, t=round(robot.d.time - t0, 2),
+                                                teacher=handed is not None or a.teacher_drives,
+                                                cut=robot.cutters[k].cut_t is not None,
+                                                cmd_gripper=round(float(cmd["gripper.pos"]), 1),
+                                                gripper=round(float(obs["gripper.pos"]), 1), **w_now)) + "\n")
                 if gate is not None and handed is None and false_alarm is None:
                     why = gate.step(robot.d.time - t0, robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip)
                     if why is not None and a.teacher_drives:
                         false_alarm = dict(why=why, t=round(robot.d.time - t0, 2))   # logged, nothing switches
-                        print(f"  ⚠️ the gate would have fired on the teacher at {false_alarm['t']} s: {why}", flush=True)
+                        print(f"  ⚠️ the gate would have fired on the teacher at {false_alarm['t']} s: {why}",
+                              flush=True)
                     elif why is not None:              # failing: the teacher takes over from here and finishes
                         why_fail, t_fail = why, round(robot.d.time - t0, 2)
+                        where_hand = rescue.truss_where(robot, k, robot.d.xpos[gid]
+                                                        + robot.d.xmat[gid].reshape(3, 3) @ grip)
                         st_norm = [obs[f"{j}.pos"] for j in expert.arm_map.JOINTS]
                         nb_hand = round(watch.max * 1000, 1)
                         if robot.cutters[k].cut_t is None:
@@ -544,13 +624,19 @@ def main():
                        neighbours_moved_mm=round(watch.max * 1000, 1),
                        t_crate=None if t_crate is None else round(t_crate, 2), seconds=round(robot.d.time - t0, 2),
                        gave_up=gave_up, frames=frames, rig=rig, hybrid=a.hybrid, handoff_t=t_hand,
-                       handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed)
+                       handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed,
+                       aim_closest=aim_closest, aim_close=aim_close, aim_cut=aim_cut,
+                       env=[round(float(v), 4) for v in env], cut_xyz_mm=(p_cut * 1000).round(1).tolist(),
+                       n_fruit=t_info["n"])
+            if a.cue_shift is not None or a.img_shift:
+                rec.update(cue_shift=a.cue_shift, cue_shift_what=a.cue_shift_what, img_shift=a.img_shift)
             if a.hybrid:
                 rec.update(handoff_radius_mm=round(r_hand * 1000, 1), handoff_from=a.handoff_from,
                            neighbours_at_handoff_mm=nb_hand, trigger=a.trigger)
             if gate is not None:
                 rec.update(rescued=handed is not None and not a.teacher_drives, rescue_why=why_fail,
                            rescue_t=t_fail, teacher_drives=a.teacher_drives, false_alarm=false_alarm,
+                           truss_at_rescue=where_hand,
                            plan_cut_s=None if gate.plan_cut_s is None else round(gate.plan_cut_s, 2),
                            plan_drop_s=None if gate.plan_drop_s is None else round(gate.plan_drop_s, 2),
                            cut_t=None if gate.t_cut is None else round(gate.t_cut, 2))
@@ -613,7 +699,15 @@ def main():
         if results:
             s = sum(r["success"] for r in results)
             ens = getattr(pcfg, "temporal_ensemble_coeff", None)
-            summary = dict(summary=True, policy=str(policy_path), policy_type=pcfg.type, temporal_ensemble_coeff=ens,
+            try:
+                import cameras
+                cam0 = (robot.d.cam_xpos[mujoco.mj_name2id(robot.m, mujoco.mjtObj.mjOBJ_CAMERA,
+                                                             cameras.CAM_IN_MODEL[robot.cam_names[0]])] * 1000
+                        ).round(1).tolist()
+            except Exception:                           # a diagnostic only
+                cam0 = None
+            summary = dict(summary=True, cam0_mm=cam0, policy=str(policy_path), policy_type=pcfg.type,
+                           temporal_ensemble_coeff=ens,
                            n_action_steps=getattr(pcfg, "n_action_steps", None), noise=a.noise, no_dr=a.no_dr,
                            same_seed=a.same_seed, success_strict=sum(r["success_strict"] for r in results),
                            closest_mm_median=float(np.median([r["closest_mm"] for r in results])),
@@ -637,7 +731,8 @@ def main():
             if "rescued" in summary:
                 held += (f"; the teacher stepped in {summary['rescued']} times ({summary['rescued_ok']} then "
                          f"succeeded), the policy alone {summary['on_its_own_ok']}/{summary['on_its_own']}"
-                         + (f", gate false alarms on the teacher {summary['false_alarms']}" if a.teacher_drives else ""))
+                         + (f", gate false alarms on the teacher {summary['false_alarms']}" if a.teacher_drives
+                            else ""))
             print(f"\n{s}/{len(results)} successes, {summary['success_strict']} with neighbours within "
                   f"{gt.NEIGHBOUR_MOVE_M * 1000:.0f} mm (target cut in {summary['cut']}, in the crate in "
                   f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm{held}).  "
