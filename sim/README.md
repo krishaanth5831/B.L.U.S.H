@@ -182,6 +182,10 @@ python eval_truss.py ../outputs/train/act_teacher_v3/checkpoints/<step>/pretrain
 `heldout_v3.jsonl`: the step-3 test set, 20 scenes from seed 9900000 on (outside every recorded range) that a
 clean teacher dry run solved (20 of 53 tried). A success rate on it is "of the scenes the teacher solves". ⚠️ As
 scenes come, not balanced like the dataset: 13 of the 20 targets hang in the first quarter of the row.
+`heldout_v5.jsonl` (2026-11-19): the test set for policies trained on dataset v5, in the 23 x 28 crate world: 100
+scenes from seeds 9970000-9970063 and 9975000-9975060 (never recorded, tuned on or gated on) that a clean teacher-v5
+dry run with `--retries 6` solved (100 of 125 tried), as scenes come: `generate_truss.py --teacher --no-dr --no-yolo
+--dry --noise-share 0 --retries 6 --seed-start 9970000 --episodes 50 --max-attempts 400` (and 9975000).
 `--holds 5` adds nothing-ready scenes, where the arm must stay home; they're reported apart.
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.

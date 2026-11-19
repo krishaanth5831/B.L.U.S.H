@@ -33,6 +33,8 @@ scenes the teacher solves", as S.H.E.A.R's "of teacher-feasible cuts".
 ⚠️ heldout_v3.jsonl and heldout_v3b.jsonl are the OLD crate's scenes (truss_scene.CRATE_*, 23 x 22 cm until
 2026-11-17): with the bigger crate the same seeds draw other scenes. Rerun them from a checkout of dev 5c1cf28 (the
 last commit with the old crate; PYTHONPATH=<checkout>/sim/plugin, as the plugin puts the main checkout's sim/ first).
+heldout_v5.jsonl (2026-11-19) is the new crate's test set: 100 scenes from 9970000 / 9975000 that clean teacher-v5
+dry runs (--retries 6) solved, 100 of 125 tried (sim/README.md, "Teacher pipeline").
 --holds K adds K nothing-ready scenes (truss_scene.build hold, as the dataset's stay-home episodes) from
 --hold-seed-start: the policy runs HOLD_EVAL_S; success = generate_truss.judge_hold (nothing cut, no fruit off,
 nothing moved) and the arm stayed within HOLD_MOVE_NORM of where it started. Reported apart, not in the success count.
