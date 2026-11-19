@@ -1,0 +1,158 @@
+diff --git a/sim/truss_teacher.py b/sim/truss_teacher.py
+index 572e028..18304ec 100644
+--- a/sim/truss_teacher.py
++++ b/sim/truss_teacher.py
+@@ -83,6 +83,23 @@ SETTLE_S = 0.2                             # v2 0.15-0.3 at the stalk before clo
+ RELEASE_S = 0.5                            # jaw opening over the crate (v2's fixed 0.5)
+ DROP_S = 0.65                              # v2 0.5-0.8
+ HOLD_END_S = 0.3                           # short: identical frames at home froze the n10 ACT run (post-mortem §2)
++# --- lift-off after the drop (2026-11-16 test, agents/liftoff) ---
++# After `drop` the open jaw goes straight up first (the grip point; orientation held where the arm can, see _lift), so the
++# fingers slide up off a truss still standing against them, and only then home from up there. ⚠️ 4 held-out seeds
++# (9900025/34/95/145) had the truss standing ~130 mm tall against the open jaw after the drop; the free move home
++# knocked it over a wall (diag_crate.log). Those 4 had no `lower` leg (no straight drop for the carry), so the lift is
++# its own IK line, not rest["lower"] reversed. ⚠️ Even where a lower leg exists the held-orientation line stopped at
++# 48 mm on an IK jump (9900035, 9900043), so every run used the grip-point-only lift. ⚠️ Tested 2026-11-16: it fixed
++# 0 of those 4 seeds (with a wait, slower or 4 cm too): the truss falls over the same wall as the jaw lifts off it.
++LIFT_M = 0.08                              # = tx.ABOVE_CRATE_M, the lower leg's height (guess, unverified)
++LIFT_STEPS = 6                             # IK way-points along the lift (as the lower leg's 6)
++LIFT_M_S = expert.CART_PEAK_M_S / 1.875    # as CART_M_S, the lower leg's pace (guess)
++LIFT_WAIT_S = 0.0                          # extra hold at the release pose, jaw open, before lifting (guess)
++LIFT_JUMP_RAD = 0.3                        # a joint moving more than this between lift way-points (16 mm apart) is an
++                                           # IK branch jump, not a lift: the line is cut there (guess)
++# ⚠️ The lift is a servo leg (sag correction on), unlike `lower`: it climbs slowly against gravity from a non-servo
++# hold where the arm hangs sagged below the release pose; with the sag along the path larger than the lead the
++# projection would sit at s=0 and the leg would never end before MAX_S (advisor review, not observed).
+ CLOSE_NORM = 1.0                           # the middle of expert.CLOSE_NORM (0-2)
+ # --- closed loop ---
+ # Lead of the commanded point along the path, norm units per frame. expert.JOINT_PEAK_NORM_S 60 /s = 2 per frame;
+@@ -230,6 +247,9 @@ class TrussTeacher(tx.TrussPlanner):
+                                               home=rest["detour_home"]),
+                                  retreat_option=rest["retreat_option"], release_point=rest["release_point"],
+                                  release_pitch=rest["release_pitch"], crate_slack_mm=rest["crate_slack_mm"],
++                                 lift_mm=round(rest["lift_m"] * 1000), lift_why=rest["lift_why"],
++                                 lift_held=rest["lift_held"],
++                                 release_tilt=rest["release_tilt"],
+                                  target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(r * 2000, 1),
+                                  tried=sorted(set(tried)), miss=False)
+                 return
+@@ -334,7 +354,7 @@ class TrussTeacher(tx.TrussPlanner):
+         rel = self._release(carry, cchk, r)
+         if isinstance(rel, str):
+             return rel
+-        x_rel, x_above, lower, p, pitch, slack = rel
++        x_rel, x_above, lower, p, pitch, slack, tilt = rel
+         to_crate, detour_crate = None, None
+         for clear in (tx.CARRY_CLEAR_M, tx.CARRY_CLEAR_MIN_M):   # the retreat can end closer than 2 cm to a neighbour
+             to_crate, detour_crate = self.free_move(ret[-1], x_above, cchk, r, soft_clearance=clear)
+@@ -344,11 +364,18 @@ class TrussTeacher(tx.TrussPlanner):
+             return "retreat -> crate blocked, via-pose too"
+         self.jaw(tx.JAW_OPEN_DEG)
+         q_start = self.fm.norm_to_rad(self.q_home)[:5]
+-        home, detour_home = self.free_move(lower[-1], q_start, self.chk, r, ignore=self.target_all, firm=False,
++        lift = self._lift(lower[-1], p, pitch, tilt, r)
++        home, detour_home = self.free_move(lift[-1], q_start, self.chk, r, ignore=self.target_all, firm=False,
+                                            **self.kw)
++        if home is None and len(lift) > 1:     # no way home from the top of the lift: home from the release pose
++            lift, self._lift_why, self._lift_m = [lower[-1]], "no way home from its top", 0.0
++            home, detour_home = self.free_move(lift[-1], q_start, self.chk, r, ignore=self.target_all, firm=False,
++                                               **self.kw)
+         if home is None:
+             return "crate -> start blocked, via-pose too"
+-        return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home,
++        return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, lift=lift, lift_m=self._lift_m,
++                    lift_why=self._lift_why, lift_held=getattr(self, "_lift_held", None),
++                    release_tilt=round(tilt, 1), home=home,
+                     detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
+                     release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1))
+ 
+@@ -389,9 +416,76 @@ class TrussTeacher(tx.TrussPlanner):
+                 low = [xr]                     # no straight drop for this pose: the carry goes to it directly
+             else:
+                 low[-1] = xr
+-            return xr, low[0], low, p, pitch, float(slack[i])
++            return xr, low[0], low, p, pitch, float(slack[i]), tilt
+         return f"no release pose: {len(ok)} of {len(Qs)} poses over the crate fit the truss"
+ 
++    def _lift(self, x_rel, p, pitch, tilt, r):
++        """The open jaw straight up LIFT_M from the release pose, clear of everything but the target (as the way home
++        is checked): the grip point p straight up with the orientation held when that reaches the whole way, else the
++        grip point straight up with the orientation free (the longer of the two clear prefixes). ⚠️ At the release
++        poses of the 4 target seeds the orientation held only 12-36 mm up; the grip point alone went 80 mm, the
++        fingers flattening from 26-35 to 2-12 deg pitch (probe_reach.py, bare-arm IK, 2026-11-16). Sets
++        self._lift_why (how, and why it stopped) and self._lift_m (height reached). [x_rel] alone if none."""
++        self._lift_why, self._lift_m = None, 0.0
++        if LIFT_M <= 0:
++            return [x_rel]
++        point = truss_ik.cut_point_in_gripper(r)
++        self.jaw(tx.JAW_OPEN_DEG)
++        kw = dict(ignore=self.target_all, firm=False, **self.kw)
++        heights = LIFT_M * np.linspace(0, 1, LIFT_STEPS)[1:]
++
++        def prefix(cands):
++            xs, why = [x_rel], "full"
++            for x in cands:
++                if x is None:
++                    return xs, "no IK"
++                if float(np.abs(np.asarray(x) - xs[-1]).max()) > LIFT_JUMP_RAD:
++                    return xs, "IK jump"
++                if not self.chk.segment_free(xs[-1], np.asarray(x), **kw):
++                    return xs, "blocked"
++                xs.append(np.asarray(x))
++            return xs, why
++
++        def line(step):
++            out, x = [], x_rel
++            for z in heights:
++                x = step(x, p + [0, 0, z])
++                out.append(x)
++                if x is None:
++                    break
++            return out
++
++        xs, why = prefix(line(lambda x0, g: self.ik_free.solve(g, pitch, tilt, point, x0=x0)))
++        how = "held"
++        self._lift_held = f"{(len(xs) - 1) * 1000 * LIFT_M / (LIFT_STEPS - 1):.0f} mm, {why}"   # log only
++        if len(xs) < LIFT_STEPS:
++            ys, why_y = prefix(line(lambda x0, g: self._grip_to(x0, g, point)))
++            if len(ys) > len(xs):
++                xs, why, how = ys, why_y, "grip point only"
++        self._lift_m = float(self.ik_free.frame(xs[-1], point)[0][2] - p[2])
++        self._lift_why = f"{how}: {why}"
++        return xs
++
++    def _grip_to(self, x0, goal, point, iters=200):
++        """Joint angles (5, rad) putting the grip point at goal, orientation free: damped least squares from x0 on
++        the bare arm (self.ik_free). None if it ends more than 2 mm off (ArmIK.solve's tolerance)."""
++        ik, x = self.ik_free, np.asarray(x0, float).copy()
++        for _ in range(iters):
++            o, R = ik.fk(x)
++            g = o + R @ point
++            e = goal - g
++            if np.linalg.norm(e) < 1e-4:
++                break
++            J = np.empty((3, 5))
++            for k in range(5):
++                dx = np.zeros(5)
++                dx[k] = 1e-5
++                o2, R2 = ik.fk(x + dx)
++                J[:, k] = (o2 + R2 @ point - g) / 1e-5
++            x = np.clip(x + J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), e), self.lo, self.hi)
++        o, R = ik.fk(x)
++        return x if np.linalg.norm(goal - (o + R @ point)) < 0.002 else None
++
+     def _build_legs(self, q0, to_std, leg, rest):
+         fm = self.fm
+         n5 = lambda xs: np.array([fm.rad_to_norm(np.r_[x, 0])[:5] for x in xs])   # noqa: E731
+@@ -426,6 +520,11 @@ class TrussTeacher(tx.TrussPlanner):
+         x_rel = n5([rest["lower"][-1]])[0]
+         L.append(Leg("release", hold=x_rel, jaw_to=(CLOSE_NORM, g_open), frames=f(RELEASE_S)))
+         L.append(Leg("drop", hold=x_rel, jaw=g_open, frames=f(DROP_S)))
++        if len(rest["lift"]) > 1:
++            if LIFT_WAIT_S > 0:
++                L.append(Leg("lift_wait", hold=x_rel, jaw=g_open, frames=f(LIFT_WAIT_S)))
++            L.append(Leg("lift", n5(rest["lift"]), jaw=g_open, servo=True,
++                         lead=cart_lead(rest["lift"], max(rest["lift_m"], 1e-3), LIFT_M_S)))
+         L.append(Leg("return", n5(rest["home"]), jaw_to=(g_open, g_start), lead=FREE_LEAD))
+         L.append(Leg("hold_end", hold=self.q_home[:5], jaw=g_start, frames=f(HOLD_END_S)))
+         self.legs = L

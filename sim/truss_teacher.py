@@ -101,7 +101,7 @@ VIA_NORM = ((-59.0, -44.0, 8.0, -34.0, 6.0),     # grip (0.27, 0.29, 0.46): high
 # offline RRT routes on scenes kept apart from the tuning set and the gate (via_search, 2026-11-18). In 3 of 4 v5
 # scenes blocked only by the way in, an offline RRT reached the standoff (046 30 of 30 candidates, 022 15 of 20,
 # 004 7 of 15, 081 0 of 12): routes exist, the four poses miss them. Still fixed poses, never an RRT route (rule 3).
-# Search (via_search.py / via_pick.py in ~/.cache/vinea_research/teacher_v5): 60 scenes from 9940000, 18 with a v5
+# Search (sim/whatif/via_search.py, via_pick.py): 60 scenes from 9940000, 18 with a v5
 # candidate blocked only on the way in (103 cases), RRT routes in 11; their 161 way-points clustered (12 norm units)
 # into 99 candidates, each scored alone and chained with VIA_NORM's; kept greedily by new scenes unblocked: 7, 2, 1
 # (10 of the 18; 2026-11-18).
@@ -140,8 +140,8 @@ ESCAPE_STALL_FRAMES = 30                   # an escape that stops moving for 1 s
 # 5 of 18 hard takeovers that escaped and then slid onto empty air (2026-11-16): it fixed none of the 18, and on the
 # 10 seeds that changed between rejoin versions it caused 5 failures (neighbours nudged to 15-17 mm, a drop) against
 # 2 it prevented (check_teacher takeover, deterministic, same 40 runs with and without it). Removed.
-# --- release fallback (teacher v4, K7 2026-11-17; measured first as a what-if, ~/.cache/vinea_research/step3_night/
-# agents/release) ---
+# --- release fallback (teacher v4, K7 2026-11-17; measured first as a what-if,
+# sim/whatif/release_fallback.patch) ---
 # ⚠️ _release keeps ONE pose (the clear one with most room to the walls) and the carry is planned to it alone: when the
 # carry there or the way home from it is blocked, the candidate (cut point, approach) is dropped, though a lower-ranked
 # pose may clear. Seed 9900001 (stock crate, strict, u 0.5, straight in): the chosen pose's carry hit s0t0's peduncle
