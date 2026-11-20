@@ -145,6 +145,56 @@ def load_policy(path, device, ds_meta, overrides=None):
     return policy, pre, post, cfg
 
 
+def fix_inference(policy, unstretch=None, mc_dropout=0, first_chunk=0):
+    """Post-mortem 2026-11-20 (scripts/postmortem_v5/offline_train_vs_inference.py): this ACT answers about 4 % further
+    from its output layer's own offset when it RUNS (dropout off) than on average while it TRAINS (dropout on); on
+    training frames that stretch is about half of the 11 mm miss at the cut. Two ways to take it out, no training:
+      unstretch S   the arm joints' commands are pulled back toward that offset: offset + (command - offset) / S
+                    (the gripper is left alone: its stretch near the close measured 1.01, and a weaker close would
+                    be a second change)
+      mc_dropout K  the answer is the mean of K answers with dropout switched on (the latent stays zero; ⚠️ random,
+                    so a scene does not replay exactly)
+    first_chunk N: only from the scene's N-th plan on (0 = every plan; 1 = not the plan made at the start frame,
+                    whose inference answer measured un-stretched against the teacher: 0.995).
+    Wraps policy.predict_action_chunk (select_action calls it once per chunk) and policy.reset (once per scene, it
+    restarts the plan count); returns a label for the log."""
+    from lerobot.utils.constants import OBS_IMAGES
+    orig, orig_reset = policy.predict_action_chunk, policy.reset
+    bias = policy.model.action_head.bias.detach()                  # the offset, in the network's normalised units
+    count = [0]
+
+    def reset():
+        count[0] = 0
+        orig_reset()
+
+    def chunk(batch):
+        count[0] += 1
+        if count[0] <= first_chunk:
+            return orig(batch)
+        if mc_dropout:
+            b = {k: (v.repeat(mc_dropout, *([1] * (v.dim() - 1))) if torch.is_tensor(v) else v)
+                 for k, v in batch.items()}
+            if policy.config.image_features:
+                b[OBS_IMAGES] = [b[k] for k in policy.config.image_features]
+            policy.eval()
+            for m in policy.model.modules():                       # only the dropout switches: the model itself
+                if isinstance(m, (torch.nn.Dropout, torch.nn.MultiheadAttention)):   # stays in inference mode
+                    m.train()
+            out = policy.model(b)[0].mean(0, keepdim=True)
+            policy.eval()
+        else:
+            out = orig(batch)
+        if unstretch:
+            out = out.clone()
+            out[..., :5] = bias[:5] + (out[..., :5] - bias[:5]) / unstretch
+        return out
+
+    policy.predict_action_chunk, policy.reset = chunk, reset
+    return ", ".join(x for x in (f"stretch /{unstretch:g}" if unstretch else "",
+                                 f"mean of {mc_dropout} dropout answers" if mc_dropout else "",
+                                 f"from plan {first_chunk + 1} on" if first_chunk else "") if x)
+
+
 class SceneVideo:
     """--video: one .mp4 per scene, the viewer's third-person view next to the policy's cameras, at sim speed.
     For when a live window can't keep up (K7 2026-11-15: the CPU held at 1 GHz froze the viewer)."""
@@ -206,6 +256,15 @@ def main():
                          "cut and while the jaw is more than NOISE_NEAR_M from the cut point; a fresh seed per scene")
     ap.add_argument("--ensemble", type=float, default=None, help="override temporal_ensemble_coeff (ACT)")
     ap.add_argument("--n-action-steps", type=int, default=None, help="override n_action_steps (ACT, no ensembling)")
+    # post-mortem 2026-11-20: take the inference-mode stretch out of the answers (fix_inference), no training
+    ap.add_argument("--unstretch", type=float, default=None,
+                    help="pull the arm joints' commands toward the output layer's offset by this factor (1.04 "
+                         "measured on act_teacher_v5 at 100k)")
+    ap.add_argument("--mc-dropout", type=int, default=0,
+                    help="answer with the mean of this many dropout-on answers instead of one dropout-off answer")
+    ap.add_argument("--fix-from", type=int, default=0,
+                    help="--unstretch / --mc-dropout only from this plan of the scene on (0-based; 1 = leave the plan "
+                         "made at the start frame as it is)")
     # post-mortem step 3 (2026-11-14): a fixed held-out set the teacher solves, and stay-home scenes
     ap.add_argument("--seeds-from", type=pathlib.Path, default=None,
                     help="a generate_truss.py attempt log (.jsonl): run its kept, non-hold seeds, at most --scenes")
@@ -313,6 +372,9 @@ def main():
     elif a.n_action_steps is not None:
         over.update(temporal_ensemble_coeff=None, n_action_steps=a.n_action_steps)
     policy, pre, post, pcfg = load_policy(policy_path, device, meta, over)
+    infer = fix_inference(policy, a.unstretch, a.mc_dropout, a.fix_from) if (a.unstretch or a.mc_dropout) else None
+    if infer:
+        print(f"⚠️ inference changed: {infer}", flush=True)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
     ens = getattr(pcfg, "temporal_ensemble_coeff", None)   # ACT: None = plays n_action_steps per chunk instead
     print(f"policy {policy_path} ({pcfg.type}) on {device}; task {gt.TASK!r}; box + cut point as numbers: {wants_env}; "
@@ -719,7 +781,8 @@ def main():
                            finisher_n_action_steps=None if fin_path is None else getattr(fcfg, "n_action_steps", None),
                            finisher_ensemble=None if fin_path is None else fcfg.temporal_ensemble_coeff,
                            crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)],   # which world: the crate changes
-                           trigger=a.trigger if a.hybrid else None, teacher_drives=a.teacher_drives)
+                           trigger=a.trigger if a.hybrid else None, teacher_drives=a.teacher_drives,
+                           infer=infer)
             if a.hybrid and a.trigger == "failing":    # DAgger-style: who did the work
                 alone_ok = [r for r in results if not r.get("rescued")]
                 resc = [r for r in results if r.get("rescued")]

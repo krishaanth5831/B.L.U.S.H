@@ -2,7 +2,7 @@
 
 The measurements behind the v5 post-mortem (vault: `08 Modules/(C) BLUSH v5 Policy Post-Mortem ...`). Every script
 writes its result files to `outputs/notes/2026-11-19_v5_postmortem/` (git-ignored), never into the repo tree.
-Run from the `lerobot` env; the three `offline_*.py` scripts need the GPU for about 2 minutes each and no simulator.
+Run from the `lerobot` env; the `offline_*.py` scripts need the GPU for 2-4 minutes each and no simulator.
 
 | Script | Question it answers | Number it gave for the 100k checkpoint |
 |---|---|---|
@@ -12,6 +12,8 @@ Run from the `lerobot` env; the three `offline_*.py` scripts need the GPU for ab
 | `offline_smoothness.py` | Are the commands jittery, do chunks join up? | speed changes 4x the teacher's; 18 mm jump at a hand-over; first command 12.7 mm from the arm |
 | `cell_geometry_and_claw_view.py` | Does the arm have room at the cut, and what does the wrist camera see of the stalk? | wrist joint within 10 units of its end stop in 201 of 736 cuts; wrist camera has the stalk at 4-5 px per mm from 1.5 s before the jaw shuts |
 | `offline_state_follow.py` | Does the policy steer by its own joint readings? | near the cut it follows a changed reading 0.6-0.9, the wrist joint only 0.36-0.48 |
+| `offline_offset_shape.py` | Is the miss one constant offset, and which way does it point? | 10.3 of the 10.8 mm is one shift of the whole plan; it points AWAY from the dataset's average command (cosine -0.91), 8 mm low |
+| `offline_train_vs_inference.py` | Does the network answer differently while it trains (dropout on) and when it runs? | as it runs 11.0 mm, mean of 16 dropout-on answers 4.9 mm, stretch taken out 6.1 mm; the commands are 4-6 % further out as it runs |
 | `run_diag_batch1.sh` | Rollout batch: same test twice, teacher alone, training scenes, shifted cue / images | results in `outputs/diag/runs/<name>/` |
 | `analyse_batch1.py` | Reads that batch: noise floor, teacher vs policy aim, training vs held-out, does the jaw follow the cue | teacher 86/100; policy 13/50 on training scenes; 3 of 50 scenes flip between identical runs |
 | `analyse_after_cut.py` | After the cut, when is the truss lost? | policy: 19 of 64 cuts lost within 0.5 s; teacher: 11 of 100 miss the crate at release |
@@ -19,17 +21,23 @@ Run from the `lerobot` env; the three `offline_*.py` scripts need the GPU for ab
 ⚠️ The checkpoint's settings show the 6 cue numbers are NOT rescaled by the library (their input type is missing
 from `normalization_mapping`), while joints and actions are. Add `ENV` to that map in the next training command.
 
+⚠️ Dropout (0.1) makes the running answer differ from the training-mode answer: on training frames that gap is about
+half of the miss (`offline_train_vs_inference.py`). `eval_truss.py --unstretch 1.035` and `--mc-dropout 16`
+(`--fix-from 1` to leave the first plan alone) take it out at inference, with no training; rollout results are in the
+vault post-mortem. The one-position control had the same gap at 20k steps and had closed it by 40k.
+
 `train_clean_50.jsonl`: the 50 clean training scenes used by the offline scripts and by the `train_clean` rollouts.
 
-## The three offline gates for the next training run
+## The offline gates for the next training run
 
-Before any rollout test of a new checkpoint, run `offline_chunk_error.py`, `offline_sensitivity.py` and
-`offline_smoothness.py` on it. The v5 values to beat:
+Before any rollout test of a new checkpoint, run `offline_chunk_error.py`, `offline_sensitivity.py`,
+`offline_smoothness.py` and `offline_train_vs_inference.py` on it. The v5 values to beat:
 
 | Gate | v5 at 100k | Why it matters |
 |---|---|---|
 | jaw error at the teacher's close, training frames | 11.0 mm (90 %: 16.7) | the tool needs about 6 mm |
 | first command of a chunk vs where the arm is | 12.7 mm (teacher 3.4) | a general lack of fit, before any target finding |
+| gap between the running answer and the mean of 16 dropout-on answers, at the teacher's close | 11.0 against 4.9 mm | the tests run the network the first way; training only fits the second |
 | share of a 30 px cue shift the jaw follows | 0.00-0.19 | the policy must use the cue it is given |
 
 ⚠️ The scripts are tied to dataset v5 (`REPO`, `SNAP`, the attempt logs in `~/.cache/blush_sim/truss/`) and to the
