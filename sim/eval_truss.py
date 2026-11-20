@@ -195,6 +195,42 @@ def fix_inference(policy, unstretch=None, mc_dropout=0, first_chunk=0):
                                  f"from plan {first_chunk + 1} on" if first_chunk else "") if x)
 
 
+def recorded_start_frames(repo_id, cams):
+    """--start-frame recorded: a function seed -> {camera: the dataset's frame 0 of that seed's episode, HWC uint8}.
+    ⚠️ Reads local files that are only there while a post-mortem runs: the dataset's hub snapshot with its videos
+    (~/.cache/huggingface/lerobot/hub/datasets--<org>--<name>/snapshots/) and generate_truss.py's attempt logs
+    (~/.cache/blush_sim/truss/<name>_p*.jsonl). Episode i of the merged dataset is the i-th kept row of those logs,
+    parts in order (checked 2026-11-20: the teacher's recorded commands replay within 0.04 joint units)."""
+    import glob
+
+    import pandas as pd
+    from lerobot.datasets.video_utils import decode_video_frames
+    org, name = repo_id.split("/")
+    hub = pathlib.Path.home() / ".cache/huggingface/lerobot/hub"
+    snaps = sorted(glob.glob(str(hub / f"datasets--{org}--{name}/snapshots/*")))
+    logs = sorted(glob.glob(str(pathlib.Path.home() / f".cache/blush_sim/truss/{name}_p*.jsonl")))
+    if not snaps or not logs:
+        sys.exit(f"⚠️ --start-frame recorded: no hub snapshot of {repo_id} or no attempt logs {name}_p*.jsonl "
+                 "on this machine")
+    kept = [r for f in logs for r in (json.loads(ln) for ln in open(f) if ln.strip()) if r.get("kept") is True]
+    by_seed = {r["seed"]: i for i, r in enumerate(kept)}
+    em = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(f"{snaps[-1]}/meta/episodes/*/*.parquet"))])
+    em = em.set_index("episode_index")
+
+    def frames(seed):
+        if seed not in by_seed:
+            sys.exit(f"⚠️ --start-frame recorded: seed {seed} is not an episode of {repo_id} (training scenes only)")
+        ep, out = by_seed[seed], {}
+        for c in cams:
+            key = f"videos/observation.images.{c}"
+            path = (f"{snaps[-1]}/videos/observation.images.{c}/chunk-{int(em.loc[ep, key + '/chunk_index']):03d}/"
+                    f"file-{int(em.loc[ep, key + '/file_index']):03d}.mp4")
+            out[c] = decode_video_frames(path, [float(em.loc[ep, key + "/from_timestamp"])], 1e-3, backend="pyav",
+                                         return_uint8=True)[0].permute(1, 2, 0).numpy()
+        return out
+    return frames
+
+
 class SceneVideo:
     """--video: one .mp4 per scene, the viewer's third-person view next to the policy's cameras, at sim speed.
     For when a live window can't keep up (K7 2026-11-15: the CPU held at 1 GHz froze the viewer)."""
@@ -265,6 +301,23 @@ def main():
     ap.add_argument("--fix-from", type=int, default=0,
                     help="--unstretch / --mc-dropout only from this plan of the scene on (0-based; 1 = leave the plan "
                          "made at the start frame as it is)")
+    # post-mortem 2026-11-20 (scripts/postmortem_v5: first_frame_check, claw_frame_leak, replay_raw_vs_recorded):
+    # the policy was trained on frames decoded from the dataset's video, and a recorded frame carries a trace of the
+    # frame AFTER it (the encoder codes a key frame together with the frame that follows; a 2-frame clip of raw frames
+    # reproduces the recorded frame exactly, a 1-frame clip does not). A test gives the raw render. At the start pose
+    # the claw camera sees the same wall in every scene, so that trace is all that differs between episodes there, and
+    # the plan made at the start frame follows it (about 110 mm after 1 s). These options change the pictures the
+    # policy PLANS from (ACT only looks at the observation when it makes a new plan); nothing else changes.
+    ap.add_argument("--start-frame", choices=("live", "recorded"), default="live",
+                    help="the pictures for the plan made at the start frame: live = the raw render (every test before "
+                         "2026-11-20), recorded = the training dataset's own frame 0 of that scene (a diagnostic for "
+                         "TRAINING scenes: needs the dataset's videos in the hub cache and its attempt logs)")
+    ap.add_argument("--start-claw", type=pathlib.Path, default=None,
+                    help="a picture file that replaces the claw camera's picture for the plan made at the start frame "
+                         "(at the start pose the claw camera sees the same wall in every scene)")
+    ap.add_argument("--codec-still", type=int, default=0, metavar="N",
+                    help="every live picture the policy plans from first goes through the dataset's video encoder, "
+                         "as a clip of N copies of itself (0 = off)")
     # post-mortem step 3 (2026-11-14): a fixed held-out set the teacher solves, and stay-home scenes
     ap.add_argument("--seeds-from", type=pathlib.Path, default=None,
                     help="a generate_truss.py attempt log (.jsonl): run its kept, non-hold seeds, at most --scenes")
@@ -373,6 +426,11 @@ def main():
         over.update(temporal_ensemble_coeff=None, n_action_steps=a.n_action_steps)
     policy, pre, post, pcfg = load_policy(policy_path, device, meta, over)
     infer = fix_inference(policy, a.unstretch, a.mc_dropout, a.fix_from) if (a.unstretch or a.mc_dropout) else None
+    pics_label = ", ".join(x for x in (
+        "first plan from the recorded frame" if a.start_frame == "recorded" else "",
+        f"first plan with claw picture {a.start_claw.stem}" if a.start_claw is not None else "",
+        f"planning pictures through the video encoder (x{a.codec_still})" if a.codec_still else "") if x)
+    infer = ", ".join(x for x in (infer, pics_label) if x) or None    # one label: the tables give each its own row
     if infer:
         print(f"⚠️ inference changed: {infer}", flush=True)
     wants_env = OBS_ENV_STATE in getattr(pcfg, "input_features", {})
@@ -423,6 +481,53 @@ def main():
             ys, yd = (slice(0, h - dy), slice(dy, h)) if dy >= 0 else (slice(-dy, h), slice(0, h + dy))
             img[yd, xd] = o[cam][ys, xs]
             o[cam] = img
+        return o
+
+    # ⚠️ not cameras(policy_path): main() imports a module named cameras further down, which shadows that helper here
+    plan_cams = sorted(k.split(".")[-1] for k in getattr(pcfg, "input_features", {})
+                       if k.startswith("observation.images."))
+    rec0 = recorded_start_frames(train_ds, plan_cams) if a.start_frame == "recorded" else None
+    claw0 = None
+    if a.start_claw is not None:
+        claw0 = cv2.imread(str(a.start_claw))
+        if claw0 is None:
+            sys.exit(f"⚠️ --start-claw: cannot read {a.start_claw}")
+        claw0 = cv2.cvtColor(claw0, cv2.COLOR_BGR2RGB)
+
+    def through_codec(img, n):
+        """A picture after the dataset's video encoding and decoding, as a clip of n copies of itself (first frame)."""
+        import tempfile
+
+        from lerobot.configs.video import RGBEncoderConfig
+        from lerobot.datasets.video_utils import decode_video_frames, encode_video_frames
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            d = pathlib.Path(td) / "imgs"
+            d.mkdir()
+            for i in range(n):
+                cv2.imwrite(str(d / f"frame-{i:06d}.png"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            v = pathlib.Path(td) / "clip.mp4"
+            # the encoder settings generate_truss.py records with (RGBEncoderConfig(vcodec="libsvtav1"))
+            encode_video_frames(d, v, expert.FPS, video_encoder=RGBEncoderConfig(vcodec="libsvtav1"), overwrite=True,
+                                log_level=None)
+            dec = decode_video_frames(str(v), [0.0], 1e-3, backend="pyav", return_uint8=True)
+            return dec[0].permute(1, 2, 0).numpy()
+
+    def plan_pictures(pol, obs, seed, first):
+        """--start-frame / --start-claw / --codec-still: the observation the policy plans from. Only when this call
+        makes a new plan (ACT's queue of commands is empty); otherwise, and without those options, obs itself."""
+        if not pics_label or len(getattr(pol, "_action_queue", ())) > 0:
+            return obs
+        o, given = dict(obs), set()
+        if first and rec0 is not None:
+            o.update(rec0(seed))
+            given |= set(plan_cams)
+        if first and claw0 is not None:
+            o["claw"] = claw0
+            given.add("claw")
+        if a.codec_still:
+            for c in plan_cams:
+                if c not in given:                     # a recorded picture has been through the encoder already
+                    o[c] = through_codec(np.asarray(o[c]), a.codec_still)
         return o
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
@@ -594,7 +699,8 @@ def main():
                         break
                     cmd = T.act([obs[f"{j}.pos"] for j in expert.arm_map.JOINTS])
                 else:
-                    cmd = act_of(policy, pre, post, wants_env, shifted(obs), env)
+                    cmd = act_of(policy, pre, post, wants_env, plan_pictures(policy, shifted(obs), seed, frames == 0),
+                                 env)
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
@@ -619,9 +725,24 @@ def main():
                     j_now = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                     w_now = rescue.truss_where(robot, k, j_now)
                     w_now["jaw_mm"] = (j_now * 1000).round(1).tolist()
+                    # what the clamp does to the stalk in this frame (TrussCutter): the weaker pad's force and the
+                    # moving blade's, 0 = that side isn't touching. Tells a truss cut outside the pads from one
+                    # the pads held too weakly (post-mortem 2026-11-20; traces before that date don't have it).
+                    w_now["pad_force_n"] = round(float(robot.cutters[k].pad_force), 2)
+                    w_now["squeeze_n"] = round(float(robot.cutters[k].squeeze), 2)
+                    # the command sent in this frame and the reading after it, per joint in arm_map.JOINTS order
+                    # (norm units). Tells a command that stops short from a motor that does not follow its command
+                    # (post-mortem 2026-11-20: the policy's arm ends its turn about 3 deg short of the stalk).
+                    w_now["cmd"] = [round(float(cmd[f"{j}.pos"]), 2) for j in expert.arm_map.JOINTS]
+                    w_now["q"] = [round(float(obs[f"{j}.pos"]), 2) for j in expert.arm_map.JOINTS]
                     if robot.cutters[k].cut_t is None:
-                        w_now["stalk_mm"] = (ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)[0]
-                                             * 1000).round(1).tolist()
+                        p_s = ts.cut_target_now(t_info, robot.d, robot.m, robot.cut_u)[0]
+                        w_now["stalk_mm"] = (p_s * 1000).round(1).tolist()
+                        # the same offset as aim_close's off_grip_mm, every frame: stalk's cut point seen from the
+                        # jaw's, in the gripper frame (x closing direction, y along the stalk, z along the fingers
+                        # with the fingertips at MINUS z, so + z = deeper in the jaw than the blade)
+                        w_now["off_grip_mm"] = (robot.d.xmat[gid].reshape(3, 3).T @ (p_s - j_now)
+                                                * 1000).round(1).tolist()
                     trace.write(json.dumps(dict(seed=seed, t=round(robot.d.time - t0, 2),
                                                 teacher=handed is not None or a.teacher_drives,
                                                 cut=robot.cutters[k].cut_t is not None,
@@ -737,9 +858,13 @@ def main():
             env = robot.env_state()
             policy.reset()
             start = np.asarray(robot._present_norm(), float)
-            watch, t0, moved = gt.Watch(robot), robot.d.time, 0.0
+            watch, t0, moved, first = gt.Watch(robot), robot.d.time, 0.0, True
             while robot.d.time - t0 < HOLD_EVAL_S:
-                robot.send_action(act_of(policy, pre, post, wants_env, obs, env))
+                # ⚠️ --start-frame recorded has no recorded frame for these seeds: holds are run with --start-claw
+                # or --codec-still only (rec0 is skipped here)
+                o_plan = obs if rec0 is not None else plan_pictures(policy, obs, seed, first)
+                robot.send_action(act_of(policy, pre, post, wants_env, o_plan, env))
+                first = False
                 obs = robot.get_observation()
                 watch.step()
                 moved = max(moved, float(np.abs(np.asarray(robot._present_norm(), float) - start).max()))

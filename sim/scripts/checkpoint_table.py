@@ -63,7 +63,7 @@ def table(run, scenes=25):
         else:
             n = a["scenes"]
             pol.append(f"| {step} | {a['success']}/{n} | {a['success_strict']}/{n} | {a['cut']}/{n} "
-                       f"| {a['in_crate']}/{n} | {a['closest_mm_median']} mm | {a['holds_ok']}/{a['holds']} |")
+                       f"| {a['in_crate']}/{n} | {a['closest_mm_median']:.1f} mm | {a['holds_ok']}/{a['holds']} |")
         if h is None:
             hyb.append(f"| {step} | … | … | … | … | … |")
         else:

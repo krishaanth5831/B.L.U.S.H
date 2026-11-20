@@ -94,7 +94,7 @@ def main():
     by = collections.defaultdict(list)
     for r in pool:
         by[cls(r)].append(r)
-    print("   gripper frame: x = closing direction, y = along the stalk, z = along the fingers (out of the jaw)")
+    print("   gripper frame: x = closing direction, y = along the stalk, z = along the fingers, + = toward the gripper body (the fingers run along -z)")
     for k in ("success", "cut, lost", "cut, other", "no cut"):
         v = [r for r in by[k] if r.get("aim_close")]
         if not v:
