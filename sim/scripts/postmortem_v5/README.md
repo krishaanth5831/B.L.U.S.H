@@ -11,6 +11,7 @@ Run from the `lerobot` env; the three `offline_*.py` scripts need the GPU for ab
 | `offline_sensitivity.py` | Which inputs decide where the jaw goes? | cue numbers followed 0.00-0.19 of the way; whole-image shift of 30 px moves the jaw 2-5 mm |
 | `offline_smoothness.py` | Are the commands jittery, do chunks join up? | speed changes 4x the teacher's; 18 mm jump at a hand-over; first command 12.7 mm from the arm |
 | `cell_geometry_and_claw_view.py` | Does the arm have room at the cut, and what does the wrist camera see of the stalk? | wrist joint within 10 units of its end stop in 201 of 736 cuts; wrist camera has the stalk at 4-5 px per mm from 1.5 s before the jaw shuts |
+| `offline_state_follow.py` | Does the policy steer by its own joint readings? | near the cut it follows a changed reading 0.6-0.9, the wrist joint only 0.36-0.48 |
 | `run_diag_batch1.sh` | Rollout batch: same test twice, teacher alone, training scenes, shifted cue / images | results in `outputs/diag/runs/<name>/` |
 | `analyse_batch1.py` | Reads that batch: noise floor, teacher vs policy aim, training vs held-out, does the jaw follow the cue | teacher 86/100; policy 13/50 on training scenes; 3 of 50 scenes flip between identical runs |
 | `analyse_after_cut.py` | After the cut, when is the truss lost? | policy: 19 of 64 cuts lost within 0.5 s; teacher: 11 of 100 miss the crate at release |
