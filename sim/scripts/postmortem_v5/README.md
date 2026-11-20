@@ -21,10 +21,11 @@ Run from the `lerobot` env; the `offline_*.py` scripts need the GPU for 2-4 minu
 ⚠️ The checkpoint's settings show the 6 cue numbers are NOT rescaled by the library (their input type is missing
 from `normalization_mapping`), while joints and actions are. Add `ENV` to that map in the next training command.
 
-⚠️ Dropout (0.1) makes the running answer differ from the training-mode answer: on training frames that gap is about
-half of the miss (`offline_train_vs_inference.py`). `eval_truss.py --unstretch 1.035` and `--mc-dropout 16`
-(`--fix-from 1` to leave the first plan alone) take it out at inference, with no training; rollout results are in the
-vault post-mortem. The one-position control had the same gap at 20k steps and had closed it by 40k.
+⚠️ With dropout 0.1 the running answer differs from the training-mode answer: on v5's training frames that gap is
+about half of the miss (`offline_train_vs_inference.py`). `eval_truss.py --unstretch 1.035` and `--mc-dropout 16`
+(`--fix-from 1` to leave the first plan alone) are two ways to run the policy closer to how it was trained, with no
+training; what they do in rollouts is in the vault post-mortem (so far: no clear gain). The one-position control,
+which worked, had a gap of the same size at 20k steps.
 
 `train_clean_50.jsonl`: the 50 clean training scenes used by the offline scripts and by the `train_clean` rollouts.
 
