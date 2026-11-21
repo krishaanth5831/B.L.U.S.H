@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Post-mortem 2026-11-20 (was outputs/notes/.../queue_pictures.sh): rollouts that test the picture finding (the policy was trained on frames decoded from
+# Post-mortem 2026-11-20: rollouts that test the picture finding (the policy was trained on frames decoded from
 # video; a test gives it the raw render; the plan made at the start frame depends on the difference).
-#   run <unit> <output folder> <seeds file> <scenes> <extra eval_truss flags...>
+#   run_traced_test.sh <unit> <output folder> <seeds file> <scenes> <extra eval_truss flags...>
 # One traced run per call, under the usual memory fuse. Never more than 3 simulator jobs at once: the caller decides.
 set -u
 REPO=/home/krishaanth/Desktop/personal_projects/github/vinea-so101/B.L.U.S.H

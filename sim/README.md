@@ -199,6 +199,22 @@ fired before the cut, and the teacher's real cut and crate times stay well insid
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
 
+Result (2026-11-19/20, 100 held-out scenes + 20 holds): 19/100 alone at 100k (13 at 20k, 12 at 70k), hybrid 60/100;
+the teacher alone 86/100. Post-mortem: `scripts/postmortem_v5/README.md` and the vault note `(C) BLUSH v5 Policy
+Post-Mortem and the Next Iteration (Nov 2026)`.
+
+⚠️ **The policy trains on pictures read back from the dataset's video and is tested on raw renders** (found
+2026-11-20). LeRobot's default encoder (SVT-AV1, crf 30, key frame every 2) puts a faint trace of the NEXT frame into
+every key frame. At the start pose the claw camera sees a blank wall, so in training that trace was the only thing
+telling episodes apart, and the policy learned to read the teacher's coming move from it; the raw test picture has
+none, and the first plan stopped about 5 deg short of the turn. Test-time corrections in `eval_truss.py`, no
+training: `--codec-still 1` (every picture the policy plans from goes through the dataset's encoder as a one-frame
+clip), `--start-frame recorded` (training scenes only: the first plan from the dataset's own frame 0, a diagnostic),
+`--unstretch 1.035` (divide out the 3.5 % stretch dropout leaves in the running answer), `--mc-dropout 16
+[--fix-from 1]`. On 50 training scenes the recorded start frame + `--unstretch` took 13/50 to 24/50. For the next
+dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
+lists the settings that do) and pass live pictures through the same step at test time.
+
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
 The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in

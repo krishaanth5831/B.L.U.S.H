@@ -171,6 +171,9 @@ def main():
     table("   teacher (train_teacher)", ["train_teacher"])
     table("   policy as trained, raw pictures (train_clean)", ["train_clean"])
     table("   first plan from the dataset's recorded start frame (train_recorded)", ["train_recorded"], ["train_clean"])
+    if trh.rows("train_recorded_unstretch"):
+        table("   ... and the stretch divided out of every plan (train_recorded_unstretch)", ["train_recorded_unstretch"],
+              ["train_recorded", "train_clean"])
     print("\nHELD-OUT SCENES")
     table("   teacher, first 50 scenes", ["teacher"])
     table("   policy as trained, first 50 scenes traced three times (base_a, base_b, base_c)", ["base_a", "base_b", "base_c"])
