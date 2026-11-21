@@ -38,7 +38,8 @@ def compare(old, new):
     only_o = [s for s in seeds if Ro[s]["success"] and not Rn[s]["success"]]
     only_n = [s for s in seeds if Rn[s]["success"] and not Ro[s]["success"]]
     print(f"\n{old} (3.8.1) against {new} (4.0.1), {len(seeds)} scenes in both")
-    print(f"   success {so} against {sn}; only under 3.8.1: {len(only_o)} {only_o[:8]}; only under 4.0.1: {len(only_n)} {only_n[:8]}")
+    print(f"   success {so} against {sn}; only under 3.8.1: {len(only_o)} {only_o[:8]}; "
+          f"only under 4.0.1: {len(only_n)} {only_n[:8]}")
     for k in ("cut", "in_crate"):
         print(f"   {k}: {sum(bool(Ro[s][k]) for s in seeds)} against {sum(bool(Rn[s][k]) for s in seeds)}")
     same_len = sum(Ro[s].get("frames") == Rn[s].get("frames") for s in seeds)
@@ -46,7 +47,8 @@ def compare(old, new):
     dcut = [first_cut_t(Tn[s]) - first_cut_t(To[s]) for s in seeds if s in To and s in Tn
             and first_cut_t(To[s]) is not None and first_cut_t(Tn[s]) is not None]
     if dcut:
-        print(f"   cut time, 4.0.1 minus 3.8.1: median {np.median(dcut):+.2f} s, largest {max(dcut, key=abs):+.2f} s ({len(dcut)} scenes cut in both)")
+        print(f"   cut time, 4.0.1 minus 3.8.1: median {np.median(dcut):+.2f} s, largest {max(dcut, key=abs):+.2f} s "
+              f"({len(dcut)} scenes cut in both)")
     line = []
     for t in LOOKS:
         d = []
