@@ -21,7 +21,7 @@ Run from the `lerobot` env; the `offline_*.py` scripts need the GPU for 2-4 minu
 | `turn_reach_height.py` | Which motion leaves the stalk beside the jaw: turn, reach or height? | 5.8 deg of turn left at 3.33 s, 3-3.5 deg at the closing; reach within 2.5 mm; jaw 12-15 mm low |
 | `offline_first_plan_turn.py` | Does the first plan finish the turn, on recorded frames? | yes, within about 1 deg (on RECORDED frames, which a test never gives it; see below) |
 | `first_frame_check.py` | Does the simulator's first observation match the recorded frame 0 of the same scene? | joints and cue identical; pictures 2.2 / 1.2 grey levels apart; the claw picture alone moves the plan 107 mm at 1 s |
-| `claw_frame_leak.py` | Does the claw camera's start picture tell the policy how the teacher will start? | yes: with the raw picture the first plan ends 6.8 deg short (11.7 at 20k), through the encoder alone 0.5 |
+| `claw_frame_leak.py` | Does the claw camera's start picture tell the policy how the teacher will start? | a little (the swap test); the big effect is the raw picture itself: the first plan ends 6.8 deg short (11.7 at 20k), the raw picture through the encoder alone (no trace) 0.5 |
 | `replay_raw_vs_recorded.py` | Through a replayed episode: raw against recorded pictures; which frames of a clip shape a stored frame | plans 46-110 mm apart at frame 0, 2-5 mm later; a stored frame depends on the next frame and nothing further |
 | `hold_or_go.py`, `hold_start_pictures.py` | Do the start pictures decide stay-home against go? | not on training episodes; held-out: the claw picture through the encoder sends 3 of 20 nothing-ripe plans off |
 | `encoder_leak_test.py` | Which encoder settings make a stored frame depend on its neighbours? | v5's: a trace of the next frame in every key frame; frame-independent: AV1 low delay + every frame a key frame (26 kB per frame), H.264 qp 18 every frame a key frame, lossless |
@@ -34,7 +34,9 @@ from `normalization_mapping`), while joints and actions are. Add `ENV` to that m
 
 ⚠️ **Training pictures are read back from the dataset's video; a test gives the policy raw renders** (2026-11-20).
 Every key frame of the video carries a trace of the next frame (SVT-AV1's look-ahead), and at the start pose that trace
-is the only difference between the claw camera's pictures of different episodes. Every offline number above was
+is the only difference between the claw camera's pictures of different episodes. The raw test picture lacks the compression
+texture altogether, and that, not the missing trace, threw the first plan off: an encoder clip without a next frame
+fixes it, and on training scenes scores 27/50 against 24/50 with the recorded frame. Every offline number above was
 computed on recorded frames: it describes the policy on its training input, not in a test. `eval_truss.py
 --codec-still 1` passes live pictures through the encoder before the policy plans; `--start-frame recorded` (training
 scenes only) uses the dataset's own frame 0. Results in the vault note, sections 4.5-4.6.

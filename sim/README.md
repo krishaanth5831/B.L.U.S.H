@@ -205,9 +205,10 @@ Post-Mortem and the Next Iteration (Nov 2026)`.
 
 ⚠️ **The policy trains on pictures read back from the dataset's video and is tested on raw renders** (found
 2026-11-20). LeRobot's default encoder (SVT-AV1, crf 30, key frame every 2) puts a faint trace of the NEXT frame into
-every key frame. At the start pose the claw camera sees a blank wall, so in training that trace was the only thing
-telling episodes apart, and the policy learned to read the teacher's coming move from it; the raw test picture has
-none, and the first plan stopped about 5 deg short of the turn. Test-time corrections in `eval_truss.py`, no
+every key frame. At the start pose the claw camera sees a blank wall, so in training the compression texture (lost
+detail plus that trace) was all there was in that picture; the raw test picture has none of it, and the first plan
+stopped about 5 deg short of the turn. The raw picture sent through the encoder alone (no next frame, so no trace)
+fixes the first plan: the texture did the damage, the trace is a readable leak on top. Test-time corrections in `eval_truss.py`, no
 training: `--codec-still 1` (every picture the policy plans from goes through the dataset's encoder as a one-frame
 clip), `--start-frame recorded` (training scenes only: the first plan from the dataset's own frame 0, a diagnostic),
 `--unstretch 1.035` (divide out the 3.5 % stretch dropout leaves in the running answer), `--mc-dropout 16
