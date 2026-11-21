@@ -211,7 +211,9 @@ none, and the first plan stopped about 5 deg short of the turn. Test-time correc
 training: `--codec-still 1` (every picture the policy plans from goes through the dataset's encoder as a one-frame
 clip), `--start-frame recorded` (training scenes only: the first plan from the dataset's own frame 0, a diagnostic),
 `--unstretch 1.035` (divide out the 3.5 % stretch dropout leaves in the running answer), `--mc-dropout 16
-[--fix-from 1]`. On 50 training scenes the recorded start frame + `--unstretch` took 13/50 to 24/50. For the next
+[--fix-from 1]`. On 50 training scenes the recorded start frame + `--unstretch` took 13/50 to 24/50; on the 100
+held-out scenes no correction raised success (16-21/100 against 19; hybrids 56-65 against 60), and `--codec-still 1`
+makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of them is the standing test condition. For the next
 dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
 lists the settings that do) and pass live pictures through the same step at test time.
 
