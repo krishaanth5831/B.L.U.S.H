@@ -12,7 +12,7 @@ Plan and reasoning: vault `08 SOARM101 Training/(C) BLUSH Sim Teleop Plan.md`.
 
 ## Watch it
 
-Run in the `lerobot` env (`conda activate lerobot`), from `sim/`. Every line opens a window.
+Run in the `lerobot-mj4` env (MuJoCo 4.0.1 since 2026-11-21; `conda activate lerobot-mj4`), from `sim/`. Every line opens a window.
 
 ```bash
 python view_scene.py --cams              # a truss scene + birdseye | claw exactly as recorded (green box + cross = target)
@@ -199,6 +199,13 @@ fired before the cut, and the teacher's real cut and crate times stay well insid
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
 
+**MuJoCo 4.0.1** (K7, 2026-11-21: all sim work on it from now on; env `lerobot-mj4`, `sim/scripts/mujoco4/`). Against
+3.8.1 on the same scenes: the teacher alone scores 87/100 against 86 (`compare_versions.py`), with the same cuts at the
+same moments and the jaw within 0.1 mm through the cut; three outcomes changed, all borderline landings at the
+release (2 gained, 1 lost). The check suite matches except `check_truss_cut.py`'s violent 5 mm shake, which pulls about
+5 % harder and releases one fruit that was already past its threshold on 3.8.1. Everything before this paragraph
+(datasets v3-v5, act_teacher_v5, the post-mortem) ran on 3.8.1.
+
 Result (2026-11-19/20, 100 held-out scenes + 20 holds): 19/100 alone at 100k (13 at 20k, 12 at 70k), hybrid 60/100;
 the teacher alone 86/100. Post-mortem: `scripts/postmortem_v5/README.md` and the vault note `(C) BLUSH v5 Policy
 Post-Mortem and the Next Iteration (Nov 2026)`.
@@ -262,7 +269,7 @@ frame's raw YOLO output, the target, and the weights' sha256 (new weights change
 
 ```bash
 ./fetch_so101.sh                  # SO-101 MJCF + meshes into assets/so101 (gitignored, ~16 MB)
-pip install -e plugin             # registers --robot.type=so101_mujoco in the lerobot env
+pip install -e plugin             # registers --robot.type=so101_mujoco in the env (lerobot-mj4)
 python build_finray_meshes.py     # only after changing the finger design; needs numpy shapely trimesh manifold3d
 ```
 

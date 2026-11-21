@@ -21,7 +21,7 @@ STEPS=${3:-100000}; FROM=${4:-20000}
 SEEDS=${SEEDS:-heldout_v5.jsonl}; N=${TEST_SCENES:-25}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 U=blush-$(echo "$RUN" | tr '_' '-')
-ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot"
+ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4"   # MuJoCo 4.0.1 since 2026-11-21 (K7); act_teacher_v5 ran on 3.8.1 (env lerobot)
 if [[ -z ${ONLY:-} ]]; then
   [[ -e $REPO/outputs/train/$RUN ]] && { echo "$REPO/outputs/train/$RUN exists"; exit 1; }
   systemd-run --user --unit="$U" --collect -q -p MemoryMax=12G -p MemorySwapMax=0 \
