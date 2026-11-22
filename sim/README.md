@@ -8,7 +8,7 @@ expert (`generate_truss.py`), not from a person on the leader.
 The single-fruit scene (fin-ray fingers plucking one fruit, 2026-10) and its tools were removed on 2026-11-08;
 its datasets were deleted on 2026-11-03.
 
-Plan and reasoning: vault `08 SOARM101 Training/(C) BLUSH Sim Teleop Plan.md`.
+Plan and reasoning: vault `08 Modules/BLUSH/(C) BLUSH Sim Teleop Plan.md`.
 
 ## Watch it
 
@@ -27,8 +27,8 @@ Without `--leader`, move the arm with the actuator sliders in the viewer's right
 Ctrl + right-drag pulls a tomato by hand; plucks and stalk cuts are printed in the terminal. Wayland prints
 `libdecor` / `GLFWError: window position` warnings, which are harmless.
 
-A trained policy (none right now: all were deleted on 2026-11-08; `scripts/train_sim.sh act-truss` writes the next
-one to `../outputs/train/act_truss_v1/`):
+A trained policy (local checkpoints in `../outputs/train/<run>/`, e.g. `act_teacher_v5`; the flags those runs are
+tested with are in "Teacher pipeline" below):
 
 ```bash
 python rollout_truss.py ../outputs/train/<run>/checkpoints/last/pretrained_model   # scene after scene
@@ -72,7 +72,8 @@ with `--hold-share` some scenes have nothing ready and the arm stays home.
 **Recording** (`generate_truss.py`): each seed is planned, dry-run with physics and judged; only a pass is
 rebuilt and recorded like `lerobot-record` (same features, units, AV1). Judged on the last frame: target truss
 cut and whole in the crate, no other truss cut, no fruit off, neighbours barely moved, arm back home.
-Defaults: rig `base`, 200 episodes into `krish5831/blush_sim_truss_v3` (the next dataset).
+Defaults: rig `base`, 200 episodes into `krish5831/blush_sim_truss_v3` (an unused name; every dataset since was
+recorded with an explicit `--repo-id`).
 
 ```bash
 export BLUSH_RIPENESS_PYTHON=$PWD/scripts/capped_ripeness_python.sh   # the YOLO worker in its own 3 GB scope
@@ -82,7 +83,7 @@ python generate_truss.py --dry --episodes 20 # plan + dry run + judge only: keep
 systemd-run --user --scope -q -p MemoryMax=12G -p MemorySwapMax=0 \
   python generate_truss.py --episodes 200 --repo-id krish5831/blush_sim_truss_v2 --rig base \
     --start-jitter-deg 3 --hold-share 0.10 --balance --seed-start 7600000
-lerobot-dataset-viz --repo-id krish5831/blush_sim_truss_v2 --episode-index 0   # what got recorded
+lerobot-dataset-viz --repo-id krish5831/blush_sim_scripted_v2 --episode-index 0   # what got recorded (renamed 2026-11-16)
 ```
 
 Writes the dataset under `~/.cache/huggingface/lerobot/<repo-id>`, the state log and
@@ -91,8 +92,9 @@ Writes the dataset under `~/.cache/huggingface/lerobot/<repo-id>`, the state log
 **DAgger** (`dagger_truss.py`, 2026-11-05): the policy drives a fresh scene; when it starts to veer off, the
 episode is rewound a little and the scripted expert finishes it. The recorded episode holds the policy's own
 actions up to the takeover. The sim runs on the checkpoint's rig. Defaults: `--policy` =
-`../outputs/train/act_truss_v1/checkpoints/last/pretrained_model` (not trained yet), appending to
-`krish5831/blush_sim_truss_v2`; it refuses a dataset whose cameras don't match the checkpoint's.
+`../outputs/train/act_truss_v1/checkpoints/last/pretrained_model` (never trained), appending to
+`krish5831/blush_sim_scripted_v2` (formerly `blush_sim_truss_v2`); it refuses a dataset whose cameras don't match the
+checkpoint's.
 
 **The truss YOLO** (`yolo_truss/`, sim-only weights, classes `truss_ready` / `truss_not_ready` / `cut_point`):
 `make_dataset.py` renders birdseye frames with labels from the sim's truth (lerobot-mj4 env), `train.sh v1` trains
@@ -103,16 +105,17 @@ YOLO11n into `../runs/yolo_truss/truss_v1/` and `train.sh eval v1` scores the fr
 
 | Dataset | Rig | Episodes |
 |---|---|---|
-| `krish5831/blush_sim_truss_v2` | base | 200 scripted (seeds 7600000+), ~10 % stay-home, 3° start jitter, targets spread along the row |
+| `krish5831/blush_sim_scripted_v2` (formerly `blush_sim_truss_v2`) | base | 200 scripted (seeds 7600000+), ~10 % stay-home, 3° start jitter, targets spread along the row |
 
-`blush_sim_truss_v1` (birdseye, 200 scripted + 100 DAgger) and the pilots were deleted on 2026-11-08.
+The teacher datasets (v3, its finisher, v5) are under "Teacher pipeline" below; `../harvest/datasets.md` lists every
+dataset. `blush_sim_truss_v1` (birdseye, 200 scripted + 100 DAgger) and the pilots were deleted on 2026-11-08.
 
-**Training** (`scripts/train_sim.sh`, run from the repo root): ⚠️ **ACT is the path** (K7 2026-11-08).
-`train_sim.sh act-truss` trains ACT on `blush_sim_truss_v2` with the box + cut point as numbers and temporal
-ensembling, 100k steps, a checkpoint every 10k into `outputs/train/act_truss_v1`, picked by graded rollouts
-(`eval_truss.py`), not by loss. Not started yet. The other recipes: `act-smoke [ds]` (500 steps on v2: data
-loads, loss falls), `act-full`, `merge <real_ds>`, `pi05-smoke`, `pi05-full`; the script header says what each
-does. SmolVLA was tried on the truss episodes and removed with its recipes on 2026-11-08.
+**Training** (`scripts/train_sim.sh`, run from the repo root): ⚠️ **ACT is the path** (K7 2026-11-08). The recipe
+in use is `act-teacher` on the teacher datasets, usually through `scripts/train_and_test.sh` (see "Teacher pipeline").
+`act-truss` (ACT on the scripted `blush_sim_scripted_v2` with the box + cut point as numbers and temporal ensembling)
+never got to its first checkpoint. The other recipes: `act-smoke [ds]` (500 steps: data loads, loss falls),
+`act-full`, `merge <real_ds>`, `pi05-smoke`, `pi05-full`; the script header says what each does. SmolVLA was tried
+on the truss episodes and removed with its recipes on 2026-11-08.
 
 ## Teacher pipeline (the post-mortem ladder, November 2026)
 
@@ -286,7 +289,11 @@ python check_plugin.py            # the plugin through lerobot on a truss scene:
 ```
 
 All print PASS/FAIL and write nothing (`check_plugin.py` uses a temp dir it deletes). ⚠️ `check_plugin.py`'s
-timing checks fail on the truss scene (Known gaps).
+timing checks fail on the truss scene (Known gaps) and swing with machine load: on 2026-11-22 (MuJoCo 4.0.1) the
+send_action + get_observation p95 was 9.6 ms in one run and 158.5 ms in the next, with other jobs running.
+Known failures on 4.0.1 (2026-11-22): `check_scene.py`'s gripper line (follower_white's open stop is 116.8°, the
+MJCF's 117.6°) and `check_truss_cut.py`'s 5 mm stalk under the violent shake (see "MuJoCo 4.0.1" above).
+`check_teacher.py` (the teacher's tests) is slow; run it under a memory cap as its docstring says.
 
 ## Files
 
@@ -307,13 +314,23 @@ timing checks fail on the truss scene (Known gaps).
 | `truss_ik.py`, `rrt.py` | IK for the cut pose; RRT-Connect routes around what the arm mustn't touch (from S.H.E.A.R) |
 | `truss_expert.py` | The scripted truss harvester (cut, carry, release, home; miss + recovery; takeovers for DAgger) |
 | `randomize.py` | Domain randomisation per scene seed (own RNG stream, so the layout doesn't change) |
-| `generate_truss.py` | Scripted truss episodes: dry run, judge, record |
+| `truss_teacher.py` | The deterministic closed-loop teacher (v5): the source of every dataset since v3 (`generate_truss.py --teacher`) |
+| `generate_truss.py` | Truss episodes from the scripted expert or the teacher: dry run, judge, record |
 | `dagger_truss.py` | DAgger: policy drives, expert takes over, recorded into the truss dataset |
 | `eval_truss.py`, `rollout_truss.py` | A truss policy in the sim, graded / just watched (windows; `eval_truss.py --headless` for batches) |
+| `rescue.py` | The "is the policy failing?" gate of `eval_truss.py --hybrid --trigger failing` |
+| `pick_checkpoint.py` | Tests every checkpoint of a training run by rollouts (`--watch` while it trains) |
+| `merge_parts.py`, `replay_check.py` | Merge a dataset recorded in parts; replay recorded episodes to check they reproduce |
+| `heldout_v3.jsonl`, `heldout_v3b.jsonl`, `heldout_v5.jsonl` | Held-out test scenes (seeds the teacher solves); the v3 ones belong to the old crate |
 | `view_scene.py` | The window on a truss scene; `--cams`, `--rig birdseye\|base`, `--overlay`, `--yolo-weights`, `--leader` reads the real leader |
-| `check_*.py` | Checks |
+| `check_*.py` | Checks (`check_teacher.py`: the teacher's own tests, slow, under a memory cap) |
+| `build_finray_meshes.py`, `fetch_so101.sh` | Finger meshes in `assets/finray/`; the SO-101 model into `assets/so101/` |
 | `yolo_truss/` | The truss YOLO: dataset from the sim's truth, training, frozen-test eval |
+| `scripts/` | lerobot wrappers (below), `train_and_test.sh`, `record_parts.sh`, `checkpoint_table.py`, `review_videos.py` |
 | `scripts/capped_ripeness_python.sh` | The ripeness env's python in its own 3 GB memory scope (the YOLO worker) |
+| `scripts/postmortem_v5/` | The v5 post-mortem's diagnostics (own README; they stay on the `lerobot` env, MuJoCo 3.8.1) |
+| `scripts/mujoco4/` | The 3.8.1 vs 4.0.1 comparison behind the port (2026-11-21) |
+| `whatif/` | November what-if patches and offline searches behind the teacher's constants (own README) |
 
 ## The layout
 
@@ -390,8 +407,11 @@ blades off it). Truss scenes use the same shape near-rigid (`scene.RIGID_FINGER_
   (`check_truss_cut.py`), truss YOLO (`truss_v1`, sim-only), scripted expert, DAgger.
 - ✅ Leader → sim: K7 drove the sim with the leader (2026-10-20, on the old single-fruit scene): joints and
   poses match. Nobody has teleoperated a truss scene yet, and it lags in real time (Known gaps).
-- ✅ `blush_sim_truss_v2` (rig base): 200 scripted, kept 200 of 534 attempts in 397 min, 25 % miss + recovery,
-  20 stay-home (`run_v2_rig_base.log`, 2026-11-06). The only dataset now.
-- ⬜ Policy: none. Earlier runs (single-fruit ACT, SmolVLA on truss v1) were deleted on 2026-11-08. Next:
-  ACT on v2 (`train_sim.sh act-truss`).
+- ✅ `blush_sim_scripted_v2` (formerly `blush_sim_truss_v2`, rig base): 200 scripted, kept 200 of 534 attempts in
+  397 min, 25 % miss + recovery, 20 stay-home (`run_v2_rig_base.log`, 2026-11-06).
+- ✅ Teacher v5 and dataset `blush_sim_teacher_v5` (800 episodes, 2026-11-19), recorded on MuJoCo 3.8.1.
+- ⚠️ Policy: `act_teacher_v5` (ACT on dataset v5) scores 19/100 alone and 60/100 with the teacher stepping in, against
+  86/100 for the teacher. Post-mortem in progress (`scripts/postmortem_v5/README.md`); nothing trains or records
+  until it is done.
+- ✅ Simulator on MuJoCo 4.0.1 since 2026-11-21 (env `lerobot-mj4`).
 - ⬜ Re-render tiers · ⬜ Real episodes + training
