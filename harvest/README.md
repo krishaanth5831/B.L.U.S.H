@@ -5,12 +5,14 @@ after ACT). The policy learns **how** to harvest; the ripeness gate (`../ripenes
 
 ⚠️ This folder was written for single-fruit picking (2026-10). Since 2026-11-03 the module harvests
 **whole trusses** (cut the stalk at the fingertips, carry the truss), which so far runs only in the sim
-(`../sim/README.md`, "Truss harvesting"). The vault notes 03–06 were written for truss cutting, so they fit
-again. Names and the task string in `harvest.env` are still single-fruit placeholders: lock them for
-trusses before the first real episode. Nothing here has recorded real episodes yet.
+(`../sim/README.md`, "Truss harvesting"). Names and the task string in `harvest.env` are still single-fruit
+placeholders: lock them for trusses before the first real episode. Nothing here has recorded real episodes
+yet, and none of these scripts has run on the real arm from this repo.
 
-⚠️ Policy choice now (K7 2026-11-08): **ACT**, as in the sim (`sim/scripts/train_sim.sh act-truss`).
-SmolVLA was tried on the sim truss episodes and removed on 2026-11-08.
+⚠️ Policy choice now (K7 2026-11-08): **ACT**, as in the sim. The sim policies are trained on the scripted
+teacher's episodes (`sim/scripts/train_sim.sh act-teacher`, `sim/scripts/train_and_test.sh`); the latest,
+`act_teacher_v5`, is under a post-mortem (`../sim/scripts/postmortem_v5/README.md`). SmolVLA was tried on the
+sim truss episodes and removed on 2026-11-08.
 
 ## Layout
 
@@ -24,7 +26,8 @@ harvest/
 │   ├── record.sh         one recording session (--resume for later ones)
 │   ├── check_dataset.py  episode count, camera keys, normalised-not-degrees
 │   ├── train_act.sh      smoke | full
-│   └── rollout.sh        eval (episodic, saved) | run (one shot)
+│   ├── rollout.sh        eval (episodic, saved) | run (one shot)
+│   └── hub_datasets.py   one-off (2026-11-16): renamed / uploaded every dataset to the Hub under the naming rule
 ├── yolo_overlay.py       draws the YOLO view (red detections + green target) into the frames; the sim uses it too
 ├── control/              target-centring controller (hybrid approach, see below; not built)
 ├── harvest_loop.py       gated v1 loop: gate → rollout → log
@@ -100,5 +103,5 @@ slow. Fumbled the align? Press ← and re-record. Don't correct on camera.
 7. `harvest_loop.py` over `plan/system_trials.csv`. Metrics: harvest success, gate
    recall, end-to-end ripe yield, **false-pick rate (target: 0)**, median time per pick.
 
-⚠️ Scripts are seeded from the vault notes (checked there against lerobot commit
-`5aa74557`) and **have not been run from this repo yet**.
+⚠️ Scripts are seeded from the vault's early BLUSH notes (checked there against lerobot commit
+`5aa74557`; those notes were retired on 2026-10-10) and **have not been run from this repo yet**.

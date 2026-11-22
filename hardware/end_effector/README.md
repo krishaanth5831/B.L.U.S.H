@@ -9,7 +9,7 @@ slider) with `python finray/view_gripper.py --stock`.
 ⚠️ **Whole-truss harvesting (K7 2026-11-03) needs other fingers**, so far only in the sim: rigid PLA
 fingers with a blade pair on the stem-side face of the tips and spring-loaded clamp pads on the rest of
 their width, so one close cuts the truss's stalk and holds it (`sim/scene.py` `add_cut_hold`,
-`sim/truss.py`; watch it with `python sim/check_truss_cut.py --windowed` in the lerobot env). There is no
+`sim/truss.py`; watch it with `python sim/check_truss_cut.py --windowed` in the lerobot-mj4 env). There is no
 printable CAD for them in this repo yet.
 
 ⚠️ Lock this before recording. The tool geometry is baked into every demonstration,

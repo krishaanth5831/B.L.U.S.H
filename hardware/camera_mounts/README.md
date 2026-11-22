@@ -9,10 +9,11 @@
   so the target is centred when the jaw is aimed right. Check full range of motion with
   the cable attached before recording.
 - **Base (sim only so far):** the sim's rig "base" (K7 2026-11-06, `sim/cameras.py`) puts the overview
-  camera low on a bracket left of the arm's base instead of the birdseye mast, and the truss dataset
-  `blush_sim_truss_v2` uses it. No bracket is drawn yet; its pose in `sim/scene.py` is the design guess.
+  camera low on a bracket left of the arm's base instead of the birdseye mast, and every sim truss dataset
+  since `blush_sim_scripted_v2` (formerly `blush_sim_truss_v2`) uses it. No printable bracket is drawn yet; its
+  pose in `sim/scene.py` is the design guess.
 
-What each camera sees, in the sim (lerobot env, a window with the birdseye | claw frames as recorded,
+What each camera sees, in the sim (lerobot-mj4 env, a window with the birdseye | claw frames as recorded,
 or base | claw with `--rig base`):
 
 ```bash
