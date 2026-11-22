@@ -35,9 +35,12 @@ they have.
 
 ## Envs
 
-- `lerobot`: recording, training, rollout (editable checkout at
-  `~/Desktop/personal_projects/github/lerobot`).
-- `ripeness`: YOLO only (`envs/ripeness.yml`). The two pin different
-  torch/opencv versions.
+- `lerobot-mj4`: simulator, recording, training, rollout on MuJoCo 4.0.1 (K7, 2026-11-21:
+  all sim work on 4.0.1 from now on; never 4.0.0, it has a solver bug). A clone of `lerobot`: the
+  same editable checkout at `~/Desktop/personal_projects/github/lerobot` and the same plugin.
+- `lerobot`: MuJoCo 3.8.1. Dataset v5, `act_teacher_v5` and the v5 post-mortem ran here, and
+  other repos (S.H.E.A.R, H.O.I.S.T, ...) still use it. Don't upgrade it in place.
+- `ripeness`: YOLO only (`envs/ripeness.yml`). It pins different torch/opencv versions from
+  the two lerobot envs.
 
 Hugging Face user is `krish5831`. GitHub user is `krishaanth5831`.

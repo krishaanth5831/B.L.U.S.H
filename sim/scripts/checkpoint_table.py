@@ -18,8 +18,11 @@ import time
 EVAL = pathlib.Path(__file__).resolve().parents[2] / "outputs" / "eval"
 
 
-def load(run):
-    """{step: {"alone": summary, "hybrid": summary, "why": Counter}} from the newest log of each (step, kind)."""
+def load(run, scenes=25):
+    """{(step, infer): {"alone": summary, "hybrid": summary, "why": Counter}} from the newest log of each (step,
+    infer, kind) that ran `scenes` scenes (⚠️ the 100-scene runs of the best checkpoints and short diagnostic re-runs
+    land in the same folder; without this filter they replaced a step's 25-scene row). infer: "" for the policy as
+    trained, else eval_truss.py's label of a changed inference (--unstretch, --mc-dropout), which gets its own row."""
     out = collections.defaultdict(dict)
     for f in sorted(EVAL.glob(f"{run}_[0-9][0-9][0-9][0-9][0-9][0-9]_*.jsonl"), key=lambda p: p.stat().st_mtime):
         step = int(re.match(rf"{re.escape(run)}_(\d{{6}})_", f.name).group(1))
@@ -27,40 +30,46 @@ def load(run):
         summ = [r for r in rows if r.get("summary")]
         if not summ:
             continue                                   # still running
+        if summ[-1].get("scenes") != scenes:
+            continue
         kind = "hybrid" if summ[-1].get("hybrid") else "alone"
-        out[step][kind] = summ[-1]
+        if kind == "hybrid" and (summ[-1].get("teacher_drives") or summ[-1].get("trigger") != "failing"):
+            continue                                   # the teacher-alone check and the old fixed hand-over
+        key = (step, summ[-1].get("infer") or "")
+        out[key][kind] = summ[-1]
         if kind == "hybrid":
-            scenes = [r for r in rows if not r.get("summary") and r.get("rescued")]
-            out[step]["why"] = collections.Counter((r.get("rescue_why") or "?").split(":")[0] for r in scenes)
-            out[step]["after_cut"] = sum(r.get("cut_t") is not None and r.get("rescue_t") is not None
-                                         and r["rescue_t"] >= r["cut_t"] for r in scenes)
+            resc = [r for r in rows if not r.get("summary") and r.get("rescued")]
+            out[key]["why"] = collections.Counter((r.get("rescue_why") or "?").split(":")[0] for r in resc)
+            out[key]["after_cut"] = sum(r.get("cut_t") is not None and r.get("rescue_t") is not None
+                                        and r["rescue_t"] >= r["cut_t"] for r in resc)
     return out
 
 
-def table(run):
+def table(run, scenes=25):
     """Two tables (K7 2026-11-19: "one test which is purely just the policy without the teacher stepping in anywhere
     and one hybrid"): the policy-only test, then the hybrid test, each on the same held-out scenes."""
-    t = load(run)
+    t = load(run, scenes)
     pol = ["**Policy only** (no teacher anywhere)", "",
            "| Step | Success | Clean (neighbours ≤ 15 mm) | Cut | In crate | Closest to cut point (median) "
            "| Holds left alone |", "|---|---|---|---|---|---|---|"]
     hyb = ["**Hybrid** (policy drives, teacher steps in only when it is failing)", "",
            "| Step | Success | Teacher stepped in | Takeovers that worked | Policy finished by itself "
            "| Why it stepped in |", "|---|---|---|---|---|---|"]
-    for step in sorted(t):
-        a, h = t[step].get("alone"), t[step].get("hybrid")
+    for key in sorted(t):
+        a, h = t[key].get("alone"), t[key].get("hybrid")
+        step = f"{key[0] // 1000}k" + (f" ({key[1]})" if key[1] else "")
         if a is None:
-            pol.append(f"| {step // 1000}k | … | … | … | … | … | … |")
+            pol.append(f"| {step} | … | … | … | … | … | … |")
         else:
             n = a["scenes"]
-            pol.append(f"| {step // 1000}k | {a['success']}/{n} | {a['success_strict']}/{n} | {a['cut']}/{n} "
-                       f"| {a['in_crate']}/{n} | {a['closest_mm_median']} mm | {a['holds_ok']}/{a['holds']} |")
+            pol.append(f"| {step} | {a['success']}/{n} | {a['success_strict']}/{n} | {a['cut']}/{n} "
+                       f"| {a['in_crate']}/{n} | {a['closest_mm_median']:.1f} mm | {a['holds_ok']}/{a['holds']} |")
         if h is None:
-            hyb.append(f"| {step // 1000}k | … | … | … | … | … |")
+            hyb.append(f"| {step} | … | … | … | … | … |")
         else:
-            n, after = h["scenes"], t[step]["after_cut"]
-            why = ", ".join(f"{k} {v}" for k, v in t[step]["why"].most_common()) or "-"
-            hyb.append(f"| {step // 1000}k | {h['success']}/{n} | {h['rescued']}/{n}"
+            n, after = h["scenes"], t[key]["after_cut"]
+            why = ", ".join(f"{k} {v}" for k, v in t[key]["why"].most_common()) or "-"
+            hyb.append(f"| {step} | {h['success']}/{n} | {h['rescued']}/{n}"
                        + (f" ({after} after the cut)" if after else "")
                        + f" | {h['rescued_ok']}/{h['rescued']} | {h['on_its_own_ok']}/{h['on_its_own']} | {why} |")
     return "\n".join(pol + [""] + hyb)
@@ -71,12 +80,14 @@ if __name__ == "__main__":
     ap.add_argument("run")
     ap.add_argument("--wait", type=int, help="block until both tests of this step are in (checks every 60 s)")
     ap.add_argument("--timeout-min", type=float, default=120)
+    ap.add_argument("--scenes", type=int, default=25, help="only the tests of this many scenes (the watch's 25; 100 "
+                                                            "for the full held-out runs of the best checkpoints)")
     a = ap.parse_args()
     if a.wait:
         t0 = time.time()
-        while not {"alone", "hybrid"} <= set(load(a.run).get(a.wait, {})):
+        while not {"alone", "hybrid"} <= set(load(a.run, a.scenes).get((a.wait, ""), {})):
             if time.time() - t0 > a.timeout_min * 60:
                 print(f"⚠️ step {a.wait}: not both tests in after {a.timeout_min:.0f} min")
                 break
             time.sleep(60)
-    print(table(a.run))
+    print(table(a.run, a.scenes))

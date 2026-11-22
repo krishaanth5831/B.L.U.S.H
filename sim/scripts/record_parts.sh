@@ -14,7 +14,7 @@ P=${3:?first part}; STRIDE=${4:?workers}; END=${5:?parts}
 SIM=$(cd "$(dirname "$0")/.." && pwd)
 LOGS=$SIM/../outputs/record_$(basename "$REPO_ID"); mkdir -p "$LOGS"
 GEN_ARGS=${GEN_ARGS:---teacher --no-dr --no-yolo --balance --hold-share 0.10 --noise-share 0.5 --retries 6 --max-attempts 900}
-source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot
+source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4   # MuJoCo 4.0.1 since 2026-11-21 (K7); dataset v5 was recorded on 3.8.1 (env lerobot)
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 RUN="systemd-inhibit --what=sleep:idle --why=blush_record systemd-run --user --scope -q -p MemoryMax=7G -p MemorySwapMax=0"
 while [ "$P" -lt "$END" ]; do

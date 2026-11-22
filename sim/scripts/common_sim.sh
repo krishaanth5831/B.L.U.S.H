@@ -56,5 +56,5 @@ if [[ -n "${DRYRUN:-}" ]]; then
   python() { if [[ "$1 $2" == "-m lerobot.async_inference.robot_client" ]]; then shift 2; printf 'CMD robot_client'; printf ' %q' "$@"; echo; else command python "$@"; fi; }
 fi
 python -c "import lerobot_robot_so101_mujoco" 2>/dev/null || {
-  echo "⚠️ sim plugin not installed in this env: conda activate lerobot && pip install -e $HERE/../plugin"; exit 1; }
+  echo "⚠️ sim plugin not installed in this env: conda activate lerobot-mj4 && pip install -e $HERE/../plugin"; exit 1; }
 echo "sim seed $SEED"

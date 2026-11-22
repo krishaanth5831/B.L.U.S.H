@@ -9,7 +9,8 @@ wrong); with eval_truss.py --record the takeovers become DAgger data (only scene
 
 Failing means one of (checked in this order, every frame):
   harm      before the cut: a neighbouring truss's fruit swung more than HARM_NEIGHBOUR_M (the data filter's
-            limit, so the teacher's own brushing never counts), the arm pressed the greenhouse / crate / table harder than gt.STRAIN_HARD_N, or a
+            limit, so the teacher's own brushing never counts), the arm pressed the greenhouse / crate / table
+            harder than gt.STRAIN_HARD_N, or a
             servo sat stalled at its force limit gt.STRAIN_STALL_FRAMES frames in a row (pressing on something)
   stuck     before the cut: for PROGRESS_S the jaw got no PROGRESS_M closer to where the cut point hangs now
   late      not cut LATE_X x + LATE_PAD_S after the teacher's own plan would have cut, or (after the cut) not in the
@@ -23,6 +24,14 @@ fired; a "stuck" rule for the carry fired in 7 of 20 (squeeze + retreat move the
 the carry heads for the crate), so the carry has the late rule only; the teacher moved neighbours up to 10 mm, so
 harm starts at the data filter's 15 mm, not at an earlier 10 mm; the plan's times run long (the teacher cut at
 0.80-0.88 x plan_cut_s and reached the crate at 0.79-0.89 x plan_drop_s), so late never comes near the teacher.
+
+⚠️ Takeovers after the cut never worked (0 of 55 over act_teacher_v5's 17 checkpoints, 2026-11-19). In the 3 traced
+(outputs/diag/trace_policy.jsonl) the truss had left the jaw within 0.5 s of the policy's cut and lay on the table when
+the late rule fired ~20 s later: nothing left to carry. Why the cut lets go is not known. A rule tried the same night
+("grip": the spring pads touch the stalk while the gripper is above 10, 3 frames in a row; seen in those 3 scenes from
+gripper ~20 on, not in the teacher's last 0.4 s before its cut on 5 scenes) FAILED the teacher check and was removed:
+it fired on the teacher in 18 of 20 scenes at gripper 28, 3.3-4.5 s in (the teacher's own slide-in brushes the stalk
+with a pad), outputs/diag/gate_grip_teacher.log. So pad contact with the jaw open does not tell a bad grasp apart.
 """
 import numpy as np
 
@@ -50,6 +59,31 @@ def plan_times(T):
         if g.name == "drop":
             drop_t = t
     return cut_t, drop_t
+
+
+def truss_where(robot, k, jaw_pt):
+    """Where the target truss is, for the takeover's record (is it still in the jaw, or already dropped?): the arm's
+    contacts with its stalk and fruit (and how many of them are the spring pads'), the stalk's nearest point to the
+    jaw's cut point, its lowest fruit's height,
+    and whether it is over the crate. For eval_truss.py's takeover record (truss_at_rescue) and --trace."""
+    r, m, d = robot, robot.m, robot.d
+    t = r.info["trusses"][k]
+    own = {m.geom(n).id for n in t["geoms"] + [f["geom"] for f in t["fruit"]]}
+    arm = pads = 0
+    for c in d.contact[:d.ncon]:
+        other = c.geom2 if c.geom1 in own else c.geom1 if c.geom2 in own else None
+        if other is None:
+            continue
+        b = m.body(m.geom_bodyid[other]).name
+        arm += b.startswith("arm/")
+        pads += b.startswith("arm/pad_")           # the spring pads (arm/pad_fixed_slide, arm/pad_moving_slide)
+    stalk = min(float(np.linalg.norm(d.geom_xpos[m.geom(n).id] - jaw_pt)) for n in t["geoms"])
+    low = min(float(d.xpos[m.body(f["tomato"]).id][2]) for f in t["fruit"])
+    (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
+    fx = np.mean([d.xpos[m.body(f["tomato"]).id][:2] for f in t["fruit"]], axis=0)
+    return dict(arm_contacts=arm, pad_contacts=pads, stalk_to_jaw_mm=round(stalk * 1000, 1),
+                lowest_fruit_z_mm=round(low * 1000, 1),
+                over_crate=bool(abs(fx[0] - cx) < sx / 2 and abs(fx[1] - cy) < sy / 2))
 
 
 class Gate:

@@ -12,7 +12,7 @@ Plan and reasoning: vault `08 SOARM101 Training/(C) BLUSH Sim Teleop Plan.md`.
 
 ## Watch it
 
-Run in the `lerobot` env (`conda activate lerobot`), from `sim/`. Every line opens a window.
+Run in the `lerobot-mj4` env (MuJoCo 4.0.1 since 2026-11-21; `conda activate lerobot-mj4`), from `sim/`. Every line opens a window.
 
 ```bash
 python view_scene.py --cams              # a truss scene + birdseye | claw exactly as recorded (green box + cross = target)
@@ -199,6 +199,33 @@ fired before the cut, and the teacher's real cut and crate times stay well insid
 ⚠️ Play whole chunks (`--n-action-steps 100`): ensembling and re-planning every 25 steps both failed in step 1.
 ⚠️ Pick checkpoints by rollouts: step 1 went 74 % at 20k, 95 % at 40k and 5 % at 50k with the loss flat.
 
+**MuJoCo 4.0.1** (K7, 2026-11-21: all sim work on it from now on; env `lerobot-mj4`, `sim/scripts/mujoco4/`). Against
+3.8.1 on the same scenes: the teacher alone scores 87/100 against 86 (`compare_versions.py`), with the same cuts at the
+same moments and the jaw within 0.1 mm through the cut; three outcomes changed, all borderline landings at the
+release (2 gained, 1 lost). The check suite matches except `check_truss_cut.py`'s violent 5 mm shake, which pulls about
+5 % harder and releases one fruit that was already past its threshold on 3.8.1. Everything before this paragraph
+(datasets v3-v5, act_teacher_v5, the post-mortem) ran on 3.8.1.
+
+Result (2026-11-19/20, 100 held-out scenes + 20 holds): 19/100 alone at 100k (13 at 20k, 12 at 70k), hybrid 60/100;
+the teacher alone 86/100. Post-mortem: `scripts/postmortem_v5/README.md` and the vault note `(C) BLUSH v5 Policy
+Post-Mortem and the Next Iteration (Nov 2026)`.
+
+⚠️ **The policy trains on pictures read back from the dataset's video and is tested on raw renders** (found
+2026-11-20). LeRobot's default encoder (SVT-AV1, crf 30, key frame every 2) puts a faint trace of the NEXT frame into
+every key frame. At the start pose the claw camera sees a blank wall, so in training the compression texture (lost
+detail plus that trace) was all there was in that picture; the raw test picture has none of it, and the first plan
+stopped about 5 deg short of the turn. The raw picture sent through the encoder alone (no next frame, so no trace)
+fixes the first plan: the texture did the damage, the trace is a readable leak on top. Test-time corrections in `eval_truss.py`, no
+training: `--codec-still 1` (every picture the policy plans from goes through the dataset's encoder as a one-frame
+clip), `--start-frame recorded` (training scenes only: the first plan from the dataset's own frame 0, a diagnostic),
+`--unstretch 1.035` (divide out the 3.5 % stretch dropout leaves in the running answer), `--mc-dropout 16
+[--fix-from 1]`. On 50 training scenes the recorded start frame + `--unstretch` took 13/50 to 24/50 (`--codec-still 1
+--unstretch 1.035`: 27/50); on the 100
+held-out scenes no correction raised success (16-21/100 against 19; hybrids 56-65 against 60), and `--codec-still 1`
+makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of them is the standing test condition. For the next
+dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
+lists the settings that do) and pass live pictures through the same step at test time.
+
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
 The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in
@@ -242,7 +269,7 @@ frame's raw YOLO output, the target, and the weights' sha256 (new weights change
 
 ```bash
 ./fetch_so101.sh                  # SO-101 MJCF + meshes into assets/so101 (gitignored, ~16 MB)
-pip install -e plugin             # registers --robot.type=so101_mujoco in the lerobot env
+pip install -e plugin             # registers --robot.type=so101_mujoco in the env (lerobot-mj4)
 python build_finray_meshes.py     # only after changing the finger design; needs numpy shapely trimesh manifold3d
 ```
 

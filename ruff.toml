@@ -7,3 +7,7 @@ select = ["E", "F", "W", "B"]
 # House style, not bugs: dense one-line statements (`a = 1; b = 2`), single-letter names from the maths
 # (l, I, O), and zip() without strict= (lengths are checked where they matter).
 ignore = ["E701", "E702", "E741", "B905"]
+
+[lint.per-file-ignores]
+# One-off post-mortem diagnostics: long report-formatting lines, kept as they were when the numbers were taken.
+"sim/scripts/postmortem_v5/*.py" = ["E501"]
