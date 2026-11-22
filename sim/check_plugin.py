@@ -8,7 +8,7 @@ It builds the robot through lerobot's own factory on a truss scene (SEED), drive
 episode with lerobot-record's feature pipeline and the AV1 encoder, reads it back, and sends one frame to rerun.
 Then rig "base" (base + claw cameras, the box on the base camera) and, if the truss YOLO is trained
 (generate_truss.YOLO_TRUSS), overlay=yolo for 15 s. Everything it writes goes to a temp dir ($TMPDIR honoured)
-that is deleted afterwards. Run in the lerobot env after `pip install -e plugin`.
+that is deleted afterwards. Run in the lerobot-mj4 env after `pip install -e plugin`.
 """
 import argparse
 import os

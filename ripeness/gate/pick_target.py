@@ -7,7 +7,7 @@
 Run directly for a live view on the claw camera:
     python ripeness/gate/pick_target.py [camera_index]
 
-Rule (vault note 02, step 8a):
+Rule (the vault's former note 02, step 8a):
   1. keep `ripe` boxes with conf >= t_ripe (t_ripe comes from eval_threshold.py, never set by eye)
   2. drop boxes touching the image edge (partly out of view, so ripeness is uncertain)
   3. of the rest, take the LARGEST box: usually the closest, least hidden fruit

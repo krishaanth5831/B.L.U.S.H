@@ -5,7 +5,8 @@ also put them on the hub and then delete locally and also keep a strict and good
     krish5831/<module>_<world>_<source>_v<N>[_<subset>][_<YYYYMMDDhhmm>]
       module  blush | shear | arm (an SO-101 test that belongs to no module)
       world   sim | real
-      source  teacher (closed-loop scripted teacher) | scripted (open-loop scripted expert) | teleop (a human, leader arm)
+      source  teacher (closed-loop scripted teacher) | scripted (open-loop scripted expert)
+              | teleop (a human, leader arm)
       vN      the version of that source (teacher v3, the v2 truss planner, the v1 / v2 camera rig)
       subset  only for a partial or special set: pilot | onelayout | onerow | markercup ...
       time    only for one-off real recordings: when the recording started
@@ -32,11 +33,13 @@ MAP = [
     ("blush_sim_teacher_v3_pilot", "blush_sim_teacher_v3_pilot", "B.L.U.S.H: 5-episode pilot of teacher v3"),
     ("blush_sim_teacher_onelayout_v1", "blush_sim_teacher_v3_onelayout",
      "B.L.U.S.H step 1: 50 noisy teacher-v3 episodes on one layout (seed 9100009)"),
-    ("blush_sim_truss_v2", "blush_sim_scripted_v2", "B.L.U.S.H: 200 episodes of the v2 scripted truss planner (SmolVLA era)"),
+    ("blush_sim_truss_v2", "blush_sim_scripted_v2",
+     "B.L.U.S.H: 200 episodes of the v2 scripted truss planner (SmolVLA era)"),
     ("shear_sim_teacher_v3", "shear_sim_teacher_v3", "S.H.E.A.R step 2: 600 teacher-v3 episodes (540 cuts, 60 holds)"),
     ("shear_sim_teacher_onerow_v1", "shear_sim_teacher_v3_onerow",
      "S.H.E.A.R step 1: 50 noisy teacher-v3 episodes on one row (910057)"),
-    ("shear_sim_scripted_v1", "shear_sim_scripted_v1", "S.H.E.A.R: 200 episodes of the v1 scripted expert (SmolVLA era)"),
+    ("shear_sim_scripted_v1", "shear_sim_scripted_v1",
+     "S.H.E.A.R: 200 episodes of the v1 scripted expert (SmolVLA era)"),
     ("marker_test_20260920_201308", "arm_real_teleop_v1_markercup_202609202013",
      "Real SO-101, leader-arm teleop: grab the marker, put it in the cup (camera rig v1)"),
     ("marker_test_20260920_213650", "arm_real_teleop_v1_markercup_202609202136",
@@ -89,7 +92,8 @@ def blob(p):
 def verify(name, local):
     info = api.dataset_info(f"{U}/{name}", files_metadata=True)
     remote = {s.rfilename: s for s in info.siblings}
-    files = [p for p in sorted(local.rglob("*")) if p.is_file() and not ({"images", ".cache"} & set(p.relative_to(local).parts))]
+    files = [p for p in sorted(local.rglob("*"))
+             if p.is_file() and not ({"images", ".cache"} & set(p.relative_to(local).parts))]
     bad = []
     for p in files:
         rel, s = str(p.relative_to(local)), remote.get(str(p.relative_to(local)))
@@ -110,7 +114,8 @@ def verify(name, local):
 def card(name, old, what):
     c = DatasetCard(f"---\nlicense: other\ntags:\n- LeRobot\n- vinea\n---\n# {U}/{name}\n\n{what}.\n\n"
                     + (f"Formerly `{U}/{old}`.\n\n" if old != name else "")
-                    + "Naming: `<module>_<world>_<source>_v<N>[_<subset>][_<YYYYMMDDhhmm>]`. Private, not for release.\n")
+                    + "Naming: `<module>_<world>_<source>_v<N>[_<subset>][_<YYYYMMDDhhmm>]`. "
+                    "Private, not for release.\n")
     c.push_to_hub(f"{U}/{name}", repo_type="dataset")
 
 
@@ -131,8 +136,9 @@ for old, new, what in MAP:
         step = f"upload the local copy as {new}"
     else:
         step = "NOT FOUND (no local copy, not on the Hub)"
+    hub = hub_old or hub_new
     print(f"{old} -> {new}: {step}; local copy {'yes' if has_local else 'no'}; "
-          f"{'private' if (hub_old or hub_new) and (hub_old or hub_new).private else 'public' if (hub_old or hub_new) else '-'}",
+          f"{'private' if hub and hub.private else 'public' if hub else '-'}",
           flush=True)
     if mode != "run":
         continue
@@ -153,7 +159,8 @@ for old, new, what in MAP:
     if mode in ("run", "verify") and has_local:
         allok &= verify(new, local)
 if mode == "verify":
-    for old, new, what in MAP:
+    for old, new, _what in MAP:
         if (L / old / "data").exists():
             allok &= verify(new, L / old)
-print("ALL VERIFIED" if allok and mode != "plan" else "done" if mode == "plan" else "SOMETHING NOT VERIFIED", flush=True)
+print("ALL VERIFIED" if allok and mode != "plan" else "done" if mode == "plan" else "SOMETHING NOT VERIFIED",
+      flush=True)

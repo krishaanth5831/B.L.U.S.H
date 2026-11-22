@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# record_sim.sh: record teleop demos in the sim (lerobot env). Same flags as harvest/scripts/record.sh.
+# record_sim.sh: record teleop demos in the sim (lerobot-mj4 env). Same flags as harvest/scripts/record.sh.
 #   sim/scripts/record_sim.sh            first session (creates $SIM_DATASET)
 #   sim/scripts/record_sim.sh --resume   later sessions (appends; every other flag must stay identical)
 #

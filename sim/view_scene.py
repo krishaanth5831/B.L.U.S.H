@@ -17,7 +17,7 @@ the true box alone (--overlay true_box, the default when no truss YOLO is traine
 
 --leader is the sign check from arm_map.py: move each leader joint on its own and check the sim joint
 turns the same way and lands where the real follower would. The leader is read only (no torque,
-no calibration written). Writes nothing. Run in the lerobot env.
+no calibration written). Writes nothing. Run in the lerobot-mj4 env.
 """
 import argparse
 import os

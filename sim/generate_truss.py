@@ -28,7 +28,7 @@ from a missed close; act_box_v1 never saw one, 2026-11-03 analysis), steered whi
 
 Writes: the dataset (~/.cache/huggingface/lerobot/<repo-id>), the sim state log (~/.cache/blush_sim/states/),
 the attempt log (~/.cache/blush_sim/truss/<name>_<stamp>.jsonl). Never pushes to the Hub.
-Run in the lerobot env under the memory cap (README / CLAUDE.md):
+Run in the lerobot-mj4 env under the memory cap (README / CLAUDE.md):
   BLUSH_RIPENESS_PYTHON=$PWD/scripts/capped_ripeness_python.sh systemd-run --user --scope -q -p MemoryMax=9G \\
       -p MemorySwapMax=0 python generate_truss.py ...
 """

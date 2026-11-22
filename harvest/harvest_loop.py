@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from ripeness.gate.pick_target import Gate  # noqa: E402
 
 CLAW_CAM = 2          # config/hardware.env; recheck per boot
-SETTLE_FRAMES = 15    # flush the buffer + let exposure settle (vault note 06)
+SETTLE_FRAMES = 15    # flush the buffer + let exposure settle (the vault's former note 06)
 LOG = ROOT / "harvest/logs/harvest_log.csv"
 FRAMES = ROOT / "harvest/gate_frames"   # gitignored. One jpg per trial, for checking wrong calls.
 OUTCOMES = ("success", "miss_approach", "bad_pick", "drop", "collision", "wrong_target")

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Teacher v5 via search, the pure-Python steps (2026-11-18):
-    via_pick.py cands via/cases_*.jsonl            # pool the RRT way-points, cluster (max-abs NORM_TOL) -> via/cands.json
+    via_pick.py cands via/cases_*.jsonl            # pool the RRT way-points, cluster (max-abs NORM_TOL)
+                                                   #   -> via/cands.json
     via_pick.py pick via/score_*.jsonl             # greedy: the via that unblocks the most NEW scenes, then the next
 A scene counts as unblocked when one of its blocked cases clears (the teacher needs one candidate)."""
-import glob
 import json
 import sys
 

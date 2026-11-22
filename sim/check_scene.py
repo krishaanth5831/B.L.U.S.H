@@ -7,7 +7,7 @@
 The fingertips' cut + hold are check_truss_cut.py's, the tethers check_tomato_release.py's.
 Watch it instead: python view_scene.py --cams [--rig base]
 
-Writes nothing. Run in the lerobot env.
+Writes nothing. Run in the lerobot-mj4 env.
 """
 import argparse
 import os

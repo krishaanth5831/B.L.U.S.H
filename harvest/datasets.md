@@ -66,9 +66,11 @@ Deleted:
 Sim policies train into `outputs/train/<run>/` (local, gitignored; `sim/scripts/train_sim.sh`
 names the run). Add a row here when one is pushed or evaluated with `sim/eval_truss.py`.
 
-None right now. Every earlier B.L.U.S.H policy (single-fruit ACT runs, SmolVLA LoRA / expert v1 / v2, and
-`act_truss_v1`, stopped before its first checkpoint) was deleted locally and on the Hub on 2026-11-08. Next:
-`sim/scripts/train_sim.sh act-truss` on `blush_sim_scripted_v2`.
+None on the Hub. Local only, in `outputs/train/`: `act_teacher_onelayout_v1` (post-mortem step 1),
+`act_teacher_v3` (step 3) and `act_teacher_v5` (ACT on `blush_sim_teacher_v5`, under a post-mortem since
+2026-11-20); their results are in `sim/README.md` ("Teacher pipeline"). Every earlier B.L.U.S.H policy
+(single-fruit ACT runs, SmolVLA LoRA / expert v1 / v2, and `act_truss_v1`, stopped before its first checkpoint) was
+deleted locally and on the Hub on 2026-11-08.
 
 | Hub repo | Type | Trained on | Steps | Where trained | Eval result (`plan/eval_trials.csv`) |
 |---|---|---|---|---|---|

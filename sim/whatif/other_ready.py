@@ -2,7 +2,7 @@
 """What-if for K7 (2026-11-18): in scenes where teacher v5 has no successful plan for the picked target, is there
 another ready truss it could harvest instead (the target picked by what the arm can reach, not by the most visible
 pixels)? Per seed: the ready trusses, and for each other one: teacher v5's plan + dry run + judge (retries off).
-    python other_ready.py SEED [SEED ...]     (run in the lerobot env from anywhere)"""
+    python other_ready.py SEED [SEED ...]     (run in the lerobot-mj4 env from anywhere)"""
 import json
 import os
 import sys

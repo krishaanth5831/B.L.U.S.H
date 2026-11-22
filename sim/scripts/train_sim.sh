@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# train_sim.sh: train on sim data, or on sim + real merged (lerobot env). Same recipes as harvest/scripts.
+# train_sim.sh: train on sim data, or on sim + real merged (lerobot-mj4 env). Same recipes as harvest/scripts.
 #   sim/scripts/train_sim.sh act-smoke [ds]   500 ACT steps on the laptop: data loads, both cameras, loss falls
 #   sim/scripts/train_sim.sh act-truss [ds]   ACT + box numbers + temporal ensembling on the rig "base" truss episodes (100k)
 #   sim/scripts/train_sim.sh act-teacher <ds> ACT on teacher-v3 data, augmentation on (STEPS, SAVE, RUN env vars)
@@ -11,7 +11,7 @@ set -euo pipefail
 source "$(dirname "$0")/common_sim.sh"
 OUT=outputs/train
 DS=${2:-$COTRAIN_DATASET}
-# π0.5 recipe from the vault's Throwaway Pilot step 11 (checked against lerobot 5aa74557).
+# π0.5 recipe from the vault's former Throwaway Pilot note, step 11 (checked against lerobot 5aa74557).
 PI05=(--policy.type=pi05 --policy.pretrained_path=lerobot/pi05_base
       --policy.normalization_mapping='{"ACTION": "MEAN_STD", "STATE": "MEAN_STD", "VISUAL": "IDENTITY"}'
       --policy.n_action_steps=10 --policy.empty_cameras=1 --policy.gradient_checkpointing=true

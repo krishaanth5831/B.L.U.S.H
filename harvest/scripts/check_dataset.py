@@ -1,4 +1,4 @@
-"""check_dataset.py: sanity checks on a recorded dataset before training (lerobot env).
+"""check_dataset.py: sanity checks on a recorded dataset before training (lerobot-mj4 env).
 
     python harvest/scripts/check_dataset.py krish5831/blush_pick_v1
 
@@ -11,7 +11,7 @@ import sys
 import torch
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-MIN_EPISODES = 100   # vault note 03: plan 150, keep >= 100 after deleting bad ones
+MIN_EPISODES = 100   # the vault's former note 03: plan 150, keep >= 100 after deleting bad ones
 NORM_LIMIT = 100.5   # use_degrees=false -> range-normalised to [-100, 100] (gripper [0, 100])
 
 d = LeRobotDataset(sys.argv[1])

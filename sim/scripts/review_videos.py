@@ -4,7 +4,7 @@ Base camera left, claw camera right, one mp4 per episode in outputs/videos/revie
 (short, middle, the longest), 1 noisy cut and 1 hold, from the generate_truss.py attempt logs of the parts
 (merged index = 25 * part + local index: merge_parts.py merges the parts in name order, 25 episodes each).
 ⚠️ One look only (K7 2026-11-19): delete the folder once the videos are approved or rejected.
-    python sim/scripts/review_videos.py krish5831/blush_sim_teacher_v5      (lerobot env; the merged local copy)"""
+    python sim/scripts/review_videos.py krish5831/blush_sim_teacher_v5      (lerobot-mj4 env; the merged local copy)"""
 import glob
 import json
 import pathlib

@@ -134,8 +134,9 @@ RIGID_FINGER_K_N_PER_MM = 40.0
 # Blade edge past the cap face: 4 mm squeezed a 3-5 mm stalk with 25-29 N against a 6.4-10.7 N cut force on
 # the rigid fingers (check_truss_cut.py, 2026-11-03); 6 mm cut too, with no gain.
 BLADE_PROTRUDE = 0.004
-BLADE_T_COL = 0.002              # collision thickness (SHEAR scene.BLADE_T_COL: a thinner box tunnels at 2 ms)
-BLADE_Y = {"fixed": (-0.009, -0.007), "moving": (-0.007, -0.005)}   # bypass: side by side in y, stem side
+# Bypass: side by side in y, stem side. Each blade is 2 mm thick in y (SHEAR scene.BLADE_T_COL: a thinner box
+# tunnels at 2 ms).
+BLADE_Y = {"fixed": (-0.009, -0.007), "moving": (-0.007, -0.005)}
 # Blade + pad extent along the finger (cap is -2..+2 mm). ⚠️ The closing tips aren't parallel, and an 8 mm
 # tall insert (-6..+2) let the squeezed stalk ride out over its palm end (3 mm stalk) or past its tip end
 # (5 mm) before the cut (check_truss_cut.py, 2026-11-03). Taller, with lips at both ends (PAD_LIP), it can't.

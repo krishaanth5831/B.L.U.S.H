@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rollout_sim.sh: run a trained policy on the sim arm (lerobot env). Same modes as harvest/scripts/rollout.sh.
+# rollout_sim.sh: run a trained policy on the sim arm (lerobot-mj4 env). Same modes as harvest/scripts/rollout.sh.
 #   sim/scripts/rollout_sim.sh eval <policy> <name>   20 saved episodes with resets (press N between them)
 #   sim/scripts/rollout_sim.sh run  <policy>          one 40 s run, nothing saved
 #   sim/scripts/rollout_sim.sh pi05 <policy>          π0.5 through async inference on the rented GPU

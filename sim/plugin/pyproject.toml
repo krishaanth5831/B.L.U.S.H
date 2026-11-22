@@ -1,5 +1,5 @@
 # lerobot finds this package by its name prefix (lerobot_robot_*) and imports it, which registers
-# --robot.type=so101_mujoco for every lerobot command. Install once into the lerobot env:
+# --robot.type=so101_mujoco for every lerobot command. Install once into the lerobot-mj4 env:
 #   pip install -e sim/plugin
 [build-system]
 requires = ["setuptools>=64"]

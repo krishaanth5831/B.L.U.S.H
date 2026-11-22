@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# record.sh: record one session of teleop picking demonstrations (lerobot env).
+# record.sh: record one session of teleop picking demonstrations (lerobot-mj4 env).
 #   harvest/scripts/record.sh            first session (creates the dataset)
 #   harvest/scripts/record.sh --resume   later sessions (appends; every other flag must stay identical)
 #
@@ -11,7 +11,7 @@ source "$(dirname "$0")/common.sh"
 EXTRA=()
 [[ "${1:-}" == "--resume" ]] && EXTRA+=(--resume=true)
 
-# Flags checked against lerobot commit 5aa74557 (vault note 03). After a `git pull` in the
+# Flags checked against lerobot commit 5aa74557 (the vault's former note 03). After a `git pull` in the
 # lerobot checkout, re-check with `lerobot-record --help`.
 lerobot-record "${ROBOT_FLAGS[@]}" "${TELEOP_FLAGS[@]}" \
   --dataset.repo_id="$DATASET" \

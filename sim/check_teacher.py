@@ -26,7 +26,7 @@ planning afresh from the arm and truss as they are now (replan), or by TrussTeac
 back to the plan's standoff, the plan's own cut). Judged like the episodes.
 
 Writes only the solve log ~/.cache/blush_sim/teacher/solve_<stamp>.jsonl (and nothing for repeat / push).
-Run in the lerobot env under the memory cap:
+Run in the lerobot-mj4 env under the memory cap:
   systemd-run --user --scope -q -p MemoryMax=9G -p MemorySwapMax=0 python check_teacher.py solve --scenes 200
 """
 import argparse

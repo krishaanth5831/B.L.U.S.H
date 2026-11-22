@@ -6,7 +6,7 @@
                                               prints the tether force; a plucked tomato drops.
   python check_tomato_release.py              headless checks, PASS/FAIL per check, exit 1 on a FAIL
 
-Writes nothing. Run in the lerobot env (it has mujoco).
+Writes nothing. Run in the lerobot-mj4 env (it has mujoco).
 The trusses are truss.truss_xml's (the harvest scenes' cuttable ones), hanging in free space off a stand-in
 knuckle; only the tethers (tomato.Detacher) are tested here, the stalk cut is check_truss_cut.py's.
 """

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# train_act.sh: ACT baseline (lerobot env).
+# train_act.sh: ACT baseline (lerobot-mj4 env).
 #   harvest/scripts/train_act.sh smoke   500 steps on the laptop: data loads, both camera keys listed, loss falls
 #   harvest/scripts/train_act.sh full    the real run, meant for the rented 4090
 set -euo pipefail

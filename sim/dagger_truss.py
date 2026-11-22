@@ -31,7 +31,7 @@ frame is logged per episode, so the policy prefix can be dropped or down-weighte
 Writes: appends to the dataset (~/.cache/huggingface/lerobot/<repo-id>, LeRobotDataset.resume), the sim state log
 (~/.cache/blush_sim/states/), the attempt log (~/.cache/blush_sim/truss/dagger_<stamp>.jsonl). Never pushes.
 ⚠️ Back up the dataset before a run (it appends in place; an interrupted run is finalized in `finally`).
-Run in the lerobot env, outside the Claude sandbox (GPU + display), under the memory cap, with
+Run in the lerobot-mj4 env, outside the Claude sandbox (GPU + display), under the memory cap, with
 BLUSH_RIPENESS_PYTHON set as for generate_truss.py.
 """
 import argparse
@@ -56,7 +56,8 @@ import truss_ik  # noqa: E402
 import truss_scene as ts  # noqa: E402
 
 DEFAULT_POLICY = HERE.parent / "outputs/train/act_truss_v1/checkpoints/last/pretrained_model"   # train_sim.sh act-truss
-DEFAULT_REPO = "krish5831/blush_sim_scripted_v2"   # formerly blush_sim_truss_v2; what act_truss_v1 trains on (rig "base")
+# formerly blush_sim_truss_v2; what act_truss_v1 trains on (rig "base")
+DEFAULT_REPO = "krish5831/blush_sim_scripted_v2"
 # v1 training 210000-210512, pilot 200000-200008, eval 5000000-5000019 + ~1.6e9; ⚠️ blush_sim_truss_v2 was
 # recorded from 7600000 (7600000-7600533), so a run past ~600k attempts would reach it
 DEFAULT_SEED = 7_000_000
