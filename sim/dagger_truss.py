@@ -56,7 +56,8 @@ import truss_ik  # noqa: E402
 import truss_scene as ts  # noqa: E402
 
 DEFAULT_POLICY = HERE.parent / "outputs/train/act_truss_v1/checkpoints/last/pretrained_model"   # train_sim.sh act-truss
-DEFAULT_REPO = "krish5831/blush_sim_scripted_v2"   # formerly blush_sim_truss_v2; what act_truss_v1 trains on (rig "base")
+# formerly blush_sim_truss_v2; what act_truss_v1 trains on (rig "base")
+DEFAULT_REPO = "krish5831/blush_sim_scripted_v2"
 # v1 training 210000-210512, pilot 200000-200008, eval 5000000-5000019 + ~1.6e9; ⚠️ blush_sim_truss_v2 was
 # recorded from 7600000 (7600000-7600533), so a run past ~600k attempts would reach it
 DEFAULT_SEED = 7_000_000

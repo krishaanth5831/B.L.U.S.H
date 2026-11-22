@@ -74,7 +74,7 @@ for s, r in R.items():
         fails[cls(dict(reason=last))] += 1
 print("failures (last reason):", dict(fails.most_common()))
 try_fail = collections.Counter()
-for s, r in R.items():
+for r in R.values():
     for t in r.get("tries", []):
         if not t["ok"]:
             try_fail[cls(dict(reason="dry run: " + t["why"]))] += 1
@@ -84,7 +84,8 @@ for s, r in R.items():
     k = cw[s]["n"] if s in cw else (r.get("plan") or {}).get("n_fruit")
     by_n[k][0] += s in kept
     by_n[k][1] += 1
-print("by fruit count (kept / seeds):", {k: f"{a}/{b}" for k, (a, b) in sorted(by_n.items(), key=lambda kv: str(kv[0]))})
+print("by fruit count (kept / seeds):",
+      {k: f"{a}/{b}" for k, (a, b) in sorted(by_n.items(), key=lambda kv: str(kv[0]))})
 st = [t["strain"] for r in R.values() for t in r.get("tries", []) if t.get("ok") and "strain" in t]
 if st:
     for key in ("hard_n", "sat_frames", "sat_run", "cmd_step", "cmd_acc"):
