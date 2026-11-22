@@ -42,7 +42,6 @@ SOFT_CLEARANCE = 0.002   # m kept from soft / firm things by default (SHEAR's ke
 STEP = np.radians(3.0)   # joint-space resolution of collision checks along a segment (largest joint)
 EXTEND = np.radians(12.0)    # RRT step: how far a tree grows toward a sample (design choice)
 MAX_ITERS = 4000         # per plan() call
-GOAL_BIAS = 0.15         # share of samples aimed at the other tree's newest node (RRT-Connect does this anyway)
 SHORTCUT_TRIES = 150     # random corner cuts per path (copied from S.H.E.A.R, unverified)
 
 
