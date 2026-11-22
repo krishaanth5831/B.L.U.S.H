@@ -31,7 +31,7 @@ frame is logged per episode, so the policy prefix can be dropped or down-weighte
 Writes: appends to the dataset (~/.cache/huggingface/lerobot/<repo-id>, LeRobotDataset.resume), the sim state log
 (~/.cache/blush_sim/states/), the attempt log (~/.cache/blush_sim/truss/dagger_<stamp>.jsonl). Never pushes.
 ⚠️ Back up the dataset before a run (it appends in place; an interrupted run is finalized in `finally`).
-Run in the lerobot env, outside the Claude sandbox (GPU + display), under the memory cap, with
+Run in the lerobot-mj4 env, outside the Claude sandbox (GPU + display), under the memory cap, with
 BLUSH_RIPENESS_PYTHON set as for generate_truss.py.
 """
 import argparse

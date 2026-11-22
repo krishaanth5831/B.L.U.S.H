@@ -19,7 +19,7 @@ evaluating each one once it is finished (lerobot points `checkpoints/last` at a 
 written, lerobot_train.py), until the checkpoint --until is ranked, or the training process --pid is gone and
 nothing new has landed. --from-step skips the early checkpoints. --cpu runs the rollouts with
 CUDA_VISIBLE_DEVICES="" so training keeps the GPU to itself.
-Run as eval_truss.py is run (lerobot env, outside the Claude sandbox, under systemd-run MemoryMax).
+Run as eval_truss.py is run (lerobot-mj4 env, outside the Claude sandbox, under systemd-run MemoryMax).
 """
 import argparse
 import json

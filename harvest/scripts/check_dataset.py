@@ -1,4 +1,4 @@
-"""check_dataset.py: sanity checks on a recorded dataset before training (lerobot env).
+"""check_dataset.py: sanity checks on a recorded dataset before training (lerobot-mj4 env).
 
     python harvest/scripts/check_dataset.py krish5831/blush_pick_v1
 

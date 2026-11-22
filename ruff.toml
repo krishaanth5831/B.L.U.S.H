@@ -1,4 +1,4 @@
-# Lint rules for the whole repo: `ruff check .` (ruff lives in the lerobot env: ~/miniforge3/envs/lerobot/bin/ruff).
+# Lint rules for the whole repo: `ruff check .` (ruff: ~/miniforge3/envs/lerobot-mj4/bin/ruff).
 line-length = 120
 extend-exclude = ["outputs", "runs", "sim/assets", "sim/.cache"]
 

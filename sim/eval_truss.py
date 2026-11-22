@@ -42,7 +42,7 @@ nothing moved) and the arm stayed within HOLD_MOVE_NORM of where it started. Rep
 Graded like generate_truss.judge, at the end of each scene: success = the target truss was cut and lies whole in
 the crate, no other truss was cut, no fruit came off anywhere. Also logged: cut at all, which fruit came off, how
 far the neighbours moved, time to the crate. Results: ../outputs/eval/<run>_<checkpoint>_<stamp>.jsonl.
-Nothing is pushed, and nothing is recorded without --record. Run in the lerobot env, outside the Claude sandbox
+Nothing is pushed, and nothing is recorded without --record. Run in the lerobot-mj4 env, outside the Claude sandbox
 (GPU + display), with BLUSH_RIPENESS_PYTHON set as for generate_truss.py (the YOLO worker).
 
 --record REPO_ID (with --hybrid --rejoin; the last-stage finisher's data, K7 2026-11-16): every scene from the

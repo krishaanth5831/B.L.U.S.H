@@ -1,6 +1,6 @@
 """yolo_worker.py: runs the ripeness YOLO for the sim, in the `ripeness` env.
 
-The sim runs in the `lerobot` env, which has no ultralytics, and the two envs pin different
+The sim runs in the `lerobot-mj4` env, which has no ultralytics, and the two envs pin different
 torch/opencv (CLAUDE.md). So yolo_client.py starts this script with the ripeness env's python and
 talks to it over pipes. Not meant to be run by hand.
 

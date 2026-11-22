@@ -4,7 +4,7 @@
     pick = select_target(dets, t_ripe=0.25, reach_mask=polygon)   # None = nothing to pick, skip
 
 `dets` is a list of {"box": (x0, y0, x1, y1), "cls": int, "conf": float}, i.e. YOLO output at a
-low conf. No ultralytics import here, so the sim (lerobot env) and the real gate share this rule.
+low conf. No ultralytics import here, so the sim (lerobot-mj4 env) and the real gate share this rule.
 
 Rule (BLUSH Roadmap M2.5, step 7): `ripe` >= t_ripe, box centre inside the reach mask, most
 confident; on a tie, the least overlapped by other boxes (least hidden).

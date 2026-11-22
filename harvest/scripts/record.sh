@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# record.sh: record one session of teleop picking demonstrations (lerobot env).
+# record.sh: record one session of teleop picking demonstrations (lerobot-mj4 env).
 #   harvest/scripts/record.sh            first session (creates the dataset)
 #   harvest/scripts/record.sh --resume   later sessions (appends; every other flag must stay identical)
 #

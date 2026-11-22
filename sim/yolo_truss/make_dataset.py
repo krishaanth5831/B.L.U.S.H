@@ -14,7 +14,7 @@ Split BY SEED, never by frame: train, val and a frozen test split live on disjoi
 (SEED_BASE), so no scene leaks between them. ⚠️ Sim-only: there are no real truss photos labelled yet, so
 this model says nothing about the real camera until it's checked on one.
 
-Run in the lerobot env (MuJoCo); training runs in the ripeness env (train.sh).
+Run in the lerobot-mj4 env (MuJoCo); training runs in the ripeness env (train.sh).
 """
 import argparse
 import json

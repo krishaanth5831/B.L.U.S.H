@@ -1,4 +1,4 @@
-"""yolo_client.py: a YOLO (the sim's truss YOLO) from the lerobot env, via yolo_worker.py in the ripeness env.
+"""yolo_client.py: a YOLO (the sim's truss YOLO) from the lerobot-mj4 env, via yolo_worker.py in the ripeness env.
 
     yolo = YoloClient(weights)     # starts the worker; loading the weights takes a few seconds
     dets = yolo(rgb)               # 640x480 RGB uint8 -> [{"box", "cls", "conf"}, ...]

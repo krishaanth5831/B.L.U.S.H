@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rollout.sh: run a trained policy on the follower (lerobot env).
+# rollout.sh: run a trained policy on the follower (lerobot-mj4 env).
 #   harvest/scripts/rollout.sh eval <policy_repo> <eval_name>   episodic: 20 saved episodes with resets, for the eval grid
 #   harvest/scripts/rollout.sh run  <policy_repo>               one 40 s run, nothing saved
 #

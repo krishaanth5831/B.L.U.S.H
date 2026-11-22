@@ -95,7 +95,7 @@ actions up to the takeover. The sim runs on the checkpoint's rig. Defaults: `--p
 `krish5831/blush_sim_truss_v2`; it refuses a dataset whose cameras don't match the checkpoint's.
 
 **The truss YOLO** (`yolo_truss/`, sim-only weights, classes `truss_ready` / `truss_not_ready` / `cut_point`):
-`make_dataset.py` renders birdseye frames with labels from the sim's truth (lerobot env), `train.sh v1` trains
+`make_dataset.py` renders birdseye frames with labels from the sim's truth (lerobot-mj4 env), `train.sh v1` trains
 YOLO11n into `../runs/yolo_truss/truss_v1/` and `train.sh eval v1` scores the frozen test split (ripeness env).
 `generate_truss.py`, `view_scene.py` and the `scripts/` wrappers use those weights when they exist.
 
@@ -302,7 +302,7 @@ timing checks fail on the truss scene (Known gaps).
 | `lens.py` | The InnoMaker 130° lens on MuJoCo's pinhole cameras: render wider, remap through a fisheye model (OpenCV `cv2.fisheye` K, D). ⚠️ Guessed from the spec; a calibration in `cameras.json` replaces it |
 | `cameras.py` | Renders `birdseye`, `base` and `claw` through the lens (`RIG_CAMERAS`: which two the policy gets); true boxes from the segmentation render |
 | `../harvest/yolo_overlay.py` | Draws the YOLO view; shared with the real recordings and rollout |
-| `yolo_worker.py`, `yolo_client.py` | The YOLO in the `ripeness` env (no ultralytics in the lerobot env); frames through `/dev/shm`. Needs weights |
+| `yolo_worker.py`, `yolo_client.py` | The YOLO in the `ripeness` env (no ultralytics in the lerobot-mj4 env); frames through `/dev/shm`. Needs weights |
 | `expert.py` | Shared arm motion for the truss expert: `ArmIK`, `Plan`, min-jerk, timing constants |
 | `truss_ik.py`, `rrt.py` | IK for the cut pose; RRT-Connect routes around what the arm mustn't touch (from S.H.E.A.R) |
 | `truss_expert.py` | The scripted truss harvester (cut, carry, release, home; miss + recovery; takeovers for DAgger) |

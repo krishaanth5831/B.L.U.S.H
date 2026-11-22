@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# train_sim.sh: train on sim data, or on sim + real merged (lerobot env). Same recipes as harvest/scripts.
+# train_sim.sh: train on sim data, or on sim + real merged (lerobot-mj4 env). Same recipes as harvest/scripts.
 #   sim/scripts/train_sim.sh act-smoke [ds]   500 ACT steps on the laptop: data loads, both cameras, loss falls
 #   sim/scripts/train_sim.sh act-truss [ds]   ACT + box numbers + temporal ensembling on the rig "base" truss episodes (100k)
 #   sim/scripts/train_sim.sh act-teacher <ds> ACT on teacher-v3 data, augmentation on (STEPS, SAVE, RUN env vars)
