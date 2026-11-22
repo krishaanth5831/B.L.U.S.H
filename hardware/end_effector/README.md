@@ -15,7 +15,7 @@ printable CAD for them in this repo yet.
 ⚠️ Lock this before recording. The tool geometry is baked into every demonstration,
 so changing it afterwards throws the episodes away.
 
-From the vault (note 01, written for truss cutting; still relevant):
+From the vault's former note 01 (written for truss cutting, retired 2026-10-10; still relevant):
 
 - lerobot limits gripper torque on every connect (`so_follower.py`: `Max_Torque_Limit`
   500, `Protection_Current` 250, `Overload_Torque` 25). Design for about **half**

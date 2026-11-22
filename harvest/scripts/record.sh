@@ -11,7 +11,7 @@ source "$(dirname "$0")/common.sh"
 EXTRA=()
 [[ "${1:-}" == "--resume" ]] && EXTRA+=(--resume=true)
 
-# Flags checked against lerobot commit 5aa74557 (vault note 03). After a `git pull` in the
+# Flags checked against lerobot commit 5aa74557 (the vault's former note 03). After a `git pull` in the
 # lerobot checkout, re-check with `lerobot-record --help`.
 lerobot-record "${ROBOT_FLAGS[@]}" "${TELEOP_FLAGS[@]}" \
   --dataset.repo_id="$DATASET" \
