@@ -12,9 +12,9 @@
 set -euo pipefail
 RUN=${1:?run name, e.g. act_teacher_v5b64}; shift
 CKS=("$@"); [[ ${#CKS[@]} -gt 0 ]] || { echo "give the checkpoints, e.g. 070000 065000"; exit 1; }
-WORKERS=${WORKERS:-3}; SCENES=${SCENES:-100}; HOLDS=${HOLDS:-20}
+WORKERS=${WORKERS:-3}; SCENES=${SCENES:-100}; HOLDS=${HOLDS:-20}; KINDS=${KINDS:-alone hybrid}   # KINDS=hybrid: that pass only
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-U=blush-$(echo "$RUN" | tr '_' '-')-full
+U=blush-$(echo "$RUN" | tr '_' '-')-full${TAG:+-$TAG}   # TAG: a second batch of units next to a first
 ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4"   # MuJoCo 4.0.1 (K7 2026-11-21)
 COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from heldout_v5.jsonl --scenes $SCENES"
 for ((w = 0; w < WORKERS; w++)); do
@@ -26,7 +26,7 @@ for ((w = 0; w < WORKERS; w++)); do
   systemd-run --user --unit="$U-w$w" --collect -q -p MemoryMax=7G -p MemorySwapMax=0 \
     systemd-inhibit --what=sleep:idle --why="B.L.U.S.H full tests $RUN" \
     bash -c "$ENV && cd $REPO/sim && export MUJOCO_GL=egl OMP_NUM_THREADS=2 && \
-      for ck in ${mine[*]}; do $PC $COMMON --holds $HOLDS >> $REPO/outputs/full_${RUN}_w${w}_alone.log 2>&1; done; \
-      for ck in ${mine[*]}; do $PC $COMMON --hybrid --rejoin --trigger failing >> $REPO/outputs/full_${RUN}_w${w}_hybrid.log 2>&1; done"
+      if [[ \" $KINDS \" == *' alone '* ]]; then for ck in ${mine[*]}; do $PC $COMMON --holds $HOLDS >> $REPO/outputs/full_${RUN}_w${w}_alone.log 2>&1; done; fi; \
+      if [[ \" $KINDS \" == *' hybrid '* ]]; then for ck in ${mine[*]}; do $PC $COMMON --hybrid --rejoin --trigger failing >> $REPO/outputs/full_${RUN}_w${w}_hybrid.log 2>&1; done; fi"
   echo "$U-w$w: ${mine[*]}"
 done
