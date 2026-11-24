@@ -191,6 +191,15 @@ STANDOFF_M_V5 = STANDOFF_M + (0.06, 0.08, 0.10)
 # (2026-11-18). The fruit count shows in the picture, so the pace varies with what the camera sees (R2).
 BIG_TRUSS_N = 8
 CARRY_SLOW_BIG = 0.6
+# --- v6 world (jaw "v6", 30 x 28 crate; K7 2026-11-24). Only with the v6 jaw: a v5 scene plans as before. Grid round 2
+# (base_grid.py, 30 tuning scenes per base, first plan only): the truss's own fruit came off while LOWERING it into the
+# crate in 3-4 of 30 scenes at every base, and on the way HOME in 1-2 (the way home ignores the dropped truss); with the
+# new start poses also while carrying (2-4 of 30). The v6 jaw lets the held truss swing more than v5's (catch map: drift
+# 0.5 s after the cut median 13.7 mm, v5 8.0). ---
+V6_CARRY_SCALE = 0.67        # every carry at 0.67 x v4's pace = 0.4 x the joint speed (v5: 0.6, 8-fruit trusses 0.36)
+V6_SETTLE_ABOVE_S = 0.8      # hold above the crate before lowering, so the swing dies down (guess: ~2 swings of a
+#                              12-15 cm pendulum)
+V6_LIFT_HOME = True          # after the drop: straight back up the lowering line, the way home planned from up there
 # Phase C's order and budget: cut point, then (strict and brush first, each at every stalk tilt, then push at every
 # tilt) approach angle, so a clean tilted cut comes before pressing neighbours, and the long tail of cut points
 # comes last (every phase-C plan kept on the tuning set so far cut at u 0.5, 2026-11-18). At most PHASE_C_MAX
@@ -311,6 +320,7 @@ class TrussTeacher(tx.TrussPlanner):
         add_self_check(self.chk)
         self.legs, self.phases, self.meta = [], [], {}
         self.q_home = np.asarray(scene.START_NORM, float)
+        self.v6 = scene.jaw_of(m) == "v6"      # the v6 world's carry, settle and lift (V6_*)
         self._vias = []
         self._search, self._skip, self.n_plans, self._avoid = None, True, 0, set()
         self._legs_c, self._std_c = {}, {}     # (mode, u, beta[, tilt]) -> cut leg / route to the standoff
@@ -780,11 +790,12 @@ class TrussTeacher(tx.TrussPlanner):
             return "retreat -> crate blocked, via-pose too"
         self.jaw(tx.JAW_OPEN_DEG)
         q_start = self.fm.norm_to_rad(self.q_home)[:5]
-        home, detour_home = self.free_move(lower[-1], q_start, self.chk, r, extra=extra, ignore=self.target_all,
-                                           firm=False, **self.kw)
+        lift = list(reversed(lower)) if self.v6 and V6_LIFT_HOME and len(lower) > 1 else None
+        home, detour_home = self.free_move((lift or lower)[-1], q_start, self.chk, r, extra=extra,
+                                           ignore=self.target_all, firm=False, **self.kw)
         if home is None:
             return "crate -> start blocked, via-pose too"
-        return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home,
+        return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home, lift=lift,
                     detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
                     release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1), release_fallback=alternate)
 
@@ -904,14 +915,22 @@ class TrussTeacher(tx.TrussPlanner):
         lead_ret, lead_car = cart_lead(rest["ret"], ret_m, CART_M_S), CARRY_LEAD
         if k is not None:
             lead_ret, lead_car = lead_ret * k, lead_car * k
+        if self.v6:
+            lead_car = min(lead_car, CARRY_LEAD * V6_CARRY_SCALE)
         L.append(Leg("retreat", n5(rest["ret"]), jaw=CLOSE_NORM, lead=lead_ret))
         L.append(Leg("to_crate", n5(rest["to_crate"]), jaw=CLOSE_NORM, lead=lead_car))
         if len(rest["lower"]) > 1:
+            if self.v6:
+                L.append(Leg("settle_above", hold=n5([rest["lower"][0]])[0], jaw=CLOSE_NORM,
+                             frames=f(V6_SETTLE_ABOVE_S)))
             L.append(Leg("lower", n5(rest["lower"]), jaw=CLOSE_NORM,
                          lead=cart_lead(rest["lower"], tx.ABOVE_CRATE_M, CART_M_S)))
         x_rel = n5([rest["lower"][-1]])[0]
         L.append(Leg("release", hold=x_rel, jaw_to=(CLOSE_NORM, g_open), frames=f(RELEASE_S)))
         L.append(Leg("drop", hold=x_rel, jaw=g_open, frames=f(DROP_S)))
+        if rest.get("lift"):
+            L.append(Leg("lift", n5(rest["lift"]), jaw=g_open,
+                         lead=cart_lead(rest["lift"], tx.ABOVE_CRATE_M, CART_M_S)))
         L.append(Leg("return", n5(rest["home"]), jaw_to=(g_open, g_start), lead=FREE_LEAD))
         L.append(Leg("hold_end", hold=self.q_home[:5], jaw=g_start, frames=f(HOLD_END_S)))
         self.legs = L

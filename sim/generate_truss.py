@@ -87,7 +87,8 @@ NOISE_RHO = 0.9                  # guess, unverified
 NOISE_SHARE = 0.5                # share of teacher episodes with noise (post-mortem 6.2: "on about half")
 # No noise at the stalk, at the crate or going home (the judge wants the arm within START_TOL_NORM of the start pose
 # 0.3 s after the return); half on the slide (2 cm pushes there failed 4 of 18 in check_teacher.py push).
-NOISE_OFF = {"settle_at_stalk", "close_cut", "squeeze", "lower", "release", "drop", "return", "hold_end"}
+NOISE_OFF = {"settle_at_stalk", "close_cut", "squeeze", "settle_above", "lower", "release", "drop", "lift", "return",
+             "hold_end"}   # settle_above, lift: the v6 teacher's (truss_teacher V6_*)
 NOISE_SCALE = {"slide_in": 0.5}
 # --retries (teacher v5, 2026-11-18): a scene whose dry run fails gets the teacher's next plan (TrussTeacher.next_plan),
 # up to this many more dry runs. ⚠️ The teacher's model of where a dropped truss lands is off by 42-131 mm against the
@@ -100,7 +101,7 @@ RETRIES = 6                      # guess: the release fallback's kept plans used
 # with the next release pose; before it, the next candidate with another approach (TrussTeacher.next_plan
 # avoid_approach: neighbour mode, approach angle and stalk tilt). ⚠️ Without that, 9900005 retried 5 candidates that
 # differed only in the cut point (1-2 mm apart) and moved the same neighbour fruit 62-68 mm each time (2026-11-18).
-RELEASE_PHASES = {"to_crate", "lower", "release", "drop", "return", "hold_end"}
+RELEASE_PHASES = {"to_crate", "settle_above", "lower", "release", "drop", "lift", "return", "hold_end"}
 STALL_RAD_S = 0.05               # Watch: a joint slower than this counts as standing still (guess)
 # The post-mortem's data filter (§6.2: "drop episodes with collisions, forces over the limits, or jerky motion"),
 # judged since 2026-11-18. Limits about twice the worst of 59 clean teacher v5 dry runs on the held-out seeds (arm on
