@@ -58,7 +58,10 @@ BLADE_OUT = 3.0       # blade edge past the inner face
 BLADE_CROSS = 2.0     # the two blade edges overlap this much at the closed stop (bypass)
 BLADE_T = 0.40        # 9 mm snap-off blade thickness (0.38-0.40 typical)
 BLADE_H = 9.0         # blade height (the snap-off blade's width): BLADE_H - BLADE_OUT sits in the slot
-SLOT_CLR = 0.10       # slot clearance per side; the pinch screws close it
+# Print fits (FDM, PLA/PETG, 0.4 mm nozzle; K7 2026-11-24: parts printed with nominal fits needed sanding). Starting
+# values to tune after a test print; checks() prints them as a table.
+FIT_SLIDE = 0.30      # per side: parts that must slide freely (the TPU pad in its pocket)
+SLOT_CLR = 0.15       # per side: the blade slot; snug, the M2 pinch screws close it
 # Blade planes (gripper y): fixed then moving, neighbouring (bypass). The stem side is -y (truss.py: the stalk's
 # stem end is on the blade side). SIM_BLADE_Y are the simulator's 2 mm boxes centred on them (contact robustness, as
 # the v5 sim jaw's BLADE_Y).
@@ -73,8 +76,9 @@ PAD_POCKET = PAD_TRAVEL + PAD_FACE_T - (BLADE_OUT + PAD_PROUD - PAD_FACE_T) + 1.
 PAD_PRELOAD_N = 1.5   # spring force at rest (both springs together). guess: the stalk can't push the pads back
 PAD_K_N_PER_MM = 0.5  # both springs together: 1.5 N at rest, 4.25 N at full travel. Two springs ~4 x 10 mm,
                       # 0.25 N/mm each (common hardware assortment), guess
-M2_D = 2.2            # pinch screw clearance
-SPRING_D = 4.4        # spring pocket diameter (4 mm OD springs)
+M2_D = 2.5            # M2 pinch screw clearance hole (printed holes shrink ~0.2-0.3 mm)
+SPRING_OD = 4.0       # the springs' outer diameter
+SPRING_D = SPRING_OD + 0.8   # spring pocket diameter: the springs must move freely
 GRIPPER_TORQUE_NM = 0.5 * 3.35   # scene.GRIPPER_TORQUE: lerobot sets Max_Torque_Limit 50 % of the MJCF's 3.35 N.m
 OVERLOAD_TORQUE_NM = 0.25 * 3.35  # what the servo drops to once stalled long enough (lerobot Overload_Torque 25 %)
 CUT_FORCE_PER_MM = 15.0 / 7.0    # truss.CUT_FORCE_PER_MM (SHEAR placeholder, unverified for tomato peduncles)
@@ -175,7 +179,7 @@ def build():
         blade = zone_box(name, face, inward, by[0], by[1], BLADE_H - BLADE_OUT, out=BLADE_OUT,
                          z=(ZONE_Z[0] + 1.0, ZONE_Z[1] - 1.0))
         rest = BLADE_OUT + PAD_PROUD                                  # pad face past the inner face at rest
-        pad = zone_box(name, face, inward, PAD_Y[0] + 0.3, PAD_Y[1] - 0.3, PAD_FACE_T - rest, out=rest)
+        pad = zone_box(name, face, inward, PAD_Y[0] + FIT_SLIDE, PAD_Y[1] - FIT_SLIDE, PAD_FACE_T - rest, out=rest)
         items = dict(finger=finger, blade=blade, pad=pad, main=pieces["main"][0], flare=pieces["flare"][0])
         if name == "moving":                                          # back to the q = 0 build frame
             for k in items:
@@ -263,6 +267,16 @@ def checks(parts):
     print(f"       needed at the cut: {need[0]:.1f} N (3 mm stalk) .. {need[1]:.1f} N (5 mm), cut force "
           f"{CUT_FORCE_PER_MM:.2f} N/mm (unverified) + both springs")
     report(min(f for _, _, f, _ in rows) >= need[1], "50 % torque cuts a 5 mm stalk anywhere in the zone")
+    print("Print fits (starting values; tune after a test print)")
+    zl = abs(ZONE_Z[0] - ZONE_Z[1])
+    fits = [("blade in its slot", BLADE_T, BLADE_T + 2 * SLOT_CLR, "snug; the pinch screws close it"),
+            ("M2 pinch screw in its hole", 2.0, M2_D, "clearance"),
+            ("spring in its pocket", SPRING_OD, SPRING_D, "moves freely"),
+            ("pad face across the pocket", PAD_Y[1] - PAD_Y[0] - 2 * FIT_SLIDE, PAD_Y[1] - PAD_Y[0], "slides"),
+            ("pad face along the pocket", zl, zl + 2.0, "slides")]
+    for what, part, hole, kind in fits:
+        print(f"       {what:28s} {part:5.2f} in {hole:5.2f} mm: {(hole - part) / 2:4.2f} per side ({kind})")
+        report(hole - part >= 0.2, f"{what}: not a zero-gap fit")
     return ok
 
 
@@ -298,7 +312,7 @@ def to_sim(parts):
             blade=dict(centre=placed([face + s_in * BLADE_OUT / 2, np.mean(SIM_BLADE_Y[name]), zc]),
                        half=[BLADE_OUT / 2e3, (SIM_BLADE_Y[name][1] - SIM_BLADE_Y[name][0]) / 2e3, (hz - 1.0) / 1e3]),
             pad=dict(centre=placed([face, np.mean(PAD_Y), zc]), rest_m=(BLADE_OUT + PAD_PROUD) / 1e3,
-                     half=[PAD_FACE_T / 2e3, (PAD_Y[1] - PAD_Y[0] - 0.6) / 2e3, hz / 1e3],
+                     half=[PAD_FACE_T / 2e3, (PAD_Y[1] - PAD_Y[0] - 2 * FIT_SLIDE) / 2e3, hz / 1e3],
                      travel_m=PAD_TRAVEL / 1e3, preload_n=PAD_PRELOAD_N, k_n_per_m=PAD_K_N_PER_MM * 1e3))
     spec["params"] = {k: v for k, v in globals().items() if k.isupper() and isinstance(v, (int, float, tuple, dict))
                       and k not in ("FIX", "MOV")}
@@ -317,7 +331,7 @@ def to_print(parts):
         m.export(p)
         print(f"  {p.relative_to(HERE)}  {np.round(m.extents, 1).tolist()} mm, {m.volume / 1000:.1f} cm3")
     zl = abs(ZONE_Z[0] - ZONE_Z[1])
-    pad = trimesh.creation.box(extents=[zl, PAD_Y[1] - PAD_Y[0] - 0.6, PAD_FACE_T])
+    pad = trimesh.creation.box(extents=[zl, PAD_Y[1] - PAD_Y[0] - 2 * FIT_SLIDE, PAD_FACE_T])
     pad.apply_translation(-pad.bounds[0])
     pad.export(OUT / "pad_face_TPU_x2.stl")
     print(f"  out/pad_face_TPU_x2.stl  {np.round(pad.extents, 1).tolist()} mm")

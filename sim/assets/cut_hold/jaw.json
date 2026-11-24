@@ -120,7 +120,8 @@
   "BLADE_CROSS": 2.0,
   "BLADE_T": 0.4,
   "BLADE_H": 9.0,
-  "SLOT_CLR": 0.1,
+  "FIT_SLIDE": 0.3,
+  "SLOT_CLR": 0.15,
   "BLADE_Y": {
    "fixed": [
     -7.45,
@@ -151,8 +152,9 @@
   "PAD_POCKET": 4.5,
   "PAD_PRELOAD_N": 1.5,
   "PAD_K_N_PER_MM": 0.5,
-  "M2_D": 2.2,
-  "SPRING_D": 4.4,
+  "M2_D": 2.5,
+  "SPRING_OD": 4.0,
+  "SPRING_D": 4.8,
   "GRIPPER_TORQUE_NM": 1.675,
   "OVERLOAD_TORQUE_NM": 0.8375,
   "CUT_FORCE_PER_MM": 2.142857142857143,

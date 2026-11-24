@@ -42,6 +42,22 @@ a 5 mm stalk needs 10.7 N (2.1 N/mm, SHEAR's placeholder, ⚠️ unverified for 
 springs: 14.7 N. If the servo drops to its 25 % overload limit (stalled too long) the tip end gives 10.5 N, which is
 not enough for a 5 mm stalk; the zone's upper half still is.
 
+## Print fits (K7 2026-11-24: no zero-gap fits; starting values, tune after a test print)
+
+| Fit | Part | Hole / pocket | Clearance per side |
+|---|---|---|---|
+| Blade in its slot (snug, the pinch screws close it) | 0.40 mm | 0.70 mm | 0.15 mm (`SLOT_CLR`) |
+| M2 pinch screw | 2.0 mm | 2.5 mm hole | 0.25 mm (`M2_D`) |
+| Spring in its pocket (must move freely) | 4.0 mm OD | 4.8 mm | 0.4 mm (`SPRING_D`) |
+| TPU pad face in its pocket (slides) | 12.9 × 36 mm | 13.5 × 38 mm | 0.3 / 1.0 mm (`FIT_SLIDE`) |
+
+The servo end of each jaw is the stock SO-101 part, unchanged, so it fits the servo and horn as the stock print does.
+
+## Onshape
+
+`B.L.U.S.H v6 cut-and-hold jaw (2026-11-24)` in K7's Onshape: the parts imported as mesh bodies, assembled with the
+moving jaw open 25 deg ("Assembly 1"). The Python script stays the source: after a change, re-import.
+
 ## Bill of materials (per jaw pair) ⚠️ unverified, nothing printed yet
 
 - 2 × PLA/PETG jaws (`out/jaw_fixed_cut_hold_PLA.stl`, `out/jaw_moving_cut_hold_PLA.stl`), 4 walls, 40 %+ infill
@@ -49,6 +65,7 @@ not enough for a 5 mm stalk; the zone's upper half still is.
 - 2 × TPU 95A pad face (`out/pad_face_TPU_x2.stl`, print 2)
 - 4 × compression spring, about 4 mm OD × 10 mm, about 0.25 N/mm
 - 4 × M2 × 20 screw + nut (blade pinch)
+- 1 × fit-test print first: print one jaw's zone section and try the blade, a spring and the pad before printing both jaws
 
 ## Results
 
