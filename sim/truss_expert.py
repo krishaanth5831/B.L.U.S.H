@@ -131,6 +131,12 @@ def _axis_rot(a, t):
 # swing-down model put the fruit 15 cm below the grip at release; they were 2 cm above it, and the truss
 # tipped off the crate). A real rubber clamp holds it the same way. "hang" swings it under the grip instead.
 CARRY = "rigid"
+# The gripper axis "hang" swings the truss about: 0 = the jaw's closing axis (gripper x, the model as written), 1 = the
+# stalk's own axis (gripper y). Traced 2026-11-24 (fruit_off_trace.py, seeds 9730004 / 9730018): the cut truss turns
+# about the STALK (rotation axis in the gripper frame y -0.98 to -1.0), already ~60 deg during the squeeze and on to
+# 90-177 deg in the carry: the round stalk rolls between the flat pads (v5's jaw too, 57-67 deg on seed 9730005), and
+# the truss ends up hanging under it. TrussPlanner sets CARRY "hang" + CARRY_AXIS 1 for the v6 jaw; v5 keeps "rigid".
+CARRY_AXIS = 0
 
 
 def hanging(o, R, rel, masses, grip_point):
@@ -141,7 +147,7 @@ def hanging(o, R, rel, masses, grip_point):
     W = [(o + R @ p, R @ Rr) for Rr, p in rel]
     if CARRY == "rigid":
         return W
-    a = R[:, 0]
+    a = R[:, CARRY_AXIS]
     c = sum(mb * w[0] for mb, w in zip(masses, W)) / sum(masses) - P
     c_perp = c - (c @ a) * a
     down = np.array([0, 0, -1.0]) - (-a[2]) * a
@@ -214,7 +220,10 @@ class TrussPlanner:
         self.m, self.d, self.info, self.k = m, d, info, k
         self.t = info["trusses"][k]
         self.fm = arm_map.FollowerMap()
-        truss_ik.set_jaw(scene.jaw_of(m))     # the aim point is the jaw's (v5 tips / v6 zone)
+        jaw = scene.jaw_of(m)
+        truss_ik.set_jaw(jaw)                 # the aim point is the jaw's (v5 tips / v6 zone)
+        global CARRY, CARRY_AXIS              # how the cut truss rides in the jaw (CARRY_AXIS note)
+        CARRY, CARRY_AXIS = ("hang", 1) if jaw == "v6" else ("rigid", 0)
         self.ik, self.ik_free = truss_ik.truss_ik(), expert.arm_ik()
         self.qidx, _ = scene.arm_ids(m)
         name = lambda g: m.geom(g).name or ""   # noqa: E731

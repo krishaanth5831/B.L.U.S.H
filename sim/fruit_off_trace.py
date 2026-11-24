@@ -78,6 +78,30 @@ def main():
     f6 = np.zeros(6)
     t0 = d.time
 
+    import truss_ik
+    grip_pt = truss_ik.cut_point_in_gripper(t["r"])
+    model_err = {}
+
+    def predict_vs_live(R, o):
+        """At the first frame above the crate: the fruit as the teacher's models put them vs where they are (mm)."""
+        live = np.array([d.xpos[m.body(names[j]).id] for j in mine])
+        rel = state["rel"]
+        rigid = o + rel @ R.T
+        P = o + R @ grip_pt
+        a_ = R[:, 1]                                          # the stalk's axis (tx.CARRY_AXIS 1)
+        w = np.array([radii[j] ** 3 for j in mine])
+        c = (rigid * w[:, None]).sum(0) / w.sum() - P
+        c_perp = c - (c @ a_) * a_
+        down = np.array([0, 0, -1.0]) + a_[2] * a_
+        th = np.arctan2(np.cross(c_perp, down) @ a_, c_perp @ down)
+        v = rigid - P
+        hang = P + v * np.cos(th) + np.cross(a_, v) * np.sin(th) + np.outer(v @ a_, a_) * (1 - np.cos(th))
+        for nm, pred in (("held as at the cut", rigid), ("hanging under the stalk", hang)):
+            e = (live - pred) * 1000
+            model_err[nm] = dict(mean_mm=round(float(np.linalg.norm(e, axis=1).mean()), 1),
+                                 max_mm=round(float(np.linalg.norm(e, axis=1).max()), 1),
+                                 mean_xyz_mm=np.round(e.mean(0), 1).tolist())
+
     def on_frame(_sent):
         state["frame"] += 1
         touch = collections.defaultdict(list)
@@ -98,6 +122,13 @@ def main():
         Rt = d.xmat[body].reshape(3, 3)
         if cutter.cut_t is not None and state["R0"] is None:
             state["R0"] = Rg.T @ Rt
+            og = d.xpos[grip]
+            state["rel"] = np.array([Rg.T @ (d.xpos[m.body(names[j]).id] - og) for j in mine])
+        ph_now = getattr(plan, "leg", None)
+        if state.get("rel") is not None and not model_err and ph_now in ("settle_above", "lower"):
+            predict_vs_live(Rg, d.xpos[grip])
+        if ph_now == "lift":
+            state.setdefault("lift_z", []).append(round(float(d.xpos[grip][2]) * 1000, 1))
         turn, axis = None, None
         if state["R0"] is not None:
             dR = (Rg.T @ Rt) @ state["R0"].T                     # the turn since the cut, in the gripper frame
@@ -128,6 +159,17 @@ def main():
     t_play, watch = gt.play(robot, plan, on_frame=on_frame)
     ok, why = gt.judge(robot, plan, t_play, watch)
     import truss_scene as ts
+    print(f"plan: phase {plan.meta.get('phase')}, release fallback {plan.meta.get('release_fallback')}, modelled room "
+          f"{plan.meta.get('crate_slack_mm')} mm, lowering stopped early {plan.meta.get('lower_stopped_early')}; live "
+          f"re-plan {plan.meta.get('live_release')} at {plan.meta.get('live_release_point')} room "
+          f"{plan.meta.get('live_crate_slack_mm')} mm (planned at {plan.meta.get('release_point')})")
+    for g in plan.legs:
+        if g.name == "lower" and g.W is not None and len(g.W) > 1:
+            print(f"lowering path: {len(g.W)} points, largest joint step {np.abs(np.diff(g.W, axis=0)).max():.1f} norm")
+    print(f"model vs live fruit above the crate: {model_err or 'not reached'}")
+    lz = state.get("lift_z", [])
+    if lz:
+        print(f"gripper height in the lift: first {lz[:6]} ... last {lz[-1]} mm (a dip = pushing the dropped truss)")
     (cx, cy), (sx, sy, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
     inner = np.array([sx / 2 - scene.CRATE_WALL, sy / 2 - scene.CRATE_WALL])
     print(f"crate inner half-size {np.round(inner * 1000, 0).tolist()} mm, rim at z {h * 1000:.0f} mm; release meta "

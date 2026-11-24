@@ -200,6 +200,36 @@ V6_CARRY_SCALE = 0.67        # every carry at 0.67 x v4's pace = 0.4 x the joint
 V6_SETTLE_ABOVE_S = 0.8      # hold above the crate before lowering, so the swing dies down (guess: ~2 swings of a
 #                              12-15 cm pendulum)
 V6_LIFT_HOME = True          # after the drop: straight back up the lowering line, the way home planned from up there
+# ⚠️ The truss does NOT stay as it was at the cut (tx.CARRY "rigid", measured on one seed 2026-11-03): traced on seed
+# 9730005 (fruit_off_trace.py, 2026-11-24) it turned 57 deg in the v5 jaw by the carry and 67 deg while lowering, and
+# ~110 deg in the v6 jaw, so its tip fruit hung lower than planned and was pressed into the crate floor (1.4 N on the
+# fruit, its tether at 0.74 N of a 0.59 N limit). It rolls about its STALK (tx.CARRY_AXIS note). Release fit (v6):
+# every pose judged as held at the cut and as hanging under the stalk (tx.CARRY_AXIS 1): the tighter wall room of the
+# two, and the hanging truss's lowest fruit V6_FLOOR_CLEAR_M to V6_DROP_MAX_M over the floor / rim.
+V6_FIT = "hang"              # "hang" (as cut + fully hanging), "envelope" (+ every angle between and 25 deg past),
+#                              "rigid" (v5's fit). A/B on 2026-11-24: "envelope" lost seeds on the 5 traced ones
+V6_LEAN = True               # the laid-flat outline may reach tx.LEAN_M past a wall (v5's rule); False lost 3 of 5
+V6_REQUIRE_DROP = False      # only release poses with the straight lowering line (untested on its own)
+V6_FLOOR_CLEAR_M = 0.015     # the fit: lowest fruit (held or hanging) this far over the floor
+V6_DROP_MAX_M = 0.12         # the fit: the held truss's lowest fruit at most this far over the rim
+V6_STOP_ABOVE_FLOOR_M = 0.025   # the closed-loop lowering stops with the live lowest fruit this far over the floor
+# Live release (2026-11-24): above the crate the fruit were ~22 cm (mean) from where the cut-time model put them, held,
+# hanging (fruit_off_trace.py on 9730015): the cluster droops at its sprung rachis joint and the fruit dangle, so no
+# rigid model of the truss predicts it. So on reaching the crate the teacher re-plans the release from the truss as it
+# hangs NOW (the live bodies, held as they are for the last short move), the same fit and checks as at planning time.
+V6_LIVE_RELEASE = True
+# ...and not only fully hanging: on seed 9730005 the truss had turned 62 deg when lowered and its tip fruit was lowest
+# part-way (2026-11-24). So the fit takes the worst wall room and the lowest fruit over the whole swing: from as cut to
+# fully hanging, plus V6_SWING_OVER_DEG past it either way (it still swings), in V6_SWING_STEPS angles.
+V6_SWING_OVER_DEG = 25.0
+V6_SWING_STEPS = 9
+# The fruit also dangle on their own pedicels, lower than any rigid model of the truss puts them: with the fit above,
+# 9730005 still pressed its tip fruit into the floor while lowering, and 9730018 / 9730015 dragged fruit over the crate
+# +y wall at the end of the carry (1.2-2.4 N, 2026-11-24). So in the v6 world the carry ends V6_ABOVE_CRATE_M over the
+# release pose (v5: tx.ABOVE_CRATE_M 0.08), and the lowering is closed-loop on the truss as it really hangs (the teacher
+# reads the simulator, the policy only sees the cameras): it stops once the target's lowest fruit is V6_FLOOR_CLEAR_M
+# over the crate floor, and the release + drop happen there.
+V6_ABOVE_CRATE_M = 0.15
 # Phase C's order and budget: cut point, then (strict and brush first, each at every stalk tilt, then push at every
 # tilt) approach angle, so a clean tilted cut comes before pressing neighbours, and the long tail of cut points
 # comes last (every phase-C plan kept on the tuning set so far cut at u 0.5, 2026-11-18). At most PHASE_C_MAX
@@ -290,6 +320,16 @@ class Leg:
         seg = self.cum[i + 1] - self.cum[i]
         u = 0.0 if seg < 1e-12 else (s - self.cum[i]) / seg
         return self.W[i] + (self.W[i + 1] - self.W[i]) * u
+
+    def trim_to(self, q):
+        """Start the path at q, joined to its nearest point (v6: the lift after the lowering stopped early would
+        otherwise first drive back down to the planned bottom, onto the truss it just dropped)."""
+        s0 = self.project(q, 0.0, self.L)
+        keep = self.W[self.cum > s0 + 1e-9]
+        self.W = np.vstack([q, keep]) if len(keep) else np.vstack([q, self.W[-1]])
+        seg = np.linalg.norm(np.diff(self.W, axis=0), axis=1)
+        self.cum = np.r_[0.0, np.cumsum(seg)]
+        self.L = float(self.cum[-1])
 
     def project(self, q, s_lo, s_hi):
         """Arc length of the point on the path nearest q, searched in [s_lo, s_hi]."""
@@ -799,7 +839,7 @@ class TrussTeacher(tx.TrussPlanner):
                     detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
                     release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1), release_fallback=alternate)
 
-    def _release_fit(self, carry, r, slack_min=tx.RELEASE_SLACK_M):
+    def _release_fit(self, carry, r, slack_min=tx.RELEASE_SLACK_M, live=False):
         """Every sampled pose over the crate (tx.crate_poses) the carried truss fits at, most room to the walls first:
         (their indices, slack, Qs, Os, Rs, grip point in the gripper frame). slack_min: v4's, or RELAXED_SLACK_M."""
         (cx, cy), (sx, sy, h) = ts.CRATE_CENTRE, ts.CRATE_SIZE
@@ -820,9 +860,62 @@ class TrussTeacher(tx.TrussPlanner):
         slack = np.minimum(held, flat + tx.LEAN_M)
         low_z = (G[:, :, 2] - radii).min(1) - h
         high_z = (G[:, :, 2] + radii).max(1) - h
-        ok = np.flatnonzero((slack >= slack_min) & (low_z >= scene.CRATE_WALL + 0.01 - h)
-                            & (low_z <= tx.RELEASE_ABOVE_M[1] + 0.04) & (high_z <= tx.ABOVE_RIM_MAX_M))
-        return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_z
+        if not self.v6:
+            ok = np.flatnonzero((slack >= slack_min) & (low_z >= scene.CRATE_WALL + 0.01 - h)
+                                & (low_z <= tx.RELEASE_ABOVE_M[1] + 0.04) & (high_z <= tx.ABOVE_RIM_MAX_M))
+            return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_z
+        if live:                                                           # the truss as it hangs now: held as is
+            ok = np.flatnonzero((slack >= slack_min) & (low_z >= scene.CRATE_WALL + V6_FLOOR_CLEAR_M - h)
+                                & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M))
+            # the live shape is right, so centre the TRUSS (its fruit), not the grip or the modelled room: the most
+            # "room" put 9730018's release 8 cm off centre and it settled over the -x wall (2026-11-24)
+            n_fr = len(self.t["fruit"])
+            fc = G[:, :n_fr, :2].mean(1)
+            off = np.hypot(fc[:, 0] - cx, fc[:, 1] - cy)
+            return ok[np.argsort(off[ok], kind="stable")], slack, Qs, Os, Rs, point, low_z
+        if V6_FIT == "rigid":                                              # v5's fit, unchanged
+            ok = np.flatnonzero((slack >= slack_min) & (low_z >= scene.CRATE_WALL + 0.01 - h)
+                                & (low_z <= tx.RELEASE_ABOVE_M[1] + 0.04) & (high_z <= tx.ABOVE_RIM_MAX_M))
+            return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_z
+        # v6: also as it hangs under its stalk (V6_FIT note)
+        n_fr = len(self.t["fruit"])
+        mass = np.array([fr["radius"] ** 3 for fr in self.t["fruit"]], float)    # ~ fruit mass (same density)
+        P = Os + np.einsum("nij,j->ni", Rs, point)                         # grip points
+        a = Rs[:, :, 1]                                                    # the stalk's axis per pose (tx.CARRY_AXIS)
+        c = (G[:, :n_fr, :] * mass[None, :, None]).sum(1) / mass.sum() - P # centre of mass from the grip
+        c_perp = c - (c * a).sum(1, keepdims=True) * a
+        down = np.array([0.0, 0.0, -1.0])[None, :] + a[:, 2:3] * a
+        nc, nd = np.linalg.norm(c_perp, axis=1), np.linalg.norm(down, axis=1)
+        swing = (nc > 1e-6) & (nd > 1e-6)
+        c_perp = c_perp / np.maximum(nc, 1e-9)[:, None]
+        down = down / np.maximum(nd, 1e-9)[:, None]
+        th_hang = np.arctan2((np.cross(c_perp, down) * a).sum(1), (c_perp * down).sum(1)) * swing
+        v = G - P[:, None, :]                                              # Rodrigues about a through P
+        ax = a[:, None, :]
+        lean = tx.LEAN_M if V6_LEAN else 0.0
+        if not V6_LEAN:
+            slack = np.minimum(held, flat)
+        if V6_FIT == "envelope":                                           # as cut .. hanging, then past it both ways
+            over = np.radians(V6_SWING_OVER_DEG) * np.sign(th_hang)
+            angles = [u * th_hang for u in np.linspace(0.0, 1.0, V6_SWING_STEPS)] + [th_hang - over, th_hang + over]
+        else:                                                              # "hang": fully hanging only
+            angles = [th_hang]
+        low_h = np.full(len(G), np.inf)
+        for th in angles:
+            th = th * swing
+            ct, st = np.cos(th)[:, None, None], np.sin(th)[:, None, None]
+            Gh = P[:, None, :] + v * ct + np.cross(ax, v) * st + ax * (ax * v).sum(2, keepdims=True) * (1 - ct)
+            held_h = (inner[None, None, :] - (np.abs(Gh[:, :, :2] - [cx, cy]) + radii[None, :, None])).min((1, 2))
+            flat_h = (inner[None, None, :]
+                      - (np.abs(tx.laid_flat(Gh) - [cx, cy]) + radii[None, :, None])).min((1, 2))
+            slack = np.minimum(slack, np.minimum(held_h, flat_h + lean))
+            low_h = np.minimum(low_h, (Gh[:, :, 2] - radii).min(1) - h)
+        low_all = np.minimum(low_z, low_h)
+        ok = np.flatnonzero((slack >= slack_min) & (low_all >= scene.CRATE_WALL + V6_FLOOR_CLEAR_M - h)
+                            & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M))
+        # Most room first, as v5. ⚠️ NOT nearest the crate's centre by grip point: the truss sticks out 10-20 cm along
+        # its stalk from the grip, so centred grips put it over the +y wall (5 of 5 seeds, 2026-11-24).
+        return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_all
 
     def _release_pose(self, fit, i, cchk, clear=tx.CARRY_CLEAR_M):
         """Pose i of _release_fit's: (x_rel, x_above, lower, grip point, pitch, slack), or None if it hits."""
@@ -834,9 +927,12 @@ class TrussTeacher(tx.TrussPlanner):
         tilt = np.degrees(np.arcsin(np.clip(Rs[i][2, 0], -1, 1)))
         if cchk.hits(xr, soft_clearance=clear):
             return None
-        low = [ikf.solve(p + [0, 0, tx.ABOVE_CRATE_M * (1 - v)], pitch, tilt, point, x0=xr)
-               for v in np.linspace(0, 1, 6)]
+        above = V6_ABOVE_CRATE_M if self.v6 else tx.ABOVE_CRATE_M
+        low = [ikf.solve(p + [0, 0, above * (1 - v)], pitch, tilt, point, x0=xr)
+               for v in np.linspace(0, 1, 8 if self.v6 else 6)]
         if any(x is None for x in low) or not cchk.path_ok(low[:-1] + [xr], soft_clearance=clear):
+            if self.v6 and V6_REQUIRE_DROP:
+                return None                    # only poses with the straight closed-loop lowering (V6_ABOVE_CRATE_M)
             low = [xr]                         # no straight drop for this pose: the carry goes to it directly
         else:
             low[-1] = xr
@@ -889,7 +985,6 @@ class TrussTeacher(tx.TrussPlanner):
         fm = self.fm
         n5 = lambda xs: np.array([fm.rad_to_norm(np.r_[x, 0])[:5] for x in xs])   # noqa: E731
         g_open = float(fm.rad_to_norm(np.r_[np.zeros(5), np.radians(tx.JAW_OPEN_DEG)])[5])
-        g_start = float(self.q_home[5])
         g_now = float(fm.rad_to_norm(np.r_[np.zeros(5), (self.d if d_jaw is None else d_jaw).qpos[self.g_adr]])[5])
         self.g_open, self.g_shut = g_open, CLOSE_NORM
 
@@ -918,23 +1013,82 @@ class TrussTeacher(tx.TrussPlanner):
         if self.v6:
             lead_car = min(lead_car, CARRY_LEAD * V6_CARRY_SCALE)
         L.append(Leg("retreat", n5(rest["ret"]), jaw=CLOSE_NORM, lead=lead_ret))
+        self._lead_car = lead_car
+        L += self._tail_legs(rest, lead_car)
+        self.legs = L
+        self.reset()
+
+    def _tail_legs(self, rest, lead_car):
+        """The legs from the carry to the crate on: to_crate, (settle_above, lower), release, drop, (lift), return,
+        hold_end. _build_legs's tail, also used by the live release re-plan."""
+        fm = self.fm
+        n5 = lambda xs: np.array([fm.rad_to_norm(np.r_[x, 0])[:5] for x in xs])   # noqa: E731
+        g_open, g_start = self.g_open, float(self.q_home[5])
+
+        def cart_lead(xs, metres, speed):
+            W = n5(xs)
+            Lp = float(np.linalg.norm(np.diff(W, axis=0), axis=1).sum())
+            return max(Lp / max(metres / speed * FPS, 1.0), 1e-3)
+
+        f = lambda s: max(1, int(round(s * FPS)))   # noqa: E731
+        L = []
         L.append(Leg("to_crate", n5(rest["to_crate"]), jaw=CLOSE_NORM, lead=lead_car))
         if len(rest["lower"]) > 1:
             if self.v6:
                 L.append(Leg("settle_above", hold=n5([rest["lower"][0]])[0], jaw=CLOSE_NORM,
                              frames=f(V6_SETTLE_ABOVE_S)))
             L.append(Leg("lower", n5(rest["lower"]), jaw=CLOSE_NORM,
-                         lead=cart_lead(rest["lower"], tx.ABOVE_CRATE_M, CART_M_S)))
+                         lead=cart_lead(rest["lower"], V6_ABOVE_CRATE_M if self.v6 else tx.ABOVE_CRATE_M, CART_M_S)))
         x_rel = n5([rest["lower"][-1]])[0]
         L.append(Leg("release", hold=x_rel, jaw_to=(CLOSE_NORM, g_open), frames=f(RELEASE_S)))
         L.append(Leg("drop", hold=x_rel, jaw=g_open, frames=f(DROP_S)))
         if rest.get("lift"):
             L.append(Leg("lift", n5(rest["lift"]), jaw=g_open,
-                         lead=cart_lead(rest["lift"], tx.ABOVE_CRATE_M, CART_M_S)))
+                         lead=cart_lead(rest["lift"], V6_ABOVE_CRATE_M, CART_M_S)))
         L.append(Leg("return", n5(rest["home"]), jaw_to=(g_open, g_start), lead=FREE_LEAD))
         L.append(Leg("hold_end", hold=self.q_home[:5], jaw=g_start, frames=f(HOLD_END_S)))
-        self.legs = L
-        self.reset()
+        return L
+
+    def _replan_release_live(self, q_norm):
+        """V6_LIVE_RELEASE: re-plan the release from the truss as it hangs now, from the arm where it is. Replaces the
+        legs from here on (to_crate onto the new release's above-pose, settle, lower, release, drop, lift, return);
+        keeps the old ones if nothing fits. Returns True if it re-planned."""
+        self.meta["live_release_tried"] = True
+        m, d = self.m, self.d_live
+        G = m.body("arm/gripper").id
+        o, R = d.xpos[G].copy(), d.xmat[G].reshape(3, 3).copy()
+        bodies = [m.body(self.t["body"]).id] + [m.body(fr["tomato"]).id for fr in self.t["fruit"]]
+        rel = [(R.T @ d.xmat[b].reshape(3, 3), R.T @ (d.xpos[b] - o)) for b in bodies]
+        masses = [float(m.body_subtreemass[bodies[0]])] + [float(m.body_mass[b]) for b in bodies[1:]]
+        carry = (bodies, rel, masses)
+        x_now = self.fm.norm_to_rad(np.r_[q_norm, 0.0])[:5]
+        r = self.t["r"]
+        saved = (tx.CARRY, tx.CARRY_AXIS)
+        tx.CARRY, tx.CARRY_AXIS = "rigid", 0                 # held as it is now for the last short move
+        try:
+            point = truss_ik.cut_point_in_gripper(r)
+            cchk = add_self_check(tx.CarryChecker(self.m, self.d, bodies, rel, point, hard=self.hard,
+                                                  soft=self.soft))
+            cchk.d.qpos[self.g_adr] = np.radians(-10.0)
+            fit = self._release_fit(carry, r, live=True)
+            rest = None
+            for i in fit[0][:tx.RELEASE_SAMPLES // 4]:
+                rel_pose = self._release_pose(fit, i, cchk)
+                if rel_pose is None:
+                    continue
+                out = self._via(rel_pose, [x_now], "live", cchk, r, "live", extra=True)
+                if isinstance(out, dict):
+                    rest = out
+                    break
+        finally:
+            tx.CARRY, tx.CARRY_AXIS = saved
+        self.meta["live_release"] = rest is not None
+        if rest is None:
+            return False
+        self.legs = self.legs[:self.i] + self._tail_legs(rest, getattr(self, "_lead_car", CARRY_LEAD))
+        self.n_in_leg, self.s, self.stall, self.q_prev = 0, 0.0, 0, None
+        self.meta.update(live_release_point=rest["release_point"], live_crate_slack_mm=rest["crate_slack_mm"])
+        return True
 
     # --- running (every frame) ---
     def reset(self):
@@ -958,10 +1112,28 @@ class TrussTeacher(tx.TrussPlanner):
             self.meta.update(frames=self.n_total, seconds=round(self.n_total / FPS, 2),
                              timed_out=self.i < len(self.legs))
 
+    def _low_fruit_m(self):
+        """v6: how far the target truss's lowest fruit (live, as it really hangs) is above the crate floor (m)."""
+        d, m = self.d_live, self.m
+        return min(d.xpos[m.body(f["tomato"]).id][2] - f["radius"] for f in self.t["fruit"]) - scene.CRATE_WALL
+
     def act(self, state_norm):
         """The action for this frame from the measured state (norm, 6): {joint.pos: norm}."""
         q = np.asarray(state_norm, float)[:5]
         g = self.legs[self.i]
+        if (self.v6 and V6_LIVE_RELEASE and not self.meta.get("live_release_tried") and self.n_in_leg == 0
+                and g.name in ("settle_above", "release")):
+            self._replan_release_live(q)
+            g = self.legs[self.i]
+        if self.v6 and g.name == "lower" and self._low_fruit_m() <= V6_STOP_ABOVE_FLOOR_M:
+            for h in self.legs[self.i + 1:]:          # release and drop where it stopped (V6_ABOVE_CRATE_M note)
+                if h.name in ("release", "drop"):
+                    h.hold = q.copy()
+                elif h.name == "lift" and h.W is not None:
+                    h.trim_to(q.copy())
+            self.meta["lower_stopped_early"] = True
+            self._next_leg()
+            g = self.legs[self.i]
         if g.W is not None:
             s = g.project(q, self.s - SEARCH_BACK * g.lead, self.s + SEARCH_AHEAD * g.lead)
             self.s = s
