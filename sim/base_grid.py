@@ -33,7 +33,9 @@ import scene  # noqa: E402
 START_MARGIN_NORM = 25.0      # every joint at least this far from its stop (norm units, stops at +-100): the v5 start
                               # pose had the pan at -90 and the elbow at +90 (post-mortem §5.9)
 START_STANDOFF_M = (0.15, 0.32)   # claw camera to the band's middle: close enough to see trusses, far from the plant
-START_PLANT_CLEAR_M = 0.10    # the gripper starts at least this far in front of the stem line (fruit hangs ~5-8 cm out)
+START_PLANT_CLEAR_M = 0.16    # the gripper starts at least this far in front of the stem line (fruit hangs 5-8 cm out).
+                              # 0.10 (first grid, 2026-11-24): more carry damage than today's start pose; 0.20 put
+                              # the band 33-44 deg off the claw camera's axis (its view is +-33 deg vertically)
 START_Z_M = (0.20, 0.45)      # gripper height at the start: above the crate's rim, below the crop wire (CROP_Z 0.52)
 
 
@@ -110,6 +112,7 @@ def main():
     import expert
     import generate_truss as gt
     import truss_expert as tx
+    import truss_scene as ts
     import truss_teacher as tt
     from lerobot.utils.import_utils import register_third_party_plugins
     register_third_party_plugins()
@@ -127,9 +130,11 @@ def main():
     t0 = time.time()
     for seed in range(a.seed_start, a.seed_start + a.scenes):
         t_s = time.time()
-        rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start)
+        rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE))
         robot.new_scene(seed, log=False)
         robot.get_observation()
+        if robot._tgt_k is not None:
+            rec["target"] = robot.info["trusses"][robot._tgt_k]["name"]
         if robot._tgt_k is None:
             rec.update(plan=False, ok=False, why=f"no target ({robot._box_info['reason']})")
         else:

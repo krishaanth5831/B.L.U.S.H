@@ -52,7 +52,7 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
 # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
 # IK scan: reachable over x 0.56-0.62, y 0.06-0.26. ⚠️ Toward the aisle: at y 0.17 the arm reaching over the crate
 # passed through trusses hanging out from the row (seed 200000, 2026-11-03). x max 0.73 < the end frame at 0.74.
-CRATE_CENTRE = (0.6175, 0.17)
+CRATE_CENTRE = (0.5825, 0.17)   # 30 x 28 since 2026-11-24 (see CRATE_SIZE): the +x edge stays at 0.7325
 # 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
 # found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
 # x as big as the spot allows: 0.50-0.735 (end frame tie at 0.74). ⚠️ A 6-8 fruit truss lying flat is up to ~20 cm
@@ -65,7 +65,10 @@ CRATE_CENTRE = (0.6175, 0.17)
 # sits 9 cm from the row, under trusses hanging out of it, past the reach scan's y 0.26 above: _over_crate keeps
 # trusses out of the bigger crate, so every seed draws a different scene than before, and the held-out sets
 # heldout_v3*.jsonl (and every *_teacher_v3* dataset) belong to the old crate.
-CRATE_SIZE = (0.23, 0.28, 0.05)
+# 30 x 28 cm since 2026-11-24 (K7 chose a 30 x 40 cm crate for v6; the greenhouse has 0.74 m between end frames and a
+# 0.40 m aisle, so the most that fits is 30 x 28: x grown 7 cm toward the arm base, to 0.4325-0.7325; y unchanged).
+# The 23 x 28 crate's datasets and held-out sets (v5, heldout_v5*.jsonl) belong to the old world.
+CRATE_SIZE = (0.30, 0.28, 0.05)
 
 
 IN_CRATE_TOP_M = 0.03            # a fruit may sit this far over the rim: the truss leans on a wall, still inside
