@@ -122,7 +122,7 @@ class SO101Mujoco(Robot):
 
     # --- scene ---
     def _build(self, seed, hold=False):
-        self.m, self.d, self.info = ts.build(seed, hold=hold, base_mount=self.config.rig == "base")
+        self.m, self.d, self.info = ts.build(seed, hold=hold, base_mount=self.config.rig == "base", jaw=self.config.jaw)
         self.info["dr"] = randomize.apply(self.m, seed, self.info["fruit"]) if self.config.domain_rand else None
         self.qidx, self.uidx = scene.arm_ids(self.m)
         if self.config.start_jitter_deg > 0:      # own stream: the scene's other draws stay as they were

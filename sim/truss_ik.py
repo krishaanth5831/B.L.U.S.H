@@ -28,7 +28,33 @@ DOWN_MIN = 0.2
 N_STARTS = 24
 
 
+# Jaw v6 (K7 2026-11-24, hardware/end_effector/cut_hold): the aim point sits mid-zone, V6_AIM_FROM_PAD_M in from the
+# fixed pad's face at rest (v5 aimed 1 mm off it, which left the stalk ~1 mm of room on the fixed finger's side, the
+# side of 62 of the policy's 86 misses, post-mortem 4.2). From the jaw's own geometry (assets/cut_hold/jaw.json):
+# pad face = face_m + rest_m along the fixed finger's inner normal (+x), y between the two blade planes, z the zone's
+# middle. 8 mm: a first guess inside the 29.5 mm the pads stand apart at the teacher's open angle (25 deg); the catch
+# map (catch_map.py) decides it.
+V6_AIM_FROM_PAD_M = 0.008
+JAW = "v5"                       # set_jaw(): which jaw the solver aims (the planner sets it from its scene model)
+_V6 = None
+
+
+def set_jaw(jaw):
+    global JAW, _V6
+    if jaw == "v6" and _V6 is None:
+        import json
+        spec = json.loads((scene.CUT_HOLD_V6 / "jaw.json").read_text())
+        f = spec["fixed"]
+        pad_face_x = f["face_m"][0] + f["pad"]["rest_m"]
+        y = spec["params"]["SIM_BLADE_Y"]["fixed"][1] / 1000.0     # where the fixed and moving blade planes meet
+        _V6 = (pad_face_x, y, f["face_m"][2])
+    JAW = jaw
+
+
 def cut_point_in_gripper(r):
+    if JAW == "v6":
+        pad_face_x, y, z = _V6
+        return np.array([pad_face_x + V6_AIM_FROM_PAD_M + r, y, z])
     return np.array([PAD_FACE_X + r + 0.001, CUT_Y, CUT_Z])
 
 

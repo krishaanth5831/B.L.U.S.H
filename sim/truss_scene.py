@@ -169,10 +169,13 @@ START_CLEAR_M = 0.01             # no truss within this of the arm at the start 
                                  # and the vines settle around it; fruit hanging into it fell off, 2026-11-03)
 
 
+JAW = "v5"                       # build(jaw=...) sets it for _compose (scene.JAWS)
+
+
 def _compose(static, parts, arm):
     xml = "\n".join(static + [p[0] for p in parts] + [p[1] for p in parts])
     return scene.compose(xml, "\n".join(p[2] for p in parts), "\n".join(p[3] for p in parts), arm, cut_hold=True,
-                         excludes="\n".join(p[4] for p in parts), crate=(CRATE_CENTRE, CRATE_SIZE))
+                         excludes="\n".join(p[4] for p in parts), crate=(CRATE_CENTRE, CRATE_SIZE), jaw=JAW)
 
 
 def _start_pose(m, d):
@@ -207,13 +210,16 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
                                  # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
 
 
-def build(seed=0, arm=True, hold=False, base_mount=False):
+def build(seed=0, arm=True, hold=False, base_mount=False, jaw="v5"):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model, not in the XML.
     The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
     hold: nothing is ready (every truss a decoy or unripe), for "nothing to pick, stay home" episodes (K7
     2026-11-06, SockBot's lesson: the policy has to see what not reaching looks like).
-    base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml)."""
+    base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml).
+    jaw: the arm's cut-and-hold jaw, "v5" or "v6" (scene.JAWS; K7 2026-11-24)."""
+    global JAW
+    JAW = jaw
     for j in range(LAYOUT_TRIES if arm and not hold else 1):
         out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, base_mount)
         if out[2]["ready"]:

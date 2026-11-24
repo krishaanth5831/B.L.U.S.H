@@ -49,6 +49,9 @@ class SO101MujocoConfig(RobotConfig):
     #               point go onto the base camera from the sim's truth. The claw camera stays clean (SockBot: a box on
     #               the wrist camera is noise).
     rig: str = "birdseye"
+    # The cut-and-hold jaw (scene.JAWS): "v5" the fin-ray-ladder jaw with blade + pads on the 16 mm tips (every dataset
+    # and policy so far), "v6" the rigid jaw with blade + clamp pads along a 36 mm zone (K7 2026-11-24).
+    jaw: str = "v5"
     # Each scene starts this many degrees (uniform, per arm joint, drawn from the seed) off the start pose, so a policy
     # learns "see the truss, then reach" rather than one fixed first move (SockBot's ghost-sock lesson). 0 = exact.
     start_jitter_deg: float = 0.0

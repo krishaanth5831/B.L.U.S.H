@@ -6,6 +6,9 @@ STLs, CAD source and test results for the SO-101 jaw.
 PLA stubs of the stock jaws, so the servo, horn and wrist stay stock. Watch it (a window with a jaw-angle
 slider) with `python finray/view_gripper.py --stock`.
 
+**v6 cut-and-hold jaw (K7 2026-11-24):** [`cut_hold/`](cut_hold/): rigid PLA jaws with a blade and clamp pads along a
+36 mm zone and flared tips; the same script makes the print STLs and the simulator's `jaw="v6"`. Not printed yet.
+
 ⚠️ **Whole-truss harvesting (K7 2026-11-03) needs other fingers**, so far only in the sim: rigid PLA
 fingers with a blade pair on the stem-side face of the tips and spring-loaded clamp pads on the rest of
 their width, so one close cuts the truss's stalk and holds it (`sim/scene.py` `add_cut_hold`,

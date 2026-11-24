@@ -503,6 +503,63 @@ def add_cut_hold(s, chain):
             lg.friction = PAD_FRICTION
 
 
+CUT_HOLD_V6 = HERE / "assets" / "cut_hold"   # jaw v6: hardware/end_effector/cut_hold/cut_hold_gripper.py build
+JAWS = ("v5", "v6")   # v5 = fin-ray-ladder fingers with blade + pads on the 16 mm tips (every dataset so far);
+                      # v6 (K7 2026-11-24) = rigid PLA jaws, blade + clamp pads along a 36 mm zone, flared tips
+
+
+def jaw_of(m):
+    """Which jaw a compiled scene model carries ("v5" or "v6", JAWS), from its geoms."""
+    try:
+        m.geom("arm/finger_fixed_main")
+        return "v6"
+    except KeyError:
+        return "v5"
+
+
+def add_jaw_v6(s):
+    """The v6 cut-and-hold jaw on the stock jaw bodies, all geometry from cut_hold_gripper.py (jaw.json + STLs): the
+    stock servo ends (visual), the rigid fingers as two convex pieces each, and per finger a blade and a spring pad
+    along the zone. Same geom names, contact bits and materials as add_cut_hold, so truss.TrussCutter, rescue.py and
+    the checks see the same parts; only where they sit and how far the pads stand proud and travel differ."""
+    spec = json.loads((CUT_HOLD_V6 / "jaw.json").read_text())
+    for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
+        b = s.body(body)
+        s.add_mesh(name=f"cuthold_stub_{part}", file=str(CUT_HOLD_V6 / f"stub_{part}.stl"))
+        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"cuthold_stub_{part}",
+                       rgba=PLA_RGBA)
+        g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only, as the fin-ray stubs
+        bits = FIXED_FINGER_BITS if part == "fixed" else MOVING_FINGER_BITS
+        for piece in ("main", "flare"):
+            s.add_mesh(name=f"cuthold_{part}_{piece}", file=str(CUT_HOLD_V6 / f"finger_{part}_{piece}.stl"))
+            g = b.add_geom(name=f"finger_{part}_{piece}", type=mujoco.mjtGeom.mjGEOM_MESH,
+                           meshname=f"cuthold_{part}_{piece}", rgba=PLA_RGBA)
+            g.contype, g.conaffinity, g.group = bits[0], bits[1], 2
+            _finger_contact(g)
+        sp = spec[part]
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, np.asarray(sp["R"], float).reshape(-1))
+        s_in, bl, pd = sp["s_in"], sp["blade"], sp["pad"]
+        g = b.add_geom(name=f"blade_{part}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=bl["centre"], quat=quat,
+                       size=bl["half"], rgba=STEEL_RGBA)
+        g.contype, g.conaffinity, g.group = BLADE_BITS[0], BLADE_BITS[1], 2
+        _finger_contact(g)
+        g.friction = (0.3, 0.005, 0.0001)              # steel, as add_cut_hold (guess, unverified)
+        g.solimp = BLADE_SOLIMP
+        pad = b.add_body(name=f"pad_{part}_slide", pos=pd["centre"], quat=quat)
+        j = pad.add_joint(name=f"pad_{part}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[s_in, 0, 0])
+        k = pd["k_n_per_m"]
+        j.stiffness, j.springref = [k, 0, 0], pd["preload_n"] / k    # preload: the spring rests past the stop
+        j.damping = [2 * 0.7 * np.sqrt(k * PAD_ARMATURE), 0, 0]
+        j.armature, j.limited, j.range = PAD_ARMATURE, True, (-pd["travel_m"], 0.0)
+        half = pd["half"]
+        pg = pad.add_geom(name=f"pad_{part}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                          pos=[s_in * (pd["rest_m"] - half[0]), 0, 0], size=half, mass=0.001, rgba=PAD_RGBA)
+        pg.contype, pg.conaffinity, pg.group = PAD_BITS[0], PAD_BITS[1], 2
+        _finger_contact(pg)
+        pg.friction = PAD_FRICTION
+
+
 def _connect(s, body1, body2, anchor):
     e = s.add_equality(name=f"{body1}_pin", type=mujoco.mjtEq.mjEQ_CONNECT, name1=body1, name2=body2,
                        objtype=mujoco.mjtObj.mjOBJ_BODY)
@@ -559,9 +616,12 @@ def _push_test(part, ch, k_flank, F_test, seconds=1.0):
     return F_test / max((p_now - p_mid) @ inward, 1e-9)
 
 
-def arm_spec(cut_hold=False):
+def arm_spec(cut_hold=False, jaw="v5"):
     """cut_hold: the truss harvest's rigid fingers with blade + pads at the tips (every truss scene); False = the soft
-    2 N/mm fin-ray fingers (only expert.ArmIK's kinematics model uses it: the joints and gripper frame are the same)."""
+    2 N/mm fin-ray fingers (only expert.ArmIK's kinematics model uses it: the joints and gripper frame are the same).
+    jaw (with cut_hold): "v5" the fin-ray-ladder jaw every dataset so far used, "v6" add_jaw_v6 (JAWS)."""
+    if jaw not in JAWS:
+        raise ValueError(f"jaw={jaw!r}: one of {JAWS}")
     if not SO101_XML.exists():
         raise FileNotFoundError(f"{SO101_XML} missing: run ./fetch_so101.sh in sim/ first")
     s = mujoco.MjSpec.from_file(str(SO101_XML))
@@ -569,17 +629,20 @@ def arm_spec(cut_hold=False):
     for body, stock in (("gripper", "wrist_roll_follower_so101_v1"), ("moving_jaw_so101_v1", "moving_jaw_so101_v1")):
         for g in [g for g in s.body(body).geoms if g.meshname == stock]:
             s.delete(g)
-    chain = json.loads((FINRAY / "chain.json").read_text())
-    for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
-        b = s.body(body)
-        s.add_mesh(name=f"finray_stub_{part}", file=str(FINRAY / f"stub_{part}.stl"))
-        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}",
-                       rgba=PLA_RGBA)
-        g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only: its convex hull would swallow the jaw opening
-        _finray_ladder(s, b, part, chain[part],
-                       finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
-    if cut_hold:
-        add_cut_hold(s, chain)
+    if cut_hold and jaw == "v6":
+        add_jaw_v6(s)
+    else:
+        chain = json.loads((FINRAY / "chain.json").read_text())
+        for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
+            b = s.body(body)
+            s.add_mesh(name=f"finray_stub_{part}", file=str(FINRAY / f"stub_{part}.stl"))
+            g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}",
+                           rgba=PLA_RGBA)
+            g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only: its convex hull would swallow the jaw opening
+            _finray_ladder(s, b, part, chain[part],
+                           finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
+        if cut_hold:
+            add_cut_hold(s, chain)
     lo, hi = (np.array(v) / 1000 for v in PALM_BOX_MM)
     palm = s.body("gripper").add_geom(name="palm", type=mujoco.mjtGeom.mjGEOM_BOX, pos=(lo + hi) / 2,
                                       size=(hi - lo) / 2, rgba=(1, 0, 0, 0.3))
@@ -604,12 +667,12 @@ def arm_spec(cut_hold=False):
     return s
 
 
-def compose(static, tomatoes, eqs, arm=True, scenery=True, cut_hold=False, excludes="", crate=None):
+def compose(static, tomatoes, eqs, arm=True, scenery=True, cut_hold=False, excludes="", crate=None, jaw="v5"):
     world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery, excludes, crate))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
-        world.attach(arm_spec(cut_hold), frame=fr, prefix="arm/")
+        world.attach(arm_spec(cut_hold, jaw), frame=fr, prefix="arm/")
     m = world.compile()
     return m, mujoco.MjData(m)
 

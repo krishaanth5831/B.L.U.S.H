@@ -214,6 +214,7 @@ class TrussPlanner:
         self.m, self.d, self.info, self.k = m, d, info, k
         self.t = info["trusses"][k]
         self.fm = arm_map.FollowerMap()
+        truss_ik.set_jaw(scene.jaw_of(m))     # the aim point is the jaw's (v5 tips / v6 zone)
         self.ik, self.ik_free = truss_ik.truss_ik(), expert.arm_ik()
         self.qidx, _ = scene.arm_ids(m)
         name = lambda g: m.geom(g).name or ""   # noqa: E731
