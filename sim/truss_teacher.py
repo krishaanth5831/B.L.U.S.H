@@ -55,9 +55,11 @@ IK, the carried-truss checker (CarryChecker), the release-pose fit (crate_poses 
 samples come from a fixed seed). Timing constants come from expert.py; the sag correction is expert.Plan's,
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
+import collections
 import copy
 import json
 import os
+import re
 import weakref
 
 import mujoco
@@ -286,6 +288,33 @@ if os.environ.get("BLUSH_V6"):
             globals()[_k] = _v
         else:
             raise KeyError(f"BLUSH_V6: unknown switch {_k}")
+
+
+# What blocked a plan, counted per (reason, what was hit) for base_grid --plan-only's census (2026-11-25): which geoms
+# a "slide hits" / "the truss in hand hits" / blocked route runs into. The caller clears it per scene.
+HIT_LOG = collections.Counter()
+
+
+def hit_kind(name, target):
+    """A blocked check's geom name -> a kind (the census groups by it)."""
+    if name.startswith("self:"):
+        return "the arm itself"
+    if name.startswith("blade on"):
+        return "blade near a stalk"
+    m = re.match(r"(s\d+t\d+)_(t\d+)?", name)
+    if m:
+        own = m.group(1) == target
+        return ("own " if own else "neighbour ") + ("fruit" if m.group(2) else "truss stalk")
+    for key, kind in (("crate", "crate"), ("table", "table"), ("floor", "table"), ("stem", "stem"),
+                      ("knuckle", "stem"), ("leaf", "leaf")):
+        if key in name:
+            return kind
+    return "other: " + name
+
+
+def _log_hits(reason, chk, target):
+    for n in getattr(chk, "last_hits", ()) or ():
+        HIT_LOG[(reason, hit_kind(n, target))] += 1
 
 
 def add_self_check(chk, prefix="arm/"):
@@ -556,6 +585,7 @@ class TrussTeacher(tx.TrussPlanner):
                 leg = dict(leg)                # the cached one keeps v4's route (none)
                 to_std, detour = self._to_standoff(self.q0, leg, extra=True, memo=mode)
             if to_std is None:
+                _log_hits("start -> standoff blocked", self.chk, self.t["name"])
                 tried.append("start -> standoff blocked, detour too")
                 return
         self._at_release = False
@@ -639,6 +669,7 @@ class TrussTeacher(tx.TrussPlanner):
         p_cut, s, f, slide, L = g["p_cut"], g["s"], g["f"], g["slide"], g["slide_m"]
         self.jaw(tx.JAW_OPEN_DEG)
         if not self.chk.path_ok(slide, ignore=self.target_stalk, **self.kw):
+            _log_hits("slide hits", self.chk, self.t["name"])
             return "slide hits"
         for deg in np.linspace(tx.JAW_OPEN_DEG, -10.0, 6):
             self.jaw(deg)
@@ -818,6 +849,7 @@ class TrussTeacher(tx.TrussPlanner):
                 continue
             if not cchk.path_ok(xs, **self.kw):
                 why = "retreat: the truss in hand hits"
+                _log_hits(why, cchk, self.t["name"])
                 continue
             return xs, i
         if extra:
@@ -828,6 +860,7 @@ class TrussTeacher(tx.TrussPlanner):
                 path = [np.asarray(x_cut, float)] + xs
                 if not cchk.path_ok(path, **self.kw):
                     why = "retreat: the truss in hand hits"
+                    _log_hits(why, cchk, self.t["name"])
                     continue
                 return path, f"v5_{j}"
         tried.append(why)
@@ -843,6 +876,7 @@ class TrussTeacher(tx.TrussPlanner):
             if to_crate is not None:
                 break
         if to_crate is None:
+            _log_hits("retreat -> crate blocked", cchk, self.t["name"])
             return "retreat -> crate blocked, via-pose too"
         self.jaw(tx.JAW_OPEN_DEG)
         q_start = self.fm.norm_to_rad(self.q_home)[:5]

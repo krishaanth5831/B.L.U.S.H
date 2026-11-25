@@ -88,6 +88,8 @@ def main():
     ap.add_argument("--seed-start", type=int, default=9730000, help="tuning seeds (unused by any dataset or test)")
     ap.add_argument("--scenes", type=int, default=30)
     ap.add_argument("--retries", type=int, default=0, help="more plans after a failed dry run (as generate_truss)")
+    ap.add_argument("--plan-only", action="store_true",
+                    help="census: plan each scene, no dry run; log the plan's phase or what blocked it (HIT_LOG)")
     ap.add_argument("--out", type=pathlib.Path)
     a = ap.parse_args()
     b = [float(v) for v in a.base.split(",")]
@@ -138,12 +140,19 @@ def main():
         if robot._tgt_k is None:
             rec.update(plan=False, ok=False, why=f"no target ({robot._box_info['reason']})")
         else:
+            tt.HIT_LOG.clear()
             try:
                 plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
                 rec["plan"] = True
             except tx.PlanError as e:
                 plan = None
-                rec.update(plan=False, ok=False, why=f"no plan: {str(e)[:160]}")
+                rec.update(plan=False, ok=False, why=f"no plan: {str(e)[:400]}")
+                rec["blocked_by"] = [[r_, k_, n_] for (r_, k_), n_ in tt.HIT_LOG.most_common()]
+            if a.plan_only:
+                if plan is not None:
+                    rec.update(phase=plan.meta.get("phase"), crate_slack_mm=plan.meta.get("crate_slack_mm"),
+                               release_fallback=plan.meta.get("release_fallback"))
+                plan = None
             k = 0
             while plan is not None:
                 if k:

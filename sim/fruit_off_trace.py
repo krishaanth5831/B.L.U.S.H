@@ -124,9 +124,21 @@ def main():
             state["R0"] = Rg.T @ Rt
             og = d.xpos[grip]
             state["rel"] = np.array([Rg.T @ (d.xpos[m.body(names[j]).id] - og) for j in mine])
+            state["body0"] = Rg.T @ (d.xpos[body] - og) - grip_pt
+        if state.get("body0") is not None and cutter.cut_t is not None:
+            # the truss root in the jaw since the cut: along the stalk (gripper y) = sliding; its distance from that
+            # axis changing = coming out of the pads (rolling about the stalk keeps it)
+            pb = Rg.T @ (d.xpos[body] - d.xpos[grip]) - grip_pt
+            p0 = state["body0"]
+            slide = (pb[1] - p0[1]) * 1000
+            rad = (np.hypot(pb[0], pb[2]) - np.hypot(p0[0], p0[2])) * 1000
+            state.setdefault("slide", []).append((getattr(plan, "leg", None), round(float(slide), 1),
+                                                  round(float(rad), 1)))
         ph_now = getattr(plan, "leg", None)
-        if state.get("rel") is not None and not model_err and ph_now in ("settle_above", "lower"):
-            predict_vs_live(Rg, d.xpos[grip])
+        if state.get("rel") is not None and ph_now == "settle_above":
+            predict_vs_live(Rg, d.xpos[grip])        # overwritten each frame: the error at the END of the settle
+            if "first" not in state:
+                state["first"] = {k_: dict(v_) for k_, v_ in model_err.items()}   # and as the carry stops
         if ph_now == "lift":
             state.setdefault("lift_z", []).append(round(float(d.xpos[grip][2]) * 1000, 1))
         turn, axis = None, None
@@ -166,7 +178,16 @@ def main():
     for g in plan.legs:
         if g.name == "lower" and g.W is not None and len(g.W) > 1:
             print(f"lowering path: {len(g.W)} points, largest joint step {np.abs(np.diff(g.W, axis=0)).max():.1f} norm")
-    print(f"model vs live fruit above the crate: {model_err or 'not reached'}")
+    print(f"model vs live fruit above the crate, as the carry stops: {state.get('first', 'not reached')}")
+    print(f"model vs live fruit above the crate, after the settle: {model_err or 'not reached'}")
+    sl = [x for x in state.get("slide", []) if x[0] in ("squeeze", "retreat", "to_crate", "settle_above", "lower")]
+    if sl:
+        by = collections.OrderedDict()
+        for ph, a_, r_ in sl:
+            by.setdefault(ph, []).append((a_, r_))
+        print("stalk in the jaw since the cut (mm; along the stalk = sliding, off the axis = leaving the pads): " +
+              "; ".join(f"{ph} end along {v[-1][0]} off {v[-1][1]} (max |along| {max(abs(x[0]) for x in v)})"
+                        for ph, v in by.items()))
     lz = state.get("lift_z", [])
     if lz:
         print(f"gripper height in the lift: first {lz[:6]} ... last {lz[-1]} mm (a dip = pushing the dropped truss)")
