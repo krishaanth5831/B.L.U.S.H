@@ -153,7 +153,7 @@ def attempt_record(plan, why, where):
                 beta=m.get("approach_blend_deg"), tilt=m.get("tilt_deg"), retreat=str(m.get("retreat_option")),
                 release=None if rp is None else [round(float(x), 3) for x in rp],
                 fallback=str(m.get("release_fallback")), swing_deg=m.get("release_swing_deg"),
-                align_deg=m.get("carry_align_deg"),
+                align_deg=m.get("carry_align_deg"), detour=str((m.get("detours") or {}).get("to_crate")),
                 why=str(why)[:120], damage=where)
 
 
@@ -260,6 +260,15 @@ def main():
                     attempt_record(plan, why, damage_where(robot, plan, t_play, watch, expert.FPS)))
                 if a.whatif_weld:
                     rec["attempts"][-1]["weld"] = wlog
+                # second reading, never the verdict: how far a neighbour's fruit swung at most (the judge's limit
+                # gt.NEIGHBOUR_MOVE_M is a guess, 2026-11-03) and the verdict with that one rule left out, so
+                # scripts/grid_ab.py --swing can say what any other limit would have scored
+                keep_lim, gt.NEIGHBOUR_MOVE_M = gt.NEIGHBOUR_MOVE_M, float("inf")
+                try:
+                    rec["attempts"][-1].update(nb_mm=round(watch.max * 1000, 1),
+                                               why_noswing=str(gt.judge(robot, plan, t_play, watch)[1])[:120])
+                finally:
+                    gt.NEIGHBOUR_MOVE_M = keep_lim
                 if ok or k >= a.retries:
                     break
                 k += 1

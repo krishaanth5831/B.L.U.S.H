@@ -835,7 +835,7 @@ class TrussTeacher(tx.TrussPlanner):
                     o, Rm = ikf.fk(x)
                     X.append(x), O.append(o), R.append(Rm)
                     RHO.append(float(np.linalg.norm((o + Rm @ point)[:2] - c)))
-            self._align["nkey"], self._align["segs"] = key, {}
+            self._align["nkey"] = key
             self._align["nodes"] = (np.array(X).reshape(-1, 5), np.array(O).reshape(-1, 3),
                                     np.array(R).reshape(-1, 3, 3), np.array(RHO))
         return self._align["nodes"]
@@ -851,10 +851,11 @@ class TrussTeacher(tx.TrussPlanner):
         return np.r_[pan, X[i, 1:]] if d[i] <= V6_ALIGN_VIA_TOL_M else None
 
     def _seg_ok(self, chk, a, b, kw):
-        """chk.path_ok([a, b]) remembered per cut pose: the crane move's pull-out and turn are the same for many
-        release poses (re-checking them made one plan take > 9 min, 2026-11-25)."""
-        memo = self._align.setdefault("segs", {})
-        key = (id(chk), np.asarray(a, float).round(5).tobytes(), np.asarray(b, float).round(5).tobytes(), repr(kw))
+        """chk.path_ok([a, b]) remembered ON the checker: the crane move's pull-out and turn are the same for many
+        release poses (re-checking them made one plan take > 9 min, 2026-11-25). ⚠️ On the checker, not keyed by
+        id(chk): each cut candidate has its own CarryChecker (its own carried truss), and ids are reused."""
+        memo = chk.__dict__.setdefault("_seg_memo", {})
+        key = (np.asarray(a, float).round(5).tobytes(), np.asarray(b, float).round(5).tobytes(), repr(kw))
         if key not in memo:
             memo[key] = bool(chk.path_ok([a, b], **kw))
         return memo[key]
@@ -1214,7 +1215,9 @@ class TrussTeacher(tx.TrussPlanner):
         V6_ALIGN_LOW_MAX_M over the crate floor; each then turned about the pan axis in V6_ALIGN_STEP_DEG steps, kept
         when the grip point is V6_ALIGN_INSET_M inside the walls. Cached per cut pose."""
         Rc, qc = self._R_cut, self._q_cut
-        key = tuple(np.round(Rc, 5).ravel()) + (len(rel),)
+        # ⚠️ per cut pose AND carried shape: two cut candidates with the same orientation at another point of the stalk
+        # carry the truss elsewhere in the gripper (its lowest point, the grip point), so neither may reuse the other's
+        key = (np.round(qc, 6).tobytes(), np.round(rel, 5).tobytes(), np.round(point, 6).tobytes())
         if self._align.get("key") != key:
             (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
             _, _, sgn, c = self._align_kin()

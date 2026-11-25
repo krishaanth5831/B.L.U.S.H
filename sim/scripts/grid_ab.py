@@ -4,6 +4,7 @@
     python sim/scripts/grid_ab.py A=outputs/v6/base_grid_r13_A_*.jsonl B=outputs/v6/base_grid_r13_B_*.jsonl
 
 Each argument is NAME=glob[,glob...]; later files win when a seed repeats. The first arm is the reference.
+--swing: also what each arm would score at other limits for a neighbour's swing (swing_table).
 ⚠️ A "no plan" record lists every reason any candidate hit, per mode, SORTED ALPHABETICALLY (truss_teacher joins
 sorted(set(tried))), so its first reason is not the main one. This scores a no-plan scene by the FURTHEST stage any
 candidate reached (STAGES order); the why string is cut at 400 chars, so a late stage can be missed (rare).
@@ -48,7 +49,25 @@ def bucket(r):
     return w[:40]
 
 
+def swing_table(arms, seeds, limits=(15, 20, 30, 40, 60, None)):
+    """--swing: scenes that would pass if a neighbour's fruit may swing up to each limit (mm; None = no limit), from
+    the attempts' nb_mm + why_noswing (base_grid's second reading). A scene passes at a limit if any attempt that ran
+    passes there; the retries were chosen under the judge's own limit, so this is a close estimate, not a re-run."""
+    for k, v in arms.items():
+        have = [s for s in seeds if all("nb_mm" in at for at in v[s].get("attempts", []))]
+        if not have:
+            continue
+        row = []
+        for lim in limits:
+            n = sum(any(at["why_noswing"] == "ok" and (lim is None or at["nb_mm"] <= lim)
+                        for at in v[s].get("attempts", [])) for s in have)
+            row.append(f"{'none' if lim is None else lim}: {n} ({100 * n / len(have):.0f} %)")
+        print(f"{k}: neighbour swing limit (mm) -> scenes ok of {len(have)}:  " + "   ".join(row))
+
+
 def main():
+    swing = "--swing" in sys.argv
+    sys.argv = [x for x in sys.argv if x != "--swing"]
     arms = {}
     for a in sys.argv[1:]:
         name, _, globs = a.partition("=")
@@ -64,6 +83,8 @@ def main():
         for b, n in collections.Counter(bucket(v[s]) for s in seeds).most_common():
             if b != "ok":
                 print(f"     {n:3d}  {b}")
+    if swing:
+        swing_table(arms, seeds)
     ref = names[0]
     for k in names[1:]:
         won = [s for s in seeds if arms[k][s].get("ok") and not arms[ref][s].get("ok")]

@@ -58,6 +58,62 @@ Label for the report: "measured in the project's simulation".
   - 9730005: the straight move to the crate was blocked, the detour used fixed via-poses that do not keep the tilt
     (planned change 116 degrees): the stalk swung to 55 degrees and back; success anyway.
   - 9730015: retreat variant with free orientation (planned change 16 degrees): fruit came off on the way; failure.
-- Next step being built: via-poses and the retreat projected onto the same pitch and tilt, then the 180-scene paired
-  comparison. Not yet tested: placing a vertically hanging truss in a 5 cm high crate (release above the floor and
-  let it tip, or lay it down).
+- Built after this: the retreat, the lowering and a "crane" move (pull straight back and up, turn, reach out over
+  the crate) all on the cut pose's pitch and tilt. Scored in section 6.
+
+## 6. Gravity-aligned carry scored (60 scenes, 9730000-059, up to 6 retries; the sim unchanged)
+
+- Aligned carry, no fallback to the old detours: 27/60 = 45 %. Today's teacher on the same scenes: 39/60 = 65 %; the
+  release-pose-cap variant: 41/60 = 68 %. Won 5 scenes today's teacher loses, lost 17.
+- Why it lost, by count: no plan in 21 scenes against 4 (the crane move is the only route and the row blocks its
+  pull-out or its turn); retries recovered 6 scenes against 14 (the failing piece, the pull-out, is the same in every
+  retry); and of 74 failed aligned attempts 60 were damage on the way to the crate on paths the planner had called
+  clear.
+- Predicted from these runs (deterministic): aligned as the first try, then today's teacher: 40/60; then the cap
+  variant: 42-43/60. One or two scenes, inside the noise. Not worth a 180-scene run as built.
+- What the aligned carry did do: the stalk's angle to the pads' line stays put (section 5), i.e. the tilt-driven
+  pivot about the pads' normal is gone. That was not what decided success.
+
+## 7. Where the cut truss really is (traces: `sim/whatif/carry_bump_trace.py`)
+
+- In the failed aligned carries it is the cut truss itself that touches the neighbour (never the arm), 2-6 cm from
+  where the planner's model has it at that moment.
+- The truss's fruit are 35-110 mm off BOTH planner models (as cut, and hanging under the stalk) already when the
+  retreat starts, and 60-250 mm off later in the carry. Same with the solver's creep removed (noslip 5), so this is
+  not the creep artefact.
+- Control: today's teacher on the same four scenes is just as far off its own model (45-110 mm at the retreat,
+  up to 180-430 mm near the crate) and passes three of the four on the first plan. So model accuracy is not what
+  separates the two; today's routes take the truss away from the row at once, the crane route keeps it beside the
+  row for its pull-out and turn.
+- Split by axis (gripper frame): the main error is a turn about the stalk's OWN axis, 11-111 degrees, plus 10-30
+  degrees about the pads' normal. (Already noted 2026-11-24 in `truss_expert.py`, CARRY_AXIS.)
+
+## 8. When and why the truss rolls about its stalk
+
+- When: nothing moves until the jaw closes. The roll happens in the last 0.2 s of the close, after the blade is
+  through (jaw +1.7 degrees) while the jaw snaps on to its shut position (-9 degrees): 0.6 -> 58 -> 89 degrees in
+  9730034, -> 60 in 9730005, -> 11 in 9730031 (the sim as it is). It then keeps turning in the retreat and wanders
+  over 100 degrees and more during the carry.
+- It does not follow the stalk's thickness (radius 1.64 / 1.91 / 1.56 mm for 89 / 60 / 11 degrees).
+- Probe 1, ease the jaw back open after the cut (to -4.9, -2.4 or +0.1 degrees instead of -8.7): the stalk rolls back
+  at a steady 5-8 degrees per degree of jaw in all three scenes. So moving the jaw while it grips does roll the round
+  stalk between the two flat pads, like a pencil between two palms (the pads slide past each other because the jaw
+  pivots). But what the snap-shut leaves behind varies (11-89 degrees), so a fixed ease-back over-corrects one scene
+  and under-corrects another: 9730031 went from +11 to -64 degrees. Pad force drops from 7.6 N to 3.9-6 N in total.
+  Not a fix. Code removed.
+- Probe 2, a what-if sawtooth face on the fixed pad (ridges parallel to the stalk, 3 mm pitch, 1.5 mm high, 90 degree
+  valleys; everything else unchanged): the roll still came after the cut (71 / 38 / -6 degrees at the end of the
+  squeeze), and the cut needed 34-47 N instead of 16-17 N (the stalk sat on a ridge tip). Not a fix as drawn. Code
+  removed. Jaw design stays the owner's decision.
+- Both probes: three scenes each, one plan each; enough to drop them, not to tune them.
+
+## 9. The neighbour-swing rule
+
+- The judge fails a run when any fruit of another truss is more than 15 mm from where it hung, at any frame
+  (`generate_truss.NEIGHBOUR_MOVE_M`, marked a guess on 2026-11-03).
+- Of today's teacher's 60 failed scenes (180), 20 end on that rule with no fruit lost: swings of 15-42 mm, one of
+  87 mm. Of the cap variant's 54 failures, 12 (16-55 mm).
+- That label only names the last retry's fault; an earlier retry may have failed on something else (9730004: six
+  retries ended "truss not in the crate" with 9-11 mm swings, the seventh "moved a neighbour 17 mm").
+- `base_grid.py` now also logs, per attempt, the largest swing and the verdict with that one rule left out;
+  `scripts/grid_ab.py --swing` prints what each limit would have scored. The verdict itself is unchanged.
