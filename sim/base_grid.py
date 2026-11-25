@@ -79,6 +79,37 @@ def find_start(jaw):
     return best
 
 
+def damage_where(robot, plan, t0, watch, fps):
+    """Where a dry run's first damage started (a fruit off, or a neighbour's fruit past generate_truss's
+    NEIGHBOUR_MOVE_M): its leg, the share of that leg done (0..1), the fruit and whether it is on the target truss.
+    None when nothing came off or moved. For the retry rule (to_crate damage early in the leg = leaving the plant)."""
+    k = robot._tgt_k
+    own = {f["tomato"] for f in robot.info["trusses"][k]["fruit"]}
+    ev = [(float(robot.det.detached_at[j] - t0), f["tomato"]) for j, f in enumerate(robot.info["fruit"])
+          if not np.isnan(robot.det.detached_at[j])]
+    if watch.over_t is not None:
+        ev.append((float(watch.over_t - t0 - 0.5 / fps), watch.over))
+    if not ev:
+        return None
+    t, name = min(ev)
+    i = int(t * fps)
+    for leg, n in plan.phases:
+        if i < n:
+            return dict(leg=leg, frac=round(i / max(n, 1), 2), fruit=name, own=name in own)
+        i -= n
+    return dict(leg="after", frac=None, fruit=name, own=name in own)
+
+
+def attempt_record(plan, why, where):
+    """One dry run of a scene, for the retry rule: the plan's candidate (cut, approach, retreat, release pose) + why."""
+    m = plan.meta
+    rp = m.get("release_point")
+    return dict(phase=m.get("phase"), mode=m.get("neighbours"), cut_u=m.get("cut_u"),
+                beta=m.get("approach_blend_deg"), tilt=m.get("tilt_deg"), retreat=str(m.get("retreat_option")),
+                release=None if rp is None else [round(float(x), 3) for x in rp],
+                fallback=str(m.get("release_fallback")), why=str(why)[:120], damage=where)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", required=True, help="x,y[,yaw_deg] of the arm base (world, m)")
@@ -164,6 +195,8 @@ def main():
                 t_play, watch = gt.play(robot, plan)
                 ok, why = gt.judge(robot, plan, t_play, watch)
                 rec.update(ok=ok, why=why, tries=k + 1, phase=plan.meta.get("phase"))
+                rec.setdefault("attempts", []).append(
+                    attempt_record(plan, why, damage_where(robot, plan, t_play, watch, expert.FPS)))
                 if ok or k >= a.retries:
                     break
                 k += 1

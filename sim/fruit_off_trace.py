@@ -80,44 +80,58 @@ def main():
 
     import truss_ik
     grip_pt = truss_ik.cut_point_in_gripper(t["r"])
-    model_err = {}
-
-    def predict_vs_live(R, o):
-        """At the first frame above the crate: the fruit as the teacher's models put them vs where they are (mm)."""
-        live = np.array([d.xpos[m.body(names[j]).id] for j in mine])
-        rel = state["rel"]
-        rigid = o + rel @ R.T
-        P = o + R @ grip_pt
-        a_ = R[:, 1]                                          # the stalk's axis (tx.CARRY_AXIS 1)
-        w = np.array([radii[j] ** 3 for j in mine])
-        c = (rigid * w[:, None]).sum(0) / w.sum() - P
-        c_perp = c - (c @ a_) * a_
-        down = np.array([0, 0, -1.0]) + a_[2] * a_
-        th = np.arctan2(np.cross(c_perp, down) @ a_, c_perp @ down)
-        state["th"] = th
-        v = rigid - P
-        hang = P + v * np.cos(th) + np.cross(a_, v) * np.sin(th) + np.outer(v @ a_, a_) * (1 - np.cos(th))
-        for nm, pred in (("held as at the cut", rigid), ("hanging under the stalk", hang)):
-            e = (live - pred) * 1000
-            model_err[nm] = dict(mean_mm=round(float(np.linalg.norm(e, axis=1).mean()), 1),
-                                 max_mm=round(float(np.linalg.norm(e, axis=1).max()), 1),
-                                 mean_xyz_mm=np.round(e.mean(0), 1).tolist())
 
     def rot(axis, ang, v):
         return v * np.cos(ang) + np.cross(axis, v) * np.sin(ang) + np.outer(v @ axis, axis) * (1 - np.cos(ang))
 
-    def split(Rg, og, Rb, xb):
-        """Above the crate: the STALK vs the models (its rachis end), and the fruit vs the stalk (in its frame)."""
-        P = og + Rg @ grip_pt
-        a_ = Rg[:, 1]
+    def carry_models(R, o):
+        """{model: (its fruit (n, 3), its stalk's rachis end (3,))} with the gripper at (R, o): the truss held as at the
+        cut (tx.CARRY "rigid"), swung about the stalk's axis until its centre of mass is below it (tx.CARRY "hang",
+        CARRY_AXIS 1, v6's model), and a free pivot about the grip point that puts the centre of mass straight under it
+        (no model in the teacher; scored here to see whether it explains the steady +x offset). Centre of mass from
+        the fruit (radius^3), the stalk's own mass left out."""
+        rigid = o + state["rel"] @ R.T
+        re_rigid = o + R @ (state["pb_rel"] + state["Rb_rel"] @ state["re_loc"])
+        P = o + R @ grip_pt
+        w = np.array([radii[j] ** 3 for j in mine])
+        c = (rigid * w[:, None]).sum(0) / w.sum() - P
+        out = {"held as at the cut": (rigid, re_rigid)}
+        a_ = R[:, 1]                                          # the stalk's axis (tx.CARRY_AXIS 1)
+        c_perp = c - (c @ a_) * a_
+        down = np.array([0, 0, -1.0]) + a_[2] * a_
+        th = np.arctan2(np.cross(c_perp, down) @ a_, c_perp @ down)
+        state["th"] = th
+        out["hanging about the stalk"] = (P + rot(a_, th, rigid - P), P + rot(a_, th, (re_rigid - P)[None, :])[0])
+        ax = np.cross(c, [0, 0, -1.0])
+        if np.linalg.norm(ax) > 1e-9:
+            ang = np.arctan2(np.linalg.norm(ax), -c[2])
+            ax = ax / np.linalg.norm(ax)
+            out["free pivot, centre of mass under the grip"] = (P + rot(ax, ang, rigid - P),
+                                                                 P + rot(ax, ang, (re_rigid - P)[None, :])[0])
+        return out
+
+    def score(Rg, og, Rb, xb):
+        """The fruit and the stalk's rachis end vs each carry model (mm), the fruit vs the stalk in its own frame
+        (moved on their tethers), and the stalk's angle to gripper y (the pads' line) now."""
+        live = np.array([d.xpos[m.body(names[j]).id] for j in mine])
         re_live = xb + Rb @ state["re_loc"]
-        re_rigid = og + Rg @ (state["pb_rel"] + state["Rb_rel"] @ state["re_loc"])
-        re_hang = P + rot(a_, state.get("th", 0.0), (re_rigid - P)[None, :])[0]
+        res = {}
+        for nm, (pred, re_pred) in carry_models(Rg, og).items():
+            e = (live - pred) * 1000
+            res[nm] = dict(fruit_mean_mm=round(float(np.linalg.norm(e, axis=1).mean()), 1),
+                           fruit_max_mm=round(float(np.linalg.norm(e, axis=1).max()), 1),
+                           fruit_mean_xyz_mm=np.round(e.mean(0), 1).tolist(),
+                           stalk_end_mm=round(float(np.linalg.norm(re_live - re_pred) * 1000), 1))
         floc = np.array([Rb.T @ (d.xpos[m.body(names[j]).id] - xb) for j in mine])
-        state["split"] = dict(
-            stalk_end_vs_rigid_mm=round(float(np.linalg.norm(re_live - re_rigid) * 1000), 1),
-            stalk_end_vs_hang_mm=round(float(np.linalg.norm(re_live - re_hang) * 1000), 1),
-            fruit_moved_on_stalk_mm=round(float(np.linalg.norm(floc - state["floc0"], axis=1).mean() * 1000), 1))
+        res["fruit moved on the stalk (mm)"] = round(float(np.linalg.norm(floc - state["floc0"], axis=1).mean()
+                                                           * 1000), 1)
+        res["stalk to gripper y (deg)"] = stalk_angle(Rg, Rb)
+        return res
+
+    def stalk_angle(Rg, Rb):
+        """The peduncle's angle to gripper y (the line the pads hold it along), 0..90 deg."""
+        v = Rb @ state["ped_loc"]
+        return round(float(np.degrees(np.arccos(np.clip(abs(v @ Rg[:, 1]), 0, 1)))), 1)
 
     def on_frame(_sent):
         state["frame"] += 1
@@ -151,6 +165,7 @@ def main():
             state["floc0"] = np.array([Rt.T @ (d.xpos[m.body(names[j]).id] - d.xpos[body]) for j in mine])
             P0 = og + Rg @ grip_pt
             state["s_ped0"] = float(state["ped_loc"] @ (Rt.T @ (P0 - d.xpos[body])))
+            state["angle_cut"] = stalk_angle(Rg, Rt)
         if state.get("s_ped0") is not None:
             # where the pad point sits along the peduncle, in the STALK's frame: changes only if the stalk slides
             # through the pads (a stalk pivoting in the pads keeps it)
@@ -168,11 +183,10 @@ def main():
             state.setdefault("slide", []).append((getattr(plan, "leg", None), round(float(slide), 1),
                                                   round(float(rad), 1)))
         ph_now = getattr(plan, "leg", None)
+        if state.get("rel") is not None and ph_now == "to_crate":
+            state["end_carry"] = score(Rg, d.xpos[grip], Rt, d.xpos[body])   # overwritten: the LAST to_crate frame
         if state.get("rel") is not None and ph_now == "settle_above":
-            predict_vs_live(Rg, d.xpos[grip])        # overwritten each frame: the error at the END of the settle
-            split(Rg, d.xpos[grip], Rt, d.xpos[body])
-            if "first" not in state:
-                state["first"] = {k_: dict(v_) for k_, v_ in model_err.items()}   # and as the carry stops
+            state["settled"] = score(Rg, d.xpos[grip], Rt, d.xpos[body])     # overwritten: the end of the settle
         if ph_now == "lift":
             state.setdefault("lift_z", []).append(round(float(d.xpos[grip][2]) * 1000, 1))
         turn, axis = None, None
@@ -212,9 +226,10 @@ def main():
     for g in plan.legs:
         if g.name == "lower" and g.W is not None and len(g.W) > 1:
             print(f"lowering path: {len(g.W)} points, largest joint step {np.abs(np.diff(g.W, axis=0)).max():.1f} norm")
-    print(f"model vs live fruit above the crate, as the carry stops: {state.get('first', 'not reached')}")
-    print(f"model vs live fruit above the crate, after the settle: {model_err or 'not reached'}")
-    print(f"above the crate, after the settle: {state.get('split', 'not reached')}")
+    print(f"stalk to gripper y at the cut: {state.get('angle_cut')} deg")
+    for when in ("end_carry", "settled"):
+        print(f"carry models vs live, {'last to_crate frame' if when == 'end_carry' else 'end of the settle'}: "
+              + json.dumps(state.get(when, "not reached")))
     ps = [x for x in state.get("ped_slide", []) if x[0] in ("squeeze", "retreat", "to_crate", "settle_above", "lower")]
     if ps:
         byp = collections.OrderedDict()
