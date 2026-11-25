@@ -137,6 +137,7 @@ CARRY = "rigid"
 # 90-177 deg in the carry: the round stalk rolls between the flat pads (v5's jaw too, 57-67 deg on seed 9730005), and
 # the truss ends up hanging under it. TrussPlanner sets CARRY "hang" + CARRY_AXIS 1 for the v6 jaw; v5 keeps "rigid".
 CARRY_AXIS = 0
+V6_CARRY = ("hang", 1)          # (CARRY, CARRY_AXIS) the v6 jaw plans with; truss_teacher's BLUSH_V6 can set it
 
 
 def hanging(o, R, rel, masses, grip_point):
@@ -223,7 +224,7 @@ class TrussPlanner:
         jaw = scene.jaw_of(m)
         truss_ik.set_jaw(jaw)                 # the aim point is the jaw's (v5 tips / v6 zone)
         global CARRY, CARRY_AXIS              # how the cut truss rides in the jaw (CARRY_AXIS note)
-        CARRY, CARRY_AXIS = ("hang", 1) if jaw == "v6" else ("rigid", 0)
+        CARRY, CARRY_AXIS = V6_CARRY if jaw == "v6" else ("rigid", 0)
         self.ik, self.ik_free = truss_ik.truss_ik(), expert.arm_ik()
         self.qidx, _ = scene.arm_ids(m)
         name = lambda g: m.geom(g).name or ""   # noqa: E731

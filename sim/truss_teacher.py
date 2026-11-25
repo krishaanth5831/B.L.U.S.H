@@ -56,6 +56,7 @@ samples come from a fixed seed). Timing constants come from expert.py; the sag c
 applied to the cross-track error so the lead itself doesn't wind it up.
 """
 import copy
+import json
 import os
 import weakref
 
@@ -207,7 +208,8 @@ V6_LIFT_HOME = True          # after the drop: straight back up the lowering lin
 # every pose judged as held at the cut and as hanging under the stalk (tx.CARRY_AXIS 1): the tighter wall room of the
 # two, and the hanging truss's lowest fruit V6_FLOOR_CLEAR_M to V6_DROP_MAX_M over the floor / rim.
 V6_FIT = "hang"              # "hang" (as cut + fully hanging), "envelope" (+ every angle between and 25 deg past),
-#                              "rigid" (v5's fit). A/B on 2026-11-24: "envelope" lost seeds on the 5 traced ones
+#                              "rigid" (v5's fit). "envelope" lost seeds on the 5 traced ones (2026-11-24); hang +
+#                              tx.V6_CARRY hang 20/30 vs rigid 18/30 on r2_today (2026-11-25, within the noise)
 V6_LEAN = True               # the laid-flat outline may reach tx.LEAN_M past a wall (v5's rule); False lost 3 of 5
 V6_REQUIRE_DROP = False      # only release poses with the straight lowering line (untested on its own)
 V6_FLOOR_CLEAR_M = 0.015     # the fit: lowest fruit (held or hanging) this far over the floor
@@ -217,7 +219,9 @@ V6_STOP_ABOVE_FLOOR_M = 0.025   # the closed-loop lowering stops with the live l
 # hanging (fruit_off_trace.py on 9730015): the cluster droops at its sprung rachis joint and the fruit dangle, so no
 # rigid model of the truss predicts it. So on reaching the crate the teacher re-plans the release from the truss as it
 # hangs NOW (the live bodies, held as they are for the last short move), the same fit and checks as at planning time.
-V6_LIVE_RELEASE = True
+# ⚠️ OFF: A/B on the 30 r2_today tuning scenes (2026-11-25, base_grid.py): with it 8/30, without 20/30 (round 2: 19),
+# 10 of its failures "not all in the crate". Kept behind the switch, unused.
+V6_LIVE_RELEASE = False
 # ...and not only fully hanging: on seed 9730005 the truss had turned 62 deg when lowered and its tip fruit was lowest
 # part-way (2026-11-24). So the fit takes the worst wall room and the lowest fruit over the whole swing: from as cut to
 # fully hanging, plus V6_SWING_OVER_DEG past it either way (it still swings), in V6_SWING_STEPS angles.
@@ -270,6 +274,18 @@ TILT_DEG = (0.0, -10.0, 10.0, -20.0, 20.0, -30.0, 30.0)
 # also reports arm parts closer than SELF_CLEARANCE, except pairs inside the hand (HAND_PARTS touch by design).
 SELF_CLEARANCE = 0.002                     # m (the planner's soft clearance, rrt.SOFT_CLEARANCE; guess, unverified)
 HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade")
+
+
+# A/B without editing code: BLUSH_V6='{"V6_LIVE_RELEASE": false, "V6_FIT": "rigid", "V6_CARRY": ["rigid", 0]}' sets
+# these switches (and truss_expert.V6_CARRY) for one process (base_grid.py, fruit_off_trace.py runs).
+if os.environ.get("BLUSH_V6"):
+    for _k, _v in json.loads(os.environ["BLUSH_V6"]).items():
+        if _k == "V6_CARRY":
+            tx.V6_CARRY = tuple(_v)
+        elif _k in globals() and _k.startswith("V6_"):
+            globals()[_k] = _v
+        else:
+            raise KeyError(f"BLUSH_V6: unknown switch {_k}")
 
 
 def add_self_check(chk, prefix="arm/"):
