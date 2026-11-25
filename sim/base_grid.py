@@ -100,6 +100,51 @@ def damage_where(robot, plan, t0, watch, fps):
     return dict(leg="after", frac=None, fruit=name, own=name in own)
 
 
+def weld_hook(robot, plan, log):
+    """--whatif-weld (WHAT-IF ONLY, scene.HOLD_WELD): play()'s on_frame. At the first retreat frame, if the target was
+    cut and touches a pad, its hold weld goes on at the pose it has in the gripper right then (relpose = the gripper in
+    the truss frame); at the first release / drop frame it goes off. The truss then cannot turn, slide or swing in the
+    grip between the cut and the crate. log gets when it went on/off and the pad contacts at switch-on."""
+    import mujoco
+    m, d = robot.m, robot.d
+    name = robot.info["trusses"][robot._tgt_k]["name"]
+    eq, cut = m.equality(f"{name}_truss_hold").id, m.equality(f"{name}_cut").id
+    bt, bg = m.body(f"{name}_truss").id, m.body("arm/gripper").id
+    stalk = {m.geom(f"{name}_peduncle").id, m.geom(f"{name}_rachis").id}
+    pads = {m.geom(g).id for g in ("arm/pad_fixed", "arm/pad_moving")}
+
+    def in_grip():
+        Rg = d.xmat[bg].reshape(3, 3)
+        return Rg.T @ (d.xpos[bt] - d.xpos[bg]), Rg.T @ d.xmat[bt].reshape(3, 3)
+
+    def on_frame(_sent):
+        leg = plan.leg
+        if leg == "retreat" and "on" not in log and not d.eq_active[cut]:
+            touch = sum(1 for c in d.contact[:d.ncon]
+                        if {c.geom1, c.geom2} & stalk and {c.geom1, c.geom2} & pads)
+            log["pad_contacts"] = touch
+            if touch:
+                m.eq_data[eq, 0:3] = 0.0
+                m.eq_data[eq, 3:6] = d.xmat[bt].reshape(3, 3).T @ (d.xpos[bg] - d.xpos[bt])
+                qn, q = np.zeros(4), np.zeros(4)
+                mujoco.mju_negQuat(qn, d.xquat[bt])
+                mujoco.mju_mulQuat(q, qn, d.xquat[bg])
+                m.eq_data[eq, 6:10] = q
+                d.eq_active[eq] = 1
+                log["on"] = round(float(d.time), 2)
+                log["_rel"] = in_grip()
+            else:
+                log["on"] = None
+        elif leg in ("release", "drop") and d.eq_active[eq]:
+            d.eq_active[eq] = 0
+            log["off"] = round(float(d.time), 2)
+            (p0, R0), (p1, R1) = log.pop("_rel"), in_grip()     # self-check: ~0 if the weld held where it started
+            log["drift_mm"] = round(float(np.linalg.norm(p1 - p0)) * 1e3, 1)
+            log["drift_deg"] = round(float(np.degrees(np.arccos(np.clip((np.trace(R0.T @ R1) - 1) / 2, -1, 1)))), 1)
+        return None
+    return on_frame
+
+
 def attempt_record(plan, why, where):
     """One dry run of a scene, for the retry rule: the plan's candidate (cut, approach, retreat, release pose) + why."""
     m = plan.meta
@@ -126,12 +171,17 @@ def main():
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--dedup", action="store_true",
                     help="retries skip plans repeating a release pose + retreat that already failed (gt.RETRY_DEDUP)")
+    ap.add_argument("--whatif-weld", action="store_true",
+                    help="WHAT-IF ONLY: weld the cut target to the gripper from the retreat to the release "
+                         "(scene.HOLD_WELD), the ceiling any pad design could reach")
     a = ap.parse_args()
+    scene.HOLD_WELD = a.whatif_weld
     b = [float(v) for v in a.base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
     if len(b) > 2:
         scene.ARM_YAW_DEG = b[2]
-    head = dict(base=list(scene.ARM_BASE), yaw_deg=scene.ARM_YAW_DEG, jaw=a.jaw, old_start=a.old_start)
+    head = dict(base=list(scene.ARM_BASE), yaw_deg=scene.ARM_YAW_DEG, jaw=a.jaw, old_start=a.old_start,
+                whatif_weld=a.whatif_weld)
     if not a.old_start:
         st = find_start(a.jaw)
         if st is None:
@@ -201,11 +251,14 @@ def main():
                 if k:
                     robot.new_scene(seed, log=False)
                     robot.get_observation()
-                t_play, watch = gt.play(robot, plan)
+                wlog = {}
+                t_play, watch = gt.play(robot, plan, on_frame=weld_hook(robot, plan, wlog) if a.whatif_weld else None)
                 ok, why = gt.judge(robot, plan, t_play, watch)
                 rec.update(ok=ok, why=why, tries=k + 1, phase=plan.meta.get("phase"))
                 rec.setdefault("attempts", []).append(
                     attempt_record(plan, why, damage_where(robot, plan, t_play, watch, expert.FPS)))
+                if a.whatif_weld:
+                    rec["attempts"][-1]["weld"] = wlog
                 if ok or k >= a.retries:
                     break
                 k += 1

@@ -672,12 +672,25 @@ def arm_spec(cut_hold=False, jaw="v5"):
     return s
 
 
+# WHAT-IF ONLY (base_grid --whatif-weld, 2026-11-25): every truss also gets an inactive weld to the gripper, which
+# base_grid switches on once the target is cut and off when the jaw opens at the crate = a truss that cannot turn,
+# slide or swing in the grip. It bounds what ANY pad design could buy; never on in data or tests. Off by default.
+HOLD_WELD = False
+HOLD_WELD_SOLREF = (0.004, 1.0)                  # as truss.CUT_WELD_SOLREF (stiff, at the 2 ms step's floor)
+HOLD_WELD_SOLIMP = (0.99, 0.999, 0.0001, 0.5, 2)
+
+
 def compose(static, tomatoes, eqs, arm=True, scenery=True, cut_hold=False, excludes="", crate=None, jaw="v5"):
     world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery, excludes, crate))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
         world.attach(arm_spec(cut_hold, jaw), frame=fr, prefix="arm/")
+        if HOLD_WELD:
+            for b in [b.name for b in world.bodies if b.name.endswith("_truss")]:
+                world.add_equality(name=f"{b}_hold", type=mujoco.mjtEq.mjEQ_WELD, name1=b, name2="arm/gripper",
+                                   objtype=mujoco.mjtObj.mjOBJ_BODY, active=False,
+                                   solref=HOLD_WELD_SOLREF, solimp=HOLD_WELD_SOLIMP)
     m = world.compile()
     return m, mujoco.MjData(m)
 
