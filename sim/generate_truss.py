@@ -126,6 +126,38 @@ def strain_failure(watch):
     return None
 
 
+# ⚠️ The sim is deterministic: a plan with the same release pose and retreat as one that failed from the carry on fails
+# the same way. Traced 2026-11-25 (base_grid.py attempts, v6 base 0.34/0.14): 9730016, 019 and 027 spent 20 of 21 dry
+# runs on ONE release pose each (next candidates reuse it), all failing at the same point of the same leg. With
+# RETRY_DEDUP the retry skips such plans (unjudged, not counted) for the next one with a new (release pose, retreat).
+RETRY_DEDUP = False              # off until the A/B (base_grid --dedup)
+DEDUP_SKIP_MAX = 60              # plans skipped looking for a new one before giving up (guess)
+
+
+def retry_key(meta):
+    """What a carry failure depends on: the release point (mm) and the retreat option."""
+    return tuple(round(float(v), 3) for v in meta.get("release_point") or ()), str(meta.get("retreat_option"))
+
+
+def next_plan_after(plan, why, failed, dedup=None):
+    """The teacher's next plan after a failed dry run (why), as before: from the carry on the same cut with the next
+    release pose, else the next candidate with another approach. dedup (default RETRY_DEDUP): also skip plans whose
+    retry_key already failed from the carry on in this scene (failed: the scene's set, updated here). PlanError when
+    none is left."""
+    dedup = RETRY_DEDUP if dedup is None else dedup
+    same = release_failure(why)
+    if same:
+        failed.add(retry_key(plan.meta))
+    plan.next_plan(same_candidate=same, avoid_approach=not same)
+    if dedup:
+        for _ in range(DEDUP_SKIP_MAX):
+            if retry_key(plan.meta) not in failed:
+                return plan
+            plan.next_plan(same_candidate=True)       # the same candidate's next release pose, then the next candidate
+        raise tx.PlanError(f"only repeats of failed release poses left after {DEDUP_SKIP_MAX} skipped")
+    return plan
+
+
 def release_failure(why):
     """A dry run's failure that the carry or the release decided (generate_truss.judge's reasons)."""
     if "not (all) in the crate" in why or "off the start pose" in why:   # the way home depends on the release pose
@@ -477,7 +509,7 @@ def main():
                 if a.teacher:
                     # teacher v5: deterministic, one plan search; a failed dry run takes its next plan (--retries).
                     # The cue marks the u the plan cuts at (the recording pass passes it to new_scene).
-                    tries, k = [], 0
+                    tries, k, failed_keys = [], 0, set()
                     try:
                         plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
                     except tx.PlanError as e:
@@ -504,8 +536,7 @@ def main():
                         if k > a.retries:
                             break
                         try:
-                            same = release_failure(why)
-                            plan.next_plan(same_candidate=same, avoid_approach=not same)
+                            next_plan_after(plan, why, failed_keys)
                         except tx.PlanError as e:
                             fails.append(f"no plan left ({str(e)[:60]})")
                             break

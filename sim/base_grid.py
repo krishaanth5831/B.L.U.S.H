@@ -124,6 +124,8 @@ def main():
     ap.add_argument("--plan-only", action="store_true",
                     help="census: plan each scene, no dry run; log the plan's phase or what blocked it (HIT_LOG)")
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--dedup", action="store_true",
+                    help="retries skip plans repeating a release pose + retreat that already failed (gt.RETRY_DEDUP)")
     a = ap.parse_args()
     b = [float(v) for v in a.base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
@@ -176,6 +178,7 @@ def main():
             rec.update(plan=False, ok=False, why=f"no target ({robot._box_info['reason']})")
         else:
             tt.HIT_LOG.clear()
+            tt.POOL_LOG.clear()
             try:
                 plan = tt.TrussTeacher(robot.m, robot.d, robot.info, robot._tgt_k).plan()
                 rec["plan"] = True
@@ -187,9 +190,13 @@ def main():
                 if plan is not None:
                     rec.update(phase=plan.meta.get("phase"), crate_slack_mm=plan.meta.get("crate_slack_mm"),
                                release_fallback=plan.meta.get("release_fallback"),
-                               release_swing_deg=plan.meta.get("release_swing_deg"))
+                               release_swing_deg=plan.meta.get("release_swing_deg"),
+                               release_pool=plan.meta.get("release_pool"))
+                pl = np.array(tt.POOL_LOG or [(0, 0)])
+                rec["fits"] = dict(n=len(tt.POOL_LOG), capped_empty=int((pl[:, 1] == 0).sum()),
+                                   median_fit=float(np.median(pl[:, 0])), median_capped=float(np.median(pl[:, 1])))
                 plan = None
-            k = 0
+            k, failed_keys = 0, set()
             while plan is not None:
                 if k:
                     robot.new_scene(seed, log=False)
@@ -203,8 +210,7 @@ def main():
                     break
                 k += 1
                 try:
-                    same = gt.release_failure(why)
-                    plan.next_plan(same_candidate=same, avoid_approach=not same)
+                    gt.next_plan_after(plan, why, failed_keys, dedup=a.dedup)
                 except tx.PlanError:
                     break
         n_plan += bool(rec.get("plan"))

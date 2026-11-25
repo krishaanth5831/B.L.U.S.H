@@ -241,6 +241,8 @@ V6_SWING_STEPS = 9
 # keeps only poses under it. (A first try, the hanging truss's lever about the closing axis, did NOT separate them:
 # 41-132 mm for every chosen pose, steady ones included; a 15 / 25 mm cap left 19 / 24 of 28 plans, 2026-11-25.)
 V6_PAD_SWING_MAX_DEG = None  # None = off (measured only); value from the 30-scene plan census + traces
+V6_PAD_SWING_ORDER = False   # True: the cap ORDERS instead of filtering (poses under it first, the rest after), so a
+#                              scene keeps its plans (a 20 deg filter left 26 of 28 plans on 30 scenes, 2026-11-25)
 # The fruit also dangle on their own pedicels, lower than any rigid model of the truss puts them: with the fit above,
 # 9730005 still pressed its tip fruit into the floor while lowering, and 9730018 / 9730015 dragged fruit over the crate
 # +y wall at the end of the carry (1.2-2.4 N, 2026-11-24). So in the v6 world the carry ends V6_ABOVE_CRATE_M over the
@@ -305,6 +307,7 @@ if os.environ.get("BLUSH_V6"):
 # What blocked a plan, counted per (reason, what was hit) for base_grid --plan-only's census (2026-11-25): which geoms
 # a "slide hits" / "the truss in hand hits" / blocked route runs into. The caller clears it per scene.
 HIT_LOG = collections.Counter()
+POOL_LOG = []        # every v6 release fit of a plan search: (poses that fit, of them under V6_PAD_SWING_MAX_DEG)
 
 
 def hit_kind(name, target):
@@ -420,6 +423,7 @@ class TrussTeacher(tx.TrussPlanner):
         self.legs, self.phases, self.meta = [], [], {}
         self._swing = {}                       # release pose (joints) -> gravity's swing in the pads' plane (deg)
         self._R_cut = None                     # the gripper at the cut (planned), for that swing
+        self._pool = None                      # the last v6 fit: (poses that fit, of them under V6_PAD_SWING_MAX_DEG)
         self.q_home = np.asarray(scene.START_NORM, float)
         self.v6 = scene.jaw_of(m) == "v6"      # the v6 world's carry, settle and lift (V6_*)
         self._vias = []
@@ -616,7 +620,7 @@ class TrussTeacher(tx.TrussPlanner):
                              retreat_option=rest["retreat_option"], release_point=rest["release_point"],
                              release_pitch=rest["release_pitch"], crate_slack_mm=rest["crate_slack_mm"],
                              release_swing_deg=None if rest.get("release_swing") is None
-                             else round(rest["release_swing"], 1),
+                             else round(rest["release_swing"], 1), release_pool=rest.get("release_pool"),
                              target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(r * 2000, 1),
                              tried=sorted(set(tried)), miss=False)
             if phase != "A" or rest["release_fallback"] is not None:
@@ -907,7 +911,7 @@ class TrussTeacher(tx.TrussPlanner):
         return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home, lift=lift,
                     detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
                     release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1), release_fallback=alternate,
-                    release_swing=self._swing.get(tuple(np.asarray(x_rel, float))))
+                    release_swing=self._swing.get(tuple(np.asarray(x_rel, float))), release_pool=self._pool)
 
     def _release_fit(self, carry, r, slack_min=tx.RELEASE_SLACK_M, live=False):
         """Every sampled pose over the crate (tx.crate_poses) the carried truss fits at, most room to the walls first:
@@ -989,12 +993,18 @@ class TrussTeacher(tx.TrussPlanner):
             a_cut = np.arctan2(g_cut[2], g_cut[1])
             a_rel = np.arctan2(-Rs[:, 2, 2], -Rs[:, 2, 1])
             pad_swing = np.degrees(np.abs((a_rel - a_cut + np.pi) % (2 * np.pi) - np.pi))
-        ok = np.flatnonzero((slack >= slack_min) & (low_all >= scene.CRATE_WALL + V6_FLOOR_CLEAR_M - h)
-                            & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M)
-                            & ((pad_swing <= V6_PAD_SWING_MAX_DEG) if V6_PAD_SWING_MAX_DEG is not None else True))
+        fits = ((slack >= slack_min) & (low_all >= scene.CRATE_WALL + V6_FLOOR_CLEAR_M - h)
+                & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M))
+        capped = fits & ((pad_swing <= V6_PAD_SWING_MAX_DEG) if V6_PAD_SWING_MAX_DEG is not None else True)
+        ok = np.flatnonzero(fits if V6_PAD_SWING_ORDER else capped)
+        self._pool = (int(fits.sum()), int(capped.sum()))          # poses that fit the truss, and under the cap
+        POOL_LOG.append(self._pool)
         self._swing.update({tuple(np.asarray(Qs[i], float)): float(pad_swing[i]) for i in ok})
         # Most room first, as v5. ⚠️ NOT nearest the crate's centre by grip point: the truss sticks out 10-20 cm along
         # its stalk from the grip, so centred grips put it over the +y wall (5 of 5 seeds, 2026-11-24).
+        if V6_PAD_SWING_ORDER and V6_PAD_SWING_MAX_DEG is not None:   # under the cap first, each part most room first
+            return (ok[np.lexsort((-slack[ok], pad_swing[ok] > V6_PAD_SWING_MAX_DEG))], slack, Qs, Os, Rs, point,
+                    low_all)
         return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_all
 
     def _release_pose(self, fit, i, cchk, clear=tx.CARRY_CLEAR_M):
