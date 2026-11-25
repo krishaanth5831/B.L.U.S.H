@@ -153,6 +153,7 @@ def attempt_record(plan, why, where):
                 beta=m.get("approach_blend_deg"), tilt=m.get("tilt_deg"), retreat=str(m.get("retreat_option")),
                 release=None if rp is None else [round(float(x), 3) for x in rp],
                 fallback=str(m.get("release_fallback")), swing_deg=m.get("release_swing_deg"),
+                align_deg=m.get("carry_align_deg"),
                 why=str(why)[:120], damage=where)
 
 
