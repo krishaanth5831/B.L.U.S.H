@@ -87,6 +87,7 @@ def main():
     ap.add_argument("--jaw", default="v6", choices=scene.JAWS)
     ap.add_argument("--seed-start", type=int, default=9730000, help="tuning seeds (unused by any dataset or test)")
     ap.add_argument("--scenes", type=int, default=30)
+    ap.add_argument("--seeds", help="comma-separated seeds instead of --seed-start/--scenes")
     ap.add_argument("--retries", type=int, default=0, help="more plans after a failed dry run (as generate_truss)")
     ap.add_argument("--plan-only", action="store_true",
                     help="census: plan each scene, no dry run; log the plan's phase or what blocked it (HIT_LOG)")
@@ -130,7 +131,9 @@ def main():
         out.flush()
     n_plan = n_ok = 0
     t0 = time.time()
-    for seed in range(a.seed_start, a.seed_start + a.scenes):
+    seeds = [int(x) for x in a.seeds.split(",")] if a.seeds else range(a.seed_start, a.seed_start + a.scenes)
+    a.scenes = len(seeds)
+    for seed in seeds:
         t_s = time.time()
         rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE))
         robot.new_scene(seed, log=False)

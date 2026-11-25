@@ -217,10 +217,10 @@ V6_REQUIRE_DROP = False      # only release poses with the straight lowering lin
 V6_FLOOR_CLEAR_M = 0.015     # the fit: lowest fruit (held or hanging) this far over the floor
 V6_DROP_MAX_M = 0.12         # the fit: the held truss's lowest fruit at most this far over the rim
 V6_STOP_ABOVE_FLOOR_M = 0.025   # the closed-loop lowering stops with the live lowest fruit this far over the floor
-# Live release (2026-11-24): above the crate the fruit were ~22 cm (mean) from where the cut-time model put them, held,
-# hanging (fruit_off_trace.py on 9730015): the cluster droops at its sprung rachis joint and the fruit dangle, so no
-# rigid model of the truss predicts it. So on reaching the crate the teacher re-plans the release from the truss as it
-# hangs NOW (the live bodies, held as they are for the last short move), the same fit and checks as at planning time.
+# Live release (2026-11-24): on reaching the crate, re-plan the release from the truss as it hangs NOW (the live bodies,
+# held as they are for the last short move), the same fit and checks as at planning time. Motivated by ~22 cm model
+# error on 9730015, which was NOT typical (CORRECTED 2026-11-25: that truss had nearly dropped; over 8 seeds the hang
+# model is 5-7 cm off, a consistent offset; the stalk is ONE rigid body (truss.py), there is no rachis joint to droop).
 # ⚠️ OFF: A/B on the 30 r2_today tuning scenes (2026-11-25, base_grid.py): with it 8/30, without 20/30 (round 2: 19),
 # 10 of its failures "not all in the crate". Kept behind the switch, unused.
 V6_LIVE_RELEASE = False
@@ -312,9 +312,11 @@ def hit_kind(name, target):
     return "other: " + name
 
 
-def _log_hits(reason, chk, target):
+def _log_hits(reason, chk, target, where=False):
     for n in getattr(chk, "last_hits", ()) or ():
         HIT_LOG[(reason, hit_kind(n, target))] += 1
+    if where:                                     # which segment of the path is blocked (-1: its first pose)
+        HIT_LOG[(reason + " at segment", str(getattr(chk, "last_seg", None)))] += 1
 
 
 def add_self_check(chk, prefix="arm/"):
@@ -849,7 +851,7 @@ class TrussTeacher(tx.TrussPlanner):
                 continue
             if not cchk.path_ok(xs, **self.kw):
                 why = "retreat: the truss in hand hits"
-                _log_hits(why, cchk, self.t["name"])
+                _log_hits(why, cchk, self.t["name"], where=True)
                 continue
             return xs, i
         if extra:
@@ -860,7 +862,7 @@ class TrussTeacher(tx.TrussPlanner):
                 path = [np.asarray(x_cut, float)] + xs
                 if not cchk.path_ok(path, **self.kw):
                     why = "retreat: the truss in hand hits"
-                    _log_hits(why, cchk, self.t["name"])
+                    _log_hits(why, cchk, self.t["name"], where=True)
                     continue
                 return path, f"v5_{j}"
         tried.append(why)

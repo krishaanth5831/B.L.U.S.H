@@ -105,7 +105,16 @@ class Checker:
         return True
 
     def path_ok(self, path, **kw):
-        return all(self.segment_free(a, b, **kw) for a, b in zip(path[:-1], path[1:]))
+        """Same answer as ever (the path's first way-point is not checked). Diagnostics only: self.last_seg = the first
+        blocked segment (0 = from the first way-point), or -1 when that first way-point is itself blocked."""
+        for i, (a, b) in enumerate(zip(path[:-1], path[1:])):
+            if not self.segment_free(a, b, **kw):
+                hits = self.last_hits
+                self.last_seg = -1 if self.hits(path[0], **kw) else i
+                self.last_hits = hits
+                return False
+        self.last_seg = None
+        return True
 
 
 def _steer(q_from, q_to, step=EXTEND):

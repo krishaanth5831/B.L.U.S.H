@@ -94,6 +94,7 @@ def main():
         c_perp = c - (c @ a_) * a_
         down = np.array([0, 0, -1.0]) + a_[2] * a_
         th = np.arctan2(np.cross(c_perp, down) @ a_, c_perp @ down)
+        state["th"] = th
         v = rigid - P
         hang = P + v * np.cos(th) + np.cross(a_, v) * np.sin(th) + np.outer(v @ a_, a_) * (1 - np.cos(th))
         for nm, pred in (("held as at the cut", rigid), ("hanging under the stalk", hang)):
@@ -102,8 +103,29 @@ def main():
                                  max_mm=round(float(np.linalg.norm(e, axis=1).max()), 1),
                                  mean_xyz_mm=np.round(e.mean(0), 1).tolist())
 
+    def rot(axis, ang, v):
+        return v * np.cos(ang) + np.cross(axis, v) * np.sin(ang) + np.outer(v @ axis, axis) * (1 - np.cos(ang))
+
+    def split(Rg, og, Rb, xb):
+        """Above the crate: the STALK vs the models (its rachis end), and the fruit vs the stalk (in its frame)."""
+        P = og + Rg @ grip_pt
+        a_ = Rg[:, 1]
+        re_live = xb + Rb @ state["re_loc"]
+        re_rigid = og + Rg @ (state["pb_rel"] + state["Rb_rel"] @ state["re_loc"])
+        re_hang = P + rot(a_, state.get("th", 0.0), (re_rigid - P)[None, :])[0]
+        floc = np.array([Rb.T @ (d.xpos[m.body(names[j]).id] - xb) for j in mine])
+        state["split"] = dict(
+            stalk_end_vs_rigid_mm=round(float(np.linalg.norm(re_live - re_rigid) * 1000), 1),
+            stalk_end_vs_hang_mm=round(float(np.linalg.norm(re_live - re_hang) * 1000), 1),
+            fruit_moved_on_stalk_mm=round(float(np.linalg.norm(floc - state["floc0"], axis=1).mean() * 1000), 1))
+
     def on_frame(_sent):
         state["frame"] += 1
+        Rb_now, xb_now = d.xmat[body].reshape(3, 3), d.xpos[body]
+        if state["frame"] == 1:                          # points fixed on the stalk body, in its frame
+            ped = np.asarray(t["peduncle_end"], float) - np.asarray(t["knuckle"], float)
+            state["ped_loc"] = Rb_now.T @ (ped / np.linalg.norm(ped))
+            state["re_loc"] = Rb_now.T @ (np.asarray(t["rachis_end"], float) - xb_now)
         touch = collections.defaultdict(list)
         stalk_touch = []
         for i in range(d.ncon):
@@ -125,6 +147,17 @@ def main():
             og = d.xpos[grip]
             state["rel"] = np.array([Rg.T @ (d.xpos[m.body(names[j]).id] - og) for j in mine])
             state["body0"] = Rg.T @ (d.xpos[body] - og) - grip_pt
+            state["Rb_rel"], state["pb_rel"] = Rg.T @ Rt, Rg.T @ (d.xpos[body] - og)
+            state["floc0"] = np.array([Rt.T @ (d.xpos[m.body(names[j]).id] - d.xpos[body]) for j in mine])
+            P0 = og + Rg @ grip_pt
+            state["s_ped0"] = float(state["ped_loc"] @ (Rt.T @ (P0 - d.xpos[body])))
+        if state.get("s_ped0") is not None:
+            # where the pad point sits along the peduncle, in the STALK's frame: changes only if the stalk slides
+            # through the pads (a stalk pivoting in the pads keeps it)
+            Pn = d.xpos[grip] + Rg @ grip_pt
+            s_now = float(state["ped_loc"] @ (Rt.T @ (Pn - d.xpos[body])))
+            state.setdefault("ped_slide", []).append((getattr(plan, "leg", None),
+                                                      round((s_now - state["s_ped0"]) * 1000, 1)))
         if state.get("body0") is not None and cutter.cut_t is not None:
             # the truss root in the jaw since the cut: along the stalk (gripper y) = sliding; its distance from that
             # axis changing = coming out of the pads (rolling about the stalk keeps it)
@@ -137,6 +170,7 @@ def main():
         ph_now = getattr(plan, "leg", None)
         if state.get("rel") is not None and ph_now == "settle_above":
             predict_vs_live(Rg, d.xpos[grip])        # overwritten each frame: the error at the END of the settle
+            split(Rg, d.xpos[grip], Rt, d.xpos[body])
             if "first" not in state:
                 state["first"] = {k_: dict(v_) for k_, v_ in model_err.items()}   # and as the carry stops
         if ph_now == "lift":
@@ -180,6 +214,14 @@ def main():
             print(f"lowering path: {len(g.W)} points, largest joint step {np.abs(np.diff(g.W, axis=0)).max():.1f} norm")
     print(f"model vs live fruit above the crate, as the carry stops: {state.get('first', 'not reached')}")
     print(f"model vs live fruit above the crate, after the settle: {model_err or 'not reached'}")
+    print(f"above the crate, after the settle: {state.get('split', 'not reached')}")
+    ps = [x for x in state.get("ped_slide", []) if x[0] in ("squeeze", "retreat", "to_crate", "settle_above", "lower")]
+    if ps:
+        byp = collections.OrderedDict()
+        for ph, v in ps:
+            byp.setdefault(ph, []).append(v)
+        print("pad point along the peduncle since the cut (mm, stalk frame = true sliding): " +
+              "; ".join(f"{ph} end {v[-1]} (max |{max(abs(x) for x in v)}|)" for ph, v in byp.items()))
     sl = [x for x in state.get("slide", []) if x[0] in ("squeeze", "retreat", "to_crate", "settle_above", "lower")]
     if sl:
         by = collections.OrderedDict()
