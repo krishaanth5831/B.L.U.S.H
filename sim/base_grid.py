@@ -107,7 +107,8 @@ def attempt_record(plan, why, where):
     return dict(phase=m.get("phase"), mode=m.get("neighbours"), cut_u=m.get("cut_u"),
                 beta=m.get("approach_blend_deg"), tilt=m.get("tilt_deg"), retreat=str(m.get("retreat_option")),
                 release=None if rp is None else [round(float(x), 3) for x in rp],
-                fallback=str(m.get("release_fallback")), why=str(why)[:120], damage=where)
+                fallback=str(m.get("release_fallback")), swing_deg=m.get("release_swing_deg"),
+                why=str(why)[:120], damage=where)
 
 
 def main():
@@ -185,7 +186,8 @@ def main():
             if a.plan_only:
                 if plan is not None:
                     rec.update(phase=plan.meta.get("phase"), crate_slack_mm=plan.meta.get("crate_slack_mm"),
-                               release_fallback=plan.meta.get("release_fallback"))
+                               release_fallback=plan.meta.get("release_fallback"),
+                               release_swing_deg=plan.meta.get("release_swing_deg"))
                 plan = None
             k = 0
             while plan is not None:

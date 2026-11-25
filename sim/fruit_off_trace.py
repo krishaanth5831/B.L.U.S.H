@@ -30,6 +30,7 @@ def main():
     ap.add_argument("--base", default="0.37,0.20")
     ap.add_argument("--old-start", action="store_true")
     ap.add_argument("--jaw", default="v6", choices=scene.JAWS)
+    ap.add_argument("--tag", default="", help="suffix for the trace file (a jaw variant, a BLUSH_V6 switch)")
     a = ap.parse_args()
     b = [float(v) for v in a.base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
@@ -70,7 +71,7 @@ def main():
     crate_floor = scene.CRATE_WALL                 # the floor's top (crate_xml: slab at z 0..wall; as _release_fit)
     radii = {j: own[info["fruit"][j]["tomato"]]["radius"] for j in mine}
     thr = det.thresholds
-    out = pathlib.Path(HERE.parent / "outputs" / "v6" / f"trace_{a.seed}_{a.jaw}.jsonl")
+    out = pathlib.Path(HERE.parent / "outputs" / "v6" / f"trace_{a.seed}_{a.jaw}{a.tag}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
     log = out.open("w")
     cutter = robot.cutters[k]
@@ -126,6 +127,10 @@ def main():
         res["fruit moved on the stalk (mm)"] = round(float(np.linalg.norm(floc - state["floc0"], axis=1).mean()
                                                            * 1000), 1)
         res["stalk to gripper y (deg)"] = stalk_angle(Rg, Rb)
+        # the wrist's pose: gripper x = the jaw's closing axis (the pads' normal), y = the pads' line (the stalk's
+        # axis at the cut); their angle to horizontal (0 = level, 90 = vertical)
+        res["gripper x / y to horizontal (deg)"] = [round(float(np.degrees(np.arcsin(min(1.0, abs(Rg[2, i]))))), 1)
+                                                    for i in (0, 1)]
         return res
 
     def stalk_angle(Rg, Rb):

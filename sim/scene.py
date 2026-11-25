@@ -12,6 +12,7 @@ its mast behind row R0, "base" low off the arm's base (always in the model; its 
 ⚠️ The arm model needs the SO-ARM100 files: run ./fetch_so101.sh once (sim/assets/so101 is gitignored).
 """
 import json
+import os
 import pathlib
 
 import mujoco
@@ -504,6 +505,10 @@ def add_cut_hold(s, chain):
 
 
 CUT_HOLD_V6 = HERE / "assets" / "cut_hold"   # jaw v6: hardware/end_effector/cut_hold/cut_hold_gripper.py build
+# A/B of a jaw variant without touching the committed build: BLUSH_CUT_HOLD_DIR = a copy of assets/cut_hold with its own
+# jaw.json (e.g. stiffer pad springs, 2026-11-25), for one process (fruit_off_trace, base_grid, check_truss_cut)
+if os.environ.get("BLUSH_CUT_HOLD_DIR"):
+    CUT_HOLD_V6 = pathlib.Path(os.environ["BLUSH_CUT_HOLD_DIR"])
 JAWS = ("v5", "v6")   # v5 = fin-ray-ladder fingers with blade + pads on the 16 mm tips (every dataset so far);
                       # v6 (K7 2026-11-24) = rigid PLA jaws, blade + clamp pads along a 36 mm zone, flared tips
 

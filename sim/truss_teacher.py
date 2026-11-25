@@ -229,6 +229,18 @@ V6_LIVE_RELEASE = False
 # fully hanging, plus V6_SWING_OVER_DEG past it either way (it still swings), in V6_SWING_STEPS angles.
 V6_SWING_OVER_DEG = 25.0
 V6_SWING_STEPS = 9
+# ⚠️ The truss also TURNS IN THE GRIP on the way to the crate: traced 2026-11-25 (fruit_off_trace.py, base 0.34/0.14),
+# five plans ended the carry with the stalk 55-85 deg off the pads' line (the hang model then 10-40 cm off; the same
+# neighbour hit at ~0.9 of to_crate on every retry, 9730016/019), four stayed at 4-33 deg. Nothing touched the truss
+# (it turns ~1-1.5 deg/frame under its weight); stiffer pad springs (5.3 / 9.5 N vs 4.25 N) only cut it to 45-68 deg.
+# What separates them is how the gripper turns from the cut to the crate (planned joints, FK, 9 seeds): about the
+# closing axis (gripper x, the pads' normal) 55-140 deg in the five, 11-26 deg in the four (theirs mostly about the
+# stalk, gripper y). The flat pads hold the stalk's roll and slide but not a turn in their own plane: the truss keeps
+# hanging as gravity pulls while the pads turn round it. So the fit measures, per pose, how far gravity's direction
+# swings in the pads' plane (gripper y-z) from the cut (meta release_swing_deg) and, with V6_PAD_SWING_MAX_DEG set,
+# keeps only poses under it. (A first try, the hanging truss's lever about the closing axis, did NOT separate them:
+# 41-132 mm for every chosen pose, steady ones included; a 15 / 25 mm cap left 19 / 24 of 28 plans, 2026-11-25.)
+V6_PAD_SWING_MAX_DEG = None  # None = off (measured only); value from the 30-scene plan census + traces
 # The fruit also dangle on their own pedicels, lower than any rigid model of the truss puts them: with the fit above,
 # 9730005 still pressed its tip fruit into the floor while lowering, and 9730018 / 9730015 dragged fruit over the crate
 # +y wall at the end of the carry (1.2-2.4 N, 2026-11-24). So in the v6 world the carry ends V6_ABOVE_CRATE_M over the
@@ -406,6 +418,8 @@ class TrussTeacher(tx.TrussPlanner):
         super().__init__(m, copy.copy(d), info, k)
         add_self_check(self.chk)
         self.legs, self.phases, self.meta = [], [], {}
+        self._swing = {}                       # release pose (joints) -> gravity's swing in the pads' plane (deg)
+        self._R_cut = None                     # the gripper at the cut (planned), for that swing
         self.q_home = np.asarray(scene.START_NORM, float)
         self.v6 = scene.jaw_of(m) == "v6"      # the v6 world's carry, settle and lift (V6_*)
         self._vias = []
@@ -601,6 +615,8 @@ class TrussTeacher(tx.TrussPlanner):
                                           home=rest["detour_home"]),
                              retreat_option=rest["retreat_option"], release_point=rest["release_point"],
                              release_pitch=rest["release_pitch"], crate_slack_mm=rest["crate_slack_mm"],
+                             release_swing_deg=None if rest.get("release_swing") is None
+                             else round(rest["release_swing"], 1),
                              target=self.t["name"], n_fruit=self.t["n"], stalk_mm=round(r * 2000, 1),
                              tried=sorted(set(tried)), miss=False)
             if phase != "A" or rest["release_fallback"] is not None:
@@ -761,6 +777,7 @@ class TrussTeacher(tx.TrussPlanner):
         tried; self._at_release says it got past the retreat (v4's late list)."""
         x_cut = leg["x_cut"]
         carry = self._carry(x_cut)
+        self._R_cut = self.ik.fk(x_cut)[1]
         point = truss_ik.cut_point_in_gripper(r)
         cchk = add_self_check(tx.CarryChecker(self.m, self.d, carry[0], carry[1], point, hard=self.hard,
                                               soft=self.soft))
@@ -889,7 +906,8 @@ class TrussTeacher(tx.TrussPlanner):
             return "crate -> start blocked, via-pose too"
         return dict(ret=ret, retreat_option=opt, to_crate=to_crate, lower=lower, home=home, lift=lift,
                     detour_crate=detour_crate, detour_home=detour_home, release_point=np.round(p, 4).tolist(),
-                    release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1), release_fallback=alternate)
+                    release_pitch=round(pitch, 1), crate_slack_mm=round(slack * 1000, 1), release_fallback=alternate,
+                    release_swing=self._swing.get(tuple(np.asarray(x_rel, float))))
 
     def _release_fit(self, carry, r, slack_min=tx.RELEASE_SLACK_M, live=False):
         """Every sampled pose over the crate (tx.crate_poses) the carried truss fits at, most room to the walls first:
@@ -963,8 +981,18 @@ class TrussTeacher(tx.TrussPlanner):
             slack = np.minimum(slack, np.minimum(held_h, flat_h + lean))
             low_h = np.minimum(low_h, (Gh[:, :, 2] - radii).min(1) - h)
         low_all = np.minimum(low_z, low_h)
+        # gravity in each pose's gripper frame (-row 2 of R) vs at the cut: its angle in the pads' plane (y-z), i.e. how
+        # far the truss would swing about the closing axis to keep hanging (V6_PAD_SWING_MAX_DEG note)
+        pad_swing = np.zeros(len(Rs))
+        if self._R_cut is not None:
+            g_cut = -self._R_cut[2, :]
+            a_cut = np.arctan2(g_cut[2], g_cut[1])
+            a_rel = np.arctan2(-Rs[:, 2, 2], -Rs[:, 2, 1])
+            pad_swing = np.degrees(np.abs((a_rel - a_cut + np.pi) % (2 * np.pi) - np.pi))
         ok = np.flatnonzero((slack >= slack_min) & (low_all >= scene.CRATE_WALL + V6_FLOOR_CLEAR_M - h)
-                            & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M))
+                            & (low_z <= V6_DROP_MAX_M) & (high_z <= tx.ABOVE_RIM_MAX_M)
+                            & ((pad_swing <= V6_PAD_SWING_MAX_DEG) if V6_PAD_SWING_MAX_DEG is not None else True))
+        self._swing.update({tuple(np.asarray(Qs[i], float)): float(pad_swing[i]) for i in ok})
         # Most room first, as v5. ⚠️ NOT nearest the crate's centre by grip point: the truss sticks out 10-20 cm along
         # its stalk from the grip, so centred grips put it over the +y wall (5 of 5 seeds, 2026-11-24).
         return ok[np.argsort(-slack[ok], kind="stable")], slack, Qs, Os, Rs, point, low_all
