@@ -350,14 +350,35 @@ that lose fruit more often on the first plan (28 first plans lost, 25 of them on
 
 ## 20. More fixed via-poses for the scenes with no plan (changes "3 and 4", search seeds 9740000-299)
 
-Old setup, `outputs/v6/via_old/`. The teacher side is in place and off: `truss_teacher.VIA_NORM_V5B` (empty), used only
-in a last pass after phase C found nothing more, so a scene that had a plan keeps it (30 tuning scenes reproduce
-record for record with the list empty, r33).
+Old setup, `outputs/v6/via_old/`. Teacher side: `truss_teacher.VIA_NORM_V5B`, used only in a last pass after phase C
+found nothing more, so a scene that had a plan keeps it (30 tuning scenes reproduce record for record with the list
+empty, r33). **Result: +4 of 180 tuning scenes, +2 of 180 fresh ones, none lost. Left OFF** (owner, 2026-11-26, before
+the result: "if this test doesnt seem to give good results then we ... just stick with this teacher"); the three
+poses stay in the code as `VIA_NORM_V5B_FOUND`.
 
 - Pass 1 (`whatif/via_search_crate.py collect --base 0.37,0.20 --old-start --jaw v5`): 294 scenes with a target, 33
   with no plan (11 %). A blocked way in is among the reasons in 30 of them, a blocked carry in 3.
-- **The carry (change 4): nothing to find.** 18 blocked carries in those 3 scenes, and the offline RRT (8000
-  iterations, 2 tries, the carried-truss checker at its loosest clearance) finds a route for none of them.
-- The way in (change 3, `VIA_EXTRA=1 whatif/via_search.py collect`): 329 blocked candidates in 29 scenes, an RRT
-  route for 116 of them in 18 scenes, none in 11 scenes. 464 way-points, 247 candidate poses (12 norm units apart).
-  Scoring and the pick: running.
+- **The way in (change 3,** `VIA_EXTRA=1 whatif/via_search.py collect`): 329 blocked candidates in 29 scenes, an RRT
+  route (8000 iterations, 2 tries) for 116 of them in 18 scenes, none in 11 scenes. Most routes need 3 to 5
+  way-points; the teacher allows one or two. 464 way-points, 247 candidate poses (12 norm units apart); one candidate,
+  alone or chained with one existing via, clears the way in for 6 of the 29 scenes. Kept: 3 poses (+3, +2, +1).
+  With them the teacher plans 5 of those 6 search scenes, each through a `v5b:` way in (`fires_planonly.jsonl`).
+
+| Scenes (the unsolved ones re-run, r34 / r35) | Old teacher | With the 3 poses | Newly a plan | Lost |
+|---|---|---|---|---|
+| Tuning, 9730000-179 | 155 = 86.1 % | 159 = 88.3 % | 5 (9730006, 017, 091, 175 pass; 144 moves a neighbour 27 mm) | 0 |
+| Fresh, 9730180-359 | 143 = 79.4 % | 145 = 80.6 % | 2 (9730284, 293 pass) | 0 |
+| Both | 298 of 360 = 82.8 % | 304 = 84.4 % | 7 | 0 |
+
+  Only the unsolved scenes were re-run: a solved scene stops at its successful plan, which comes before the last pass.
+  Cost: a scene with no plan takes about twice as long to give up.
+- **The carry (change 4): no pose found.** 18 blocked carries in the 3 scenes, no RRT route for any. Is that the
+  search's own fault? ⚠️ `rrt.plan` gives up at once when the start touches something, while the teacher's moves
+  never check a path's first way-point (`Checker.path_ok`); the tool now tries a first hop off such a start by the
+  teacher's rule. Control (`--control 4`, scenes 9740000-029): the RRT finds a route for 28 of 28 carries the teacher
+  can do (4 of them needed a via-pose). Re-check of the blocked ones (`crate_diag_blocked.jsonl`), first scene
+  (9740086): in 4 of 6 the retreat ends with the carried truss within 1 cm of a neighbour's fruit and no first hop
+  off it exists in 300 tries (no via-pose can help; it is the retreat's end, not the route), in 2 start and goal are
+  free and the RRT finds nothing. The other two scenes: running when this was written.
+- What is left of the no-plan scenes would need the two options not taken: the builder re-checking the start pose
+  after the plants settle (4 of the 22 tuning no-plans), and only ripening trusses the teacher has a plan for.
