@@ -15,7 +15,10 @@ The rule (note 5.6): a stored frame may depend on its own picture only, and a te
 the same step. So:
     encoder()            the dataset's video setting (STORE). Every recorder passes it to LeRobotDataset.create.
     through_encoder(img) a live picture -> what the dataset would have stored for it (a one-frame clip, decoded).
-                         eval_truss.py --through-encoder and the real arm's test loop call this.
+                         eval_truss.py does this by itself for a policy whose training dataset carries the gate
+                         file (with THAT dataset's settings, encoder_of); the real arm's test loop must too.
+    encoder_of(features) the setting a recorded dataset was stored with, from its own meta/info.json.
+    merge_gates(...)     carries the gate file through a merge of parts (merge_parts.py), episodes renumbered.
     Gate                 the recorder notes a fingerprint of through_encoder(raw picture) for GATE_FRAMES of every
                          episode and camera (meta/picture_gate.jsonl in the dataset).
     gate(repo_id)        reads those stored frames back the way training does and compares: every one must match to
@@ -36,6 +39,7 @@ import itertools
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 
 import numpy as np
@@ -77,6 +81,76 @@ def encoder():
     return cfg
 
 
+def independent(cfg):
+    """Is this encoder setting one of the frame-independent ones this module vouches for (H.264, every frame a key
+    frame, constant quantiser)? AV1 is refused whatever its options say: see the traps above."""
+    return (cfg.vcodec in ("h264", "libx264") and cfg.g == 1 and cfg.crf is None
+            and "qp" in (cfg.extra_options or {}))
+
+
+def encoder_of(features):
+    """The encoder setting a recorded dataset's cameras were stored with (the `info` block of its video features in
+    meta/info.json; LeRobotDatasetMetadata.features). A test sends live pictures through THIS, not through STORE,
+    which may have changed since the dataset was recorded. Refuses a dataset whose cameras disagree (a merge of
+    parts stored differently: LeRobot then blanks the fields) or whose setting is not frame-independent."""
+    from lerobot.configs.video import RGBEncoderConfig
+    infos = {k: (v.get("info") or {}) for k, v in features.items() if v.get("dtype") == "video"}
+    if not infos:
+        raise RuntimeError("picture_store.encoder_of: the dataset has no video features")
+    # ⚠️ not RGBEncoderConfig.from_video_info: it skips fields stored as null, so "crf: null" (= constant quantiser)
+    # would come back as the default crf and the clip would be encoded in quality mode (found by gatecheck)
+    cfgs = {k: RGBEncoderConfig(vcodec=i.get("video.codec"), pix_fmt=i.get("video.pix_fmt"), g=i.get("video.g"),
+                                crf=i.get("video.crf"), preset=i.get("video.preset"),
+                                fast_decode=i.get("video.fast_decode"),
+                                extra_options=dict(i.get("video.extra_options") or {})) for k, i in infos.items()}
+    first = next(iter(cfgs.values()))
+    bad = [k for k, c in cfgs.items() if c != first or not independent(c)]
+    if bad:
+        raise RuntimeError(f"picture_store.encoder_of: {bad} are not stored frame-independently, or not all alike: "
+                           f"{ {k: infos[k] for k in bad} }")
+    return first
+
+
+def stored_with_gate(root, features):
+    """Does this dataset follow the picture rule? True = it carries the gate file (a test must then send live
+    pictures through encoder_of(features)); False = an older dataset (AV1, no gate file: raw renders, as every test
+    before 2026-11-26). ⚠️ H.264 videos WITHOUT the gate file raise: that is a picture_store dataset whose gate
+    file was lost in a copy or a merge, and a silent fall back to raw renders would bring the v5 mismatch back."""
+    has = (pathlib.Path(root) / GATE_FILE).exists()
+    codecs = {(v.get("info") or {}).get("video.codec") for v in features.values() if v.get("dtype") == "video"}
+    if not has and "h264" in codecs:
+        raise RuntimeError(f"picture_store: {root} has H.264 videos but no {GATE_FILE}. It was recorded with "
+                           f"picture_store and lost its gate file (a copy or merge that skipped it): restore the "
+                           f"file (merge_parts.py carries it) before testing or training.")
+    return has
+
+
+def merge_gates(part_roots, out_root):
+    """Carry the gate file through a merge of parts (lerobot aggregate_datasets, in this order): part k's episode e
+    becomes episode (episodes of the parts before it) + e. All parts must have the file, or none (returns 0).
+    Run gate(out) afterwards: it reads the merged videos, so a wrong renumbering or a re-encode would fail it."""
+    part_roots = [pathlib.Path(r) for r in part_roots]
+    have = [(r / GATE_FILE).exists() for r in part_roots]
+    if not any(have):
+        return 0
+    if not all(have):
+        raise RuntimeError("picture_store.merge_gates: some parts have a gate file and some do not: "
+                           f"{[r.name for r, h in zip(part_roots, have) if not h]} lack it (parts stored the old "
+                           f"way must not be merged with new ones)")
+    out, off, n = pathlib.Path(out_root) / GATE_FILE, 0, 0
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        for r in part_roots:
+            for line in open(r / GATE_FILE):
+                if line.strip():
+                    row = json.loads(line)
+                    row["episode"] += off
+                    f.write(json.dumps(row) + "\n")
+                    n += 1
+            off += int(json.load(open(r / "meta" / "info.json"))["total_episodes"])
+    return n
+
+
 _N = itertools.count()      # unique video file names (see through_encoder)
 
 
@@ -109,6 +183,7 @@ def through_encoder(img, cfg=None, how=None, threads=None):
     """A live RGB uint8 picture -> the picture the dataset stores for it (encoded alone, decoded as training does).
     ⚠️ A new file name every call: lerobot's torchcodec decoder is cached by PATH, so a second video written to the
     same path is answered with the first one's frames (selfcheck's first version compared nonsense that way)."""
+    # (lerobot's decoder cache is an LRU of 100 entries, so the one-frame clips do not pile up as open files)
     with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
         v = pathlib.Path(td) / f"one_{next(_N)}.mp4"
         _encode([img], v, cfg, threads)
@@ -122,12 +197,12 @@ def fingerprint(img):
 class Gate:
     """The recorder's side: note(obs) once per recorded frame, then keep(root, episode) or drop()."""
 
-    def __init__(self, cams):
-        self.cams, self.k, self.rows = tuple(cams), 0, {}
+    def __init__(self, cams, cfg=None):
+        self.cams, self.cfg, self.k, self.rows = tuple(cams), cfg, 0, {}    # cfg None = STORE (a new dataset)
 
     def note(self, obs):
         if self.k in GATE_FRAMES:
-            self.rows[self.k] = {c: fingerprint(through_encoder(np.asarray(obs[c]))) for c in self.cams}
+            self.rows[self.k] = {c: fingerprint(through_encoder(np.asarray(obs[c]), self.cfg)) for c in self.cams}
         self.k += 1
 
     def drop(self):
@@ -244,7 +319,7 @@ def gatecheck():
                                          "names": ["height", "width", "channels"]} for c in cams}
     feats["observation.state"] = {"dtype": "float32", "shape": (2,), "names": ["a", "b"]}
     feats["action"] = {"dtype": "float32", "shape": (2,), "names": ["a", "b"]}
-    verdict = {}
+    verdict, roots = {}, {}
     with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
         for name, cfg in (("stored with STORE", encoder()), ("stored as v5", RGBEncoderConfig(vcodec="libsvtav1"))):
             root = pathlib.Path(td) / name.replace(" ", "_")
@@ -262,8 +337,34 @@ def gatecheck():
                 g.keep(ds.root, ds.meta.total_episodes - 1)
             ds.finalize()
             verdict[name] = gate("local/gatecheck", root)
-    ok = not verdict["stored with STORE"][1] and bool(verdict["stored as v5"][1])
-    print("gatecheck:", "PASS (the gate passes STORE and catches the v5 storage)" if ok else "FAIL")
+            roots[name] = root
+        # the same through a merge of two parts (merge_parts.py's path): the gate file is carried and renumbered
+        from lerobot.datasets.aggregate import aggregate_datasets
+        r0 = roots["stored with STORE"]
+        r1 = pathlib.Path(td) / "second_part"
+        shutil.copytree(r0, r1)
+        merged = pathlib.Path(td) / "merged"
+        aggregate_datasets(["local/gatecheck", "local/gatecheck2"], "local/merged", roots=[r0, r1], aggr_root=merged)
+        n = merge_gates([r0, r1], merged)
+        verdict["merged"] = gate("local/merged", merged)
+        from lerobot.datasets import LeRobotDatasetMetadata
+        feats = LeRobotDatasetMetadata("local/merged", root=merged).features
+        cfg_ok = encoder_of(feats) == encoder() and stored_with_gate(merged, feats)
+        (merged / GATE_FILE).unlink()
+        try:
+            stored_with_gate(merged, feats)
+            lost_ok = False
+        except RuntimeError:
+            lost_ok = True                      # an H.264 dataset without its gate file must not pass silently
+        old_feats = LeRobotDatasetMetadata("local/gatecheck", root=roots["stored as v5"]).features
+        (roots["stored as v5"] / GATE_FILE).unlink()
+        old_ok = stored_with_gate(roots["stored as v5"], old_feats) is False
+    ok = (not verdict["stored with STORE"][1] and bool(verdict["stored as v5"][1]) and n == 4
+          and verdict["merged"][0] == 2 * verdict["stored with STORE"][0] and not verdict["merged"][1]
+          and cfg_ok and lost_ok and old_ok)
+    print("gatecheck:", "PASS (the gate passes STORE, catches the v5 storage, survives a merge of two parts; the "
+          "dataset's own encoder setting reads back; a lost gate file is an error; an AV1 dataset counts as old)"
+          if ok else f"FAIL {verdict} n={n} cfg_ok={cfg_ok} lost_ok={lost_ok} old_ok={old_ok}")
     return ok
 
 

@@ -15,6 +15,8 @@ import pyarrow.parquet as pq
 from lerobot.datasets.aggregate import aggregate_datasets
 from lerobot.utils.constants import HF_LEROBOT_HOME
 
+import picture_store
+
 
 def finalized(d):
     files = sorted(d.glob("data/*/*.parquet")) + sorted(d.glob("meta/episodes/*/*.parquet"))
@@ -44,6 +46,15 @@ def main():
         sys.exit("no finalized parts found")
     print(f"merging {len(parts)} parts into {a.out}:", *parts, sep="\n  ", flush=True)
     aggregate_datasets(parts, a.out, roots=[HF_LEROBOT_HOME / p for p in parts], aggr_root=HF_LEROBOT_HOME / a.out)
+    # the picture gate (picture_store.py): carried with the episodes renumbered, then run on the merged videos
+    n = picture_store.merge_gates([HF_LEROBOT_HOME / p for p in parts], HF_LEROBOT_HOME / a.out)
+    if n:
+        checked, failed = picture_store.gate(a.out)
+        if failed or not checked:
+            sys.exit(f"⚠️ the merged dataset FAILS the picture gate ({len(failed)} of {checked} frames): do not "
+                     f"train on it or push it")
+    else:
+        print("no picture gate file in the parts (stored the old way, AV1): nothing to carry")
     print(f"done: {HF_LEROBOT_HOME / a.out}")
 
 

@@ -53,8 +53,13 @@ STALK_AT_M = (-0.004, 0.0, 0.004)   # START / PRE: "the cut point" = the stalk h
 GROUPS = np.array([1, 1, 1, 0, 0, 0], np.uint8)   # what a MuJoCo camera draws by default (geom groups 0-2)
 PPM_MIN = 1.0              # post-mortem step 5: at least 1 pixel per mm
 CROSS_DEG = 45.0           # post-mortem 5.5: lines of sight that cross at 45 deg or more place a point in 3D
-CLEAR_MIN_M = 0.04         # rank: a lens nearer than this to the arm's bounding spheres is out (guess; the spheres
-#                            overestimate the arm)
+CLEAR_MIN_M = 0.04         # rank: a lens or its post nearer than this to the arm's or the plants' bounding spheres
+#                            is out (guess; the spheres overestimate both)
+Z_MAX_M = 0.34             # rank: no lens above the truss band (KNUCKLE_Z tops at 0.32). ⚠️ The sim has no leaves:
+#                            a real crop is only stripped at and below the ripening trusses, so a view down through
+#                            the head of the plant would score here and see leaves in the greenhouse.
+CARRY_X_M = 0.40           # rank: no post at x beyond this on the aisle side (y >= 0): the cut truss is carried from
+#                            the row to the crate there (crate x 0.43-0.73), poses this score does not visit
 
 
 def setup(base, jaw, old_start):
@@ -162,6 +167,25 @@ def scene_facts(rob, seed):
     return None, "no cut pose"
 
 
+def balls(m, d, geoms, step=0.01):
+    """(centres, radii) of balls covering the geoms: a capsule or cylinder as a row of balls every `step` along its
+    axis, anything else as its bounding sphere. ⚠️ A stem is ONE 47 cm capsule: by its bounding sphere it would rule
+    out every post within 24 cm of the row (the run of 2026-11-26 20:33 did exactly that; stopped, not used)."""
+    import mujoco
+    C, R = [], []
+    for g in geoms:
+        if m.geom_type[g] in (mujoco.mjtGeom.mjGEOM_CAPSULE, mujoco.mjtGeom.mjGEOM_CYLINDER):
+            r, h = float(m.geom_size[g, 0]), float(m.geom_size[g, 1])
+            axis = d.geom_xmat[g].reshape(3, 3)[:, 2]
+            for t in np.linspace(-h, h, max(2, int(np.ceil(2 * h / step)) + 1)):
+                C.append(d.geom_xpos[g] + axis * t)
+                R.append(r)
+        else:
+            C.append(np.array(d.geom_xpos[g]))
+            R.append(float(m.geom_rbound[g]))
+    return np.array(C), np.array(R)
+
+
 def one_scene(rob, T, g, pos, ax, lens, claw_lens):
     """The answers of every candidate camera for one scene (see the module text), and the claw camera's."""
     import mujoco
@@ -173,16 +197,23 @@ def one_scene(rob, T, g, pos, ax, lens, claw_lens):
     blades = sorted(T.chk.blades)
     arm = np.flatnonzero(T.chk.is_arm)
     claw_body = cm.camera("arm/claw").bodyid[0]
-    clear = np.full(n, np.inf)
+    clear, post = np.full(n, np.inf), np.full(n, np.inf)
     out = {}
+
+    def to_post(c, r):
+        """Per camera: distance of its post (the vertical line from the table up to the lens) to spheres (c, r)."""
+        dz = c[None, :, 2] - np.clip(c[None, :, 2], 0.0, pos[:, None, 2])
+        return (np.sqrt((pos[:, None, 0] - c[None, :, 0]) ** 2 + (pos[:, None, 1] - c[None, :, 1]) ** 2 + dz ** 2)
+                - r[None, :]).min(1)
 
     def pose(q, jaw):
         cd.qpos[T.chk.adr] = q
         cd.qpos[T.g_adr] = jaw
         mujoco.mj_fwdPosition(cm, cd)
-        c = cd.geom_xpos[arm]                                   # the arm's bounding spheres
-        dist = np.linalg.norm(pos[:, None, :] - c[None, :, :], axis=2) - cm.geom_rbound[arm][None, :]
+        c, r = balls(cm, cd, arm)                               # the arm: bounding spheres, capsules as rows
+        dist = np.linalg.norm(pos[:, None, :] - c[None, :, :], axis=2) - r[None, :]
         np.minimum(clear, dist.min(1), out=clear)
+        np.minimum(post, to_post(c, r), out=post)
 
     def claw_sees():
         uv, o = model_cam_uv(cm, cd, "arm/claw", claw_lens, p_cut)
@@ -192,6 +223,9 @@ def one_scene(rob, T, g, pos, ax, lens, claw_lens):
 
     # START
     pose(T.q_now(), float(rob.d.qpos[T.g_adr]))
+    plants = np.array(sorted(T.chk.soft | T.target_all | {
+        g for g in range(cm.ngeom) if (cm.geom(g).name or "").startswith("stem")}))
+    out["plant"] = to_post(*balls(cm, cd, plants)).astype(np.float32)   # lens and post, to stems, stalks and fruit
     uv, ppm = project(lens, pos, ax, p_cut)
     out["s_in"] = inside(lens, uv)
     out["s_ppm"] = ppm.astype(np.float32)
@@ -216,6 +250,7 @@ def one_scene(rob, T, g, pos, ax, lens, claw_lens):
     for v in T.vias() + T.vias_v5():               # clearance only: the fixed poses the arm passes through
         pose(v, np.radians(tx.JAW_OPEN_DEG))
     out["clear"] = clear.astype(np.float32)
+    out["post"] = post.astype(np.float32)
     out["claw"] = np.array(claw, bool)
     out["p_cut"] = p_cut
     return out
@@ -226,7 +261,8 @@ def collect(a):
     rob = setup(a.base, a.jaw, a.old_start)
     names, pos, aim = candidates()
     ax = axes(pos, aim)
-    keys = ("p_cut", "claw", "s_in", "s_vis", "s_ppm", "p_vis", "p_blade", "c_in", "c_stalk", "c_blade", "clear")
+    keys = ("p_cut", "claw", "s_in", "s_vis", "s_ppm", "p_vis", "p_blade", "c_in", "c_stalk", "c_blade", "clear",
+            "post", "plant")
     rows = {k: [] for k in ("seed", "kz", "ntruss", "nfruit") + keys}
     skipped = {}
     b, e = names.index("base"), names.index("birdseye")
@@ -262,24 +298,30 @@ def load(files):
     z0 = zs[0]
     cat = lambda k: np.concatenate([z[k] for z in zs if len(z["seed"])])   # noqa: E731
     D = {k: cat(k) for k in ("seed", "p_cut", "kz", "ntruss", "nfruit", "claw", "s_in", "s_vis", "s_ppm", "p_vis",
-                             "p_blade", "c_in", "c_stalk", "c_blade", "clear")}
+                             "p_blade", "c_in", "c_stalk", "c_blade", "clear", "post", "plant")}
     D.update(names=[str(x) for x in z0["names"]], pos=z0["pos"], aim=z0["aim"], setup=json.loads(str(z0["setup"])))
     return D
 
 
-def mountable(D):
-    """Grid positions a post from the table can hold: outside the crate (+3 cm), off the arm's base plate, off row
-    R0's anchor rail, and never nearer than CLEAR_MIN_M to the arm's bounding spheres in any scene."""
+def mountable(D, zmax=Z_MAX_M):
+    """Grid positions a post from the table can hold, with what rules each one out. Out: above the truss band
+    (Z_MAX_M), in the carry zone (CARRY_X_M) or the crate (+3 cm), on the arm's base plate or row R0's anchor rail,
+    the lens or its post within CLEAR_MIN_M of the arm (at the poses visited) or of a plant, in any scene."""
     import truss_scene as ts
     p = D["pos"]
     (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
-    in_crate = (np.abs(p[:, 0] - cx) < sx / 2 + 0.03) & (np.abs(p[:, 1] - cy) < sy / 2 + 0.03)
     b = np.asarray(D["setup"]["base"].split(","), float)
-    on_base = np.hypot(p[:, 0] - b[0], p[:, 1] - b[1]) < 0.09           # the base plate + its clamp (guess)
-    on_rail = np.abs(p[:, 1]) < 0.03                                    # row R0's anchor rail (flange 5 cm wide)
-    ok = ~in_crate & ~on_base & ~on_rail & (D["clear"].min(0) >= CLEAR_MIN_M)
+    why = {
+        "above the truss band": p[:, 2] > zmax + 1e-9,
+        "carry zone or crate": ((p[:, 0] >= CARRY_X_M) & (p[:, 1] >= 0.0)) | (
+            (np.abs(p[:, 0] - cx) < sx / 2 + 0.03) & (np.abs(p[:, 1] - cy) < sy / 2 + 0.03)),
+        "on the base plate or a rail": (np.hypot(p[:, 0] - b[0], p[:, 1] - b[1]) < 0.09) | (np.abs(p[:, 1]) < 0.03),
+        "arm too near": np.minimum(D["clear"].min(0), D["post"].min(0)) < CLEAR_MIN_M,
+        "plants too near": D["plant"].min(0) < CLEAR_MIN_M,
+    }
+    ok = ~np.any(list(why.values()), axis=0)
     ok[:2] = True                                                       # today's cameras: listed whatever they score
-    return ok
+    return ok, {k: int(v[2:].sum()) for k, v in why.items()}
 
 
 def rank(a):
@@ -289,9 +331,11 @@ def rank(a):
     A = D["s_in"] & D["s_vis"] & (D["s_ppm"] >= PPM_MIN)        # START: the cut point is in view, sharp enough
     P = D["c_in"] & D["p_vis"] & D["p_blade"]                    # PRE: the cut point and a blade
     B = D["c_in"] & D["c_stalk"] & D["c_blade"]                  # CUT: the stalk next to the cut and a blade
-    ok = mountable(D)
+    ok, why = mountable(D, a.zmax)
     claw = D["claw"].astype(bool)
-    print(f"{N} scenes ({D['setup']}), {len(names)} cameras, {int(ok.sum()) - 2} mountable grid positions")
+    print(f"{N} scenes ({D['setup']}), {len(names)} cameras, {int(ok.sum()) - 2} mountable grid positions "
+          f"(ruled out, overlapping: {why})")
+    print(f"per scene: {D['ntruss'].mean():.1f} trusses, {D['nfruit'].mean():.0f} fruit")
     print(f"claw camera: cut point in frame and not hidden at START {100 * (claw[:, 0] & claw[:, 1]).mean():.0f} %, "
           f"at PRE {100 * (claw[:, 2] & claw[:, 3]).mean():.0f} %")
 
@@ -299,7 +343,8 @@ def rank(a):
         return (f"{names[i]:>18s}  start {100 * A[:, i].mean():3.0f} %  pre {100 * P[:, i].mean():3.0f} %  "
                 f"cut {100 * B[:, i].mean():3.0f} %  in frame {100 * D['s_in'][:, i].mean():3.0f} %  "
                 f"px/mm {np.median(D['s_ppm'][:, i]):.1f} (min {D['s_ppm'][:, i].min():.1f})  "
-                f"arm {100 * D['clear'][:, i].min():.0f} cm")
+                f"arm {100 * min(D['clear'][:, i].min(), D['post'][:, i].min()):.0f} cm  "
+                f"plants {100 * D['plant'][:, i].min():.0f} cm")
 
     one = A.mean(0) + B.mean(0)                                  # one fixed camera: start and cut, equal weight
     order = [i for i in np.argsort(-one) if ok[i]]
@@ -452,6 +497,7 @@ if __name__ == "__main__":
     s = sub.add_parser("rank")
     s.add_argument("files", nargs="+")
     s.add_argument("--top", type=int, default=15)
+    s.add_argument("--zmax", type=float, default=Z_MAX_M, help="highest lens allowed (see Z_MAX_M)")
     s.add_argument("--json")
     a = ap.parse_args()
     dict(collect=collect, rank=rank, selftest=selftest, render=render)[a.mode](a)
