@@ -386,3 +386,56 @@ poses stay in the code as `VIA_NORM_V5B_FOUND`.
   change, and the teacher is closed (section 18).
 - What is left of the no-plan scenes would need the two options not taken: the builder re-checking the start pose
   after the plants settle (4 of the 22 tuning no-plans), and only ripening trusses the teacher has a plan for.
+
+## 21. The policy side of v6: what was decided, and the two worlds (owner, 2026-11-26 evening)
+
+- Owner: the teacher, the gripper and the base stay as they are (section 18). What changes: "more varied episodes. 3
+  cameras instead of 2 but also placed in a more calculated location and position", and the post-mortem's fixes.
+  Then: the new episodes go "to the same dataset as before", "another 600 episodes on top of the previous 800",
+  training again at batch 64 and learning rate 3e-5. Nothing is recorded, re-made or trained without the owner's go.
+- **A seed is a scene only together with its world.** A seed draws its plants around the crate, and only trusses the
+  arm can reach from where it stands become ripe, so the crate, the brackets standing in the scene, the jaw, the base
+  and the start pose all decide which scene a seed gives (section 12). Dataset v5 and `heldout_v5*.jsonl` were made
+  with the 23 x 28 cm crate; the code default has been 30 x 28 since 2026-11-24. `truss_scene.WORLDS` names both
+  after their crate: `crate23` (dataset v5, and so dataset v6 and every test of a policy trained on it) and
+  `crate30` (the code default, no dataset yet). ⚠️ The names are not dataset versions: `--world crate23` is right for
+  v6. `rebuild_v5_check.py`: 14 of 14 logged v5 scenes rebuild to the logged model, target and cue in `crate23`.
+- The same seed, both worlds (9730000): `crate23` gives 311 position values, `crate30` 135. In `crate23` the scenes
+  are fuller (3.3 trusses, 22 fruit per scene on v5's own scenes; 2.2 and 14 on the tuning seeds in `crate30`) and
+  the cut points reach x 0.47 m (0.40 in `crate30`).
+- **The scene generator of dataset v6 = the one of v5**: world `crate23`, scenes decided with the old camera bracket
+  standing in them (`layout_rig="base"`), shown and simulated with the new brackets (`rig="trio"`). So the 600 new
+  episodes, the 800 old ones and the held-out sets come from one generator; only the cameras differ. Options, all
+  off by default: `generate_truss.py --world --rig --layout-rig`, `eval_truss.py --world --layout-rig`,
+  `base_grid.py --world --rig --layout-rig`.
+
+## 22. Can the old 800 episodes get new pictures? Yes: the state logs hold every frame (`remake_pictures.py`)
+
+- The recorder logged the simulator's full state at every recorded frame (`~/.cache/blush_sim/states`, 800 files).
+  `remake_pictures.py align` (read-only, all 800 episodes, 383,877 frames): every episode has one logged state more
+  than it has frames, the logged joint reading of frame k equals the dataset's `observation.state[k]` (largest
+  difference 3.8e-6 norm units = float32 rounding), and the logged cue equals the dataset's in all 800.
+- `remake_pictures.py check --episodes 1,2` (read-only; fetched 336 MB of the old videos, deleted after): the old rig
+  re-rendered from the logs against the stored v5 frames, every 10th frame: mean difference 2.2-2.6 grey levels of
+  255, worst frame 4.6, through the cut and the carry. v5's AV1 storage alone costs about 1.9 (picture_store.py), a
+  truss or the arm in another place costs far more, so the logs give back the recorded pictures.
+- So a re-make is a render job: per frame the logged state is set, the new rig's cameras rendered, the joint
+  readings and commands copied from the dataset bit for bit. What differs from a recording: the pictures show the
+  state at the end of the simulator step (the recorder rendered one 2 ms physics step earlier), MuJoCo 4.0.1 renders
+  them (v5: 3.8.1), and the brackets in view are the new rig's.
+- ⚠️ The state logs are the only source of the old episodes' pictures in any new form, and they sit in a cache
+  folder (one copy). `remake_pictures.py part` (writes a dataset part) has NOT been run.
+
+## 23. Rig "trio", picture storage, the guards and the notebook: what has run and what has not
+
+| Piece | Check | Result |
+|---|---|---|
+| Rig `trio` (cameras low, high, claw; `layout_rig`) | rig `base` scenes before and after the change | identical (geoms, state, ripe truss); only the model's camera count 3 -> 5 |
+| | `remake_pictures.py dry --start-only` on 2 old episodes, provisional cameras | both rebuilt as recorded, a box and a cut pixel on both fixed cameras |
+| Picture storage (`picture_store.py`) | `selfcheck`, `gatecheck` | H.264, every frame a key frame, constant qp: a stored frame equals its picture sent through alone; the gate passes that, refuses v5's storage, survives a merge |
+| Notebook's own gate (cell 4 of `colab_train_act_v6.ipynb`) | `scripts/check_colab_gate.py` | passes a three-camera dataset stored by the rule, refuses one stored as v5 and one with a changed fingerprint |
+| Start guard, command clip, "cut with the first closing and still held" | `eval_truss.py` on the old checkpoint (`act_teacher_v5b64` 70k), 2 held-out scenes + 2 nothing-ripe, `--world crate23 --start-guard --clip-actions` | ran; the two held-out seeds give the targets `heldout_v5.jsonl` lists; guard fired in 2 of 2 nothing-ripe scenes (policy not run); 538 commands clipped (444 of them in the scene the policy failed); first-closing measure 1 of 2 |
+| Training recipe (`--policy.dropout=0.0`, both learning rates 3e-5, no scheduler) | LeRobot's config parsed with the notebook's flags | AdamW lr 3e-5, weight decay 1e-4, scheduler None |
+
+Not run: the recorder with the gate (`generate_truss.py`, any rig), `remake_pictures.py part`, `check_plugin.py`'s
+trio block (it writes a 3 s throwaway dataset), the notebook itself, a rollout of a trio policy.

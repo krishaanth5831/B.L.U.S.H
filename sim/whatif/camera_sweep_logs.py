@@ -33,6 +33,25 @@ import camera_score as cs  # noqa: E402
 import rebuild_v5_check as rc  # noqa: E402
 
 CLEAR_M = cs.CLEAR_MIN_M
+NOTE_M = 0.06               # --episodes-json lists every episode that came nearer than this to a post (guess: the
+#                             4 cm rule plus room to see how close the near misses are)
+
+
+def shard_of(S, spec):
+    i, n = (int(v) for v in spec.split("/"))
+    return S[i::n]
+
+
+def note(per_ep, names, x, ep_min):
+    for i in np.flatnonzero(ep_min < NOTE_M):
+        per_ep.setdefault(names[i], {})[str(x["seed"])] = round(float(ep_min[i]), 4)
+
+
+def write(a, names, best, per_ep):
+    if a.json:
+        json.dump({nm: float(best[i]) for i, nm in enumerate(names)}, open(a.json, "w"), indent=1)
+    if a.episodes_json:
+        json.dump(per_ep, open(a.episodes_json, "w"), indent=1)
 
 
 def cam_positions(spec):
@@ -62,13 +81,13 @@ def arm(a):
     ts.set_world("crate23")
     S = rc.v5_scenes()
     m, d, _ = ts.build(S[1]["seed"], base_mount=True, jaw="v5")     # any scene: only the arm is posed
-    S = S[:a.limit] if a.limit else S
+    S = shard_of(S[:a.limit] if a.limit else S, a.shard)
     qidx, _ = scene.arm_ids(m)
     arm_g = np.array([g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("arm/")])
     fm = arm_map.FollowerMap()
     best = np.full(len(names), np.inf)
     where = [None] * len(names)
-    close_frames, close_eps, frames = np.zeros(len(names), int), np.zeros(len(names), int), 0
+    close_frames, close_eps, frames, per_ep = np.zeros(len(names), int), np.zeros(len(names), int), 0, {}
     for n, x in enumerate(S):
         z = np.load(x["npz"], allow_pickle=True)
         st = np.asarray(z["state"], float)[::a.every]
@@ -85,6 +104,7 @@ def arm(a):
             best = np.minimum(best, dist)
             ep_min = np.minimum(ep_min, dist)
         close_eps += ep_min < CLEAR_M
+        note(per_ep, names, x, ep_min)
         frames += len(st)
         if (n + 1) % 100 == 0:
             print(f"  {n + 1} episodes, {frames} frames", flush=True)
@@ -92,8 +112,7 @@ def arm(a):
     for i, nm in enumerate(names):
         print(f"  {nm:>18s}  nearest {100 * best[i]:5.1f} cm (seed {where[i][0]}, frame {where[i][1]}, target "
               f"{where[i][2]})  under {100 * CLEAR_M:.0f} cm in {close_eps[i]} episodes / {close_frames[i]} frames")
-    if a.json:
-        json.dump({nm: float(best[i]) for i, nm in enumerate(names)}, open(a.json, "w"), indent=1)
+    write(a, names, best, per_ep)
 
 
 def plants(a):
@@ -109,7 +128,8 @@ def plants(a):
     by = {}
     for x in S:
         by.setdefault(x["target"], []).append(x)
-    pick = [by[t][k] for k in range(max(len(v) for v in by.values())) for t in sorted(by) if k < len(by[t])][:a.n]
+    pick = [by[t][k] for k in range(max(len(v) for v in by.values())) for t in sorted(by) if k < len(by[t])]
+    pick = shard_of(pick[:a.n] if a.n else pick, a.shard)        # --n 0: every cut episode
 
     def to_post(c, r):
         dz = c[None, :, 2] - np.clip(c[None, :, 2], 0.0, pos[:, None, 2])
@@ -118,7 +138,7 @@ def plants(a):
 
     best = np.full(len(names), np.inf)
     where = [None] * len(names)
-    close_eps = np.zeros(len(names), int)
+    close_eps, per_ep = np.zeros(len(names), int), {}
     for n, x in enumerate(pick):
         z = np.load(x["npz"], allow_pickle=True)
         m, d, info = ts.build(x["seed"], base_mount=True, jaw="v5")
@@ -139,6 +159,7 @@ def plants(a):
             best = np.minimum(best, dist)
             ep_min = np.minimum(ep_min, dist)
         close_eps += ep_min < CLEAR_M
+        note(per_ep, names, x, ep_min)
         print(f"  {n + 1}/{len(pick)} seed {x['seed']} target {x['target']}: nearest "
               f"{(100 * ep_min).round(1).tolist()} cm", flush=True)
     print(f"\nplants (stems, every truss, the carried one included) against the posts over {len(pick)} recorded "
@@ -146,8 +167,7 @@ def plants(a):
     for i, nm in enumerate(names):
         print(f"  {nm:>18s}  nearest {100 * best[i]:5.1f} cm (seed {where[i][0]}, frame {where[i][1]}, target "
               f"{where[i][2]})  under {100 * CLEAR_M:.0f} cm in {close_eps[i]} episodes")
-    if a.json:
-        json.dump({nm: float(best[i]) for i, nm in enumerate(names)}, open(a.json, "w"), indent=1)
+    write(a, names, best, per_ep)
 
 
 if __name__ == "__main__":
@@ -158,8 +178,11 @@ if __name__ == "__main__":
         s.add_argument("--cams", required=True, help="comma list: camera_score names (base, g_x_y_z) or x:y:z")
         s.add_argument("--every", type=int, default=2 if name == "arm" else 3, help="use every k-th logged frame")
         s.add_argument("--json", help="write {camera: nearest distance in m} here (camera_score.py rank --sweep)")
+        s.add_argument("--episodes-json", help="write {camera: {seed: nearest distance}} for every episode that "
+                                               "came within NOTE_M of that camera's post")
+        s.add_argument("--shard", default="0/1", help="i/n: every n-th episode from the i-th (parallel runs)")
         if name == "plants":
-            s.add_argument("--n", type=int, default=60, help="episodes to rebuild")
+            s.add_argument("--n", type=int, default=60, help="episodes to rebuild (0 = every cut episode)")
         else:
             s.add_argument("--limit", type=int, default=0, help="only the first N episodes (a quick try)")
     a = ap.parse_args()

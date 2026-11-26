@@ -65,8 +65,9 @@ def table(run, scenes=25):
         else:
             n = a["scenes"]
             first = f"{a['clean_cut']}/{n}" if "clean_cut" in a else "-"
-            holds = f"{a['holds_ok']}/{a['holds']}" + (
-                f" (+{a['guard_fired']} stopped by the start guard)" if a.get("guard_fired") else "")
+            # nothing-ripe scenes: those the start guard stopped (the policy was not run) count with the rest
+            g, g_ok = a.get("guard_fired", 0), a.get("guard_fired_ok", 0)
+            holds = f"{a['holds_ok'] + g_ok}/{a['holds'] + g}" + (f" ({g} by the start guard)" if g else "")
             pol.append(f"| {step} | {a['success']}/{n} | {first} | {a['success_strict']}/{n} | {a['cut']}/{n} "
                        f"| {a['in_crate']}/{n} | {a['closest_mm_median']:.1f} mm | {holds} |")
         if h is None:
