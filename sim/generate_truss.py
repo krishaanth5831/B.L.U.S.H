@@ -48,7 +48,9 @@ import numpy as np  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import cameras  # noqa: E402
 import expert  # noqa: E402
+import picture_store  # noqa: E402
 import scene  # noqa: E402
 import truss_expert as tx  # noqa: E402
 import truss_scene as ts  # noqa: E402
@@ -365,6 +367,10 @@ def main():
                     help="truss YOLO for the start frame + overlay (default: runs/yolo_truss/truss_v1 if trained, "
                          "else the true box, no YOLO)")
     ap.add_argument("--no-yolo", action="store_true", help="true box at the start frame even if the truss YOLO exists")
+    ap.add_argument("--old-video", action="store_true",
+                    help="store the pictures as every dataset up to v5 did (LeRobot's default AV1). ⚠️ Fails the "
+                         "picture rule (picture_store.py): a stored frame then carries a trace of its neighbours "
+                         "and no test can reproduce it. Only to rebuild an old dataset as it was.")
     ap.add_argument("--rig", default="base", choices=("birdseye", "base"),
                     help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, or base + claw (2026-11-06)")
     ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
@@ -432,9 +438,13 @@ def main():
             # on 2026-11-12 lost all 108 episodes, so long runs write parts (--part-size)
             return LeRobotDataset.create(part_ids[k], expert.FPS, root=HF_LEROBOT_HOME / part_ids[k],
                                          robot_type=robot.name, features=features, use_videos=True,
-                                         rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"), image_writer_threads=4)
+                                         rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1") if a.old_video
+                                         else picture_store.encoder(), image_writer_threads=4)
         part = 0
         ds = new_part(part)
+        # the picture gate (picture_store.py): fingerprints of what the encoder stores for frames 0 and 30 of every
+        # episode and camera, checked against the finished dataset before any training
+        pg = None if a.old_video else picture_store.Gate(cameras.RIG_CAMERAS[a.rig])
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{repo_id.split('/')[-1]}{'_dry' if a.dry else ''}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
@@ -595,9 +605,14 @@ def main():
             # them up in the robot's dict (KeyError 'box_cx', pilot 2026-11-03); they're added below instead
             obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
 
+            if pg is not None:
+                pg.drop()
+
             def frame(sent, cur=cur, obs_feats=obs_feats, env=env, ds=ds):  # bound now (B023); play() calls it at once
                 t_f = time.time()
                 o = cur["obs"]
+                if pg is not None:
+                    pg.note(o)
                 fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),
                       **build_dataset_frame(ds.features, tap((sent, o)), prefix=ACTION), "task": TASK}
                 fr[OBS_ENV_STATE] = env
@@ -617,6 +632,8 @@ def main():
             # one camera after the other, in this process: lerobot's parallel encoding forks a worker per camera,
             # which took a part from 3.9 to 5.2 GB (2026-11-12), and the 6 GB caps killed 4 shards
             ds.save_episode(parallel_encoding=False)
+            if pg is not None:
+                pg.keep(ds.root, ds.meta.total_episodes - 1)
             ep = kept["n"]
             kept["n"] += 1; kept["miss"] += miss; kept["hold"] += hold
             if not hold:

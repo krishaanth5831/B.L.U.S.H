@@ -97,6 +97,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+import picture_store  # noqa: E402
 import rescue  # noqa: E402
 import truss_ik  # noqa: E402
 import truss_expert as tx  # noqa: E402
@@ -315,6 +316,11 @@ def main():
     ap.add_argument("--start-claw", type=pathlib.Path, default=None,
                     help="a picture file that replaces the claw camera's picture for the plan made at the start frame "
                          "(at the start pose the claw camera sees the same wall in every scene)")
+    ap.add_argument("--raw-pictures", action="store_true",
+                    help="a diagnostic: feed raw renders even when the training dataset was recorded with "
+                         "picture_store.py (its meta/picture_gate.jsonl exists). Without this, every picture the "
+                         "policy plans from then goes through picture_store.through_encoder, the dataset's own "
+                         "encoding: that is the standing test condition, not a patch.")
     ap.add_argument("--codec-still", type=int, default=0, metavar="N",
                     help="every live picture the policy plans from first goes through the dataset's video encoder, "
                          "as a clip of N copies of itself (0 = off)")
@@ -430,6 +436,11 @@ def main():
         "first plan from the recorded frame" if a.start_frame == "recorded" else "",
         f"first plan with claw picture {a.start_claw.stem}" if a.start_claw is not None else "",
         f"planning pictures through the video encoder (x{a.codec_still})" if a.codec_still else "") if x)
+    # a dataset recorded with picture_store.py: live pictures take the same path as its stored frames (fix 1)
+    store_same = (pathlib.Path(meta.root) / picture_store.GATE_FILE).exists() and not a.raw_pictures
+    print("pictures: " + ("every planning picture goes through the dataset's own encoding (picture_store)"
+                          if store_same else "raw renders" + (" (--raw-pictures)" if a.raw_pictures else
+                                                               " (the dataset has no picture gate file)")), flush=True)
     infer = ", ".join(x for x in (infer, pics_label) if x) or None    # one label: the tables give each its own row
     if infer:
         print(f"⚠️ inference changed: {infer}", flush=True)
@@ -515,7 +526,7 @@ def main():
     def plan_pictures(pol, obs, seed, first):
         """--start-frame / --start-claw / --codec-still: the observation the policy plans from. Only when this call
         makes a new plan (ACT's queue of commands is empty); otherwise, and without those options, obs itself."""
-        if not pics_label or len(getattr(pol, "_action_queue", ())) > 0:
+        if not (pics_label or store_same) or len(getattr(pol, "_action_queue", ())) > 0:
             return obs
         o, given = dict(obs), set()
         if first and rec0 is not None:
@@ -528,6 +539,10 @@ def main():
             for c in plan_cams:
                 if c not in given:                     # a recorded picture has been through the encoder already
                     o[c] = through_codec(np.asarray(o[c]), a.codec_still)
+        elif store_same:
+            for c in plan_cams:
+                if c not in given:
+                    o[c] = picture_store.through_encoder(np.asarray(o[c]))
         return o
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
