@@ -60,4 +60,7 @@ class SO101MujocoConfig(RobotConfig):
     jaw: str = "v5"
     # Each scene starts this many degrees (uniform, per arm joint, drawn from the seed) off the start pose, so a policy
     # learns "see the truss, then reach" rather than one fixed first move (SockBot's ghost-sock lesson). 0 = exact.
+    # A draw that leaves the arm too close to itself or to anything else is drawn again (so101_mujoco.START_CLEAR_*):
+    # the folded start has the lower arm 2-3 mm off the shoulder, so the elbow ends up moving one way more than the
+    # other.
     start_jitter_deg: float = 0.0

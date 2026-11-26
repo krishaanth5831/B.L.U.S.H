@@ -55,6 +55,17 @@ logger = logging.getLogger(__name__)
 OVERLAYS = ("none", "true_box", "yolo")
 KEY_N = 78                       # GLFW key code
 MAX_CATCH_UP_S = 0.1             # after a stall (a slow policy call), skip ahead instead of fast-forwarding
+# Start change (config.start_jitter_deg): a drawn start pose is kept only when the arm stays this far from itself and
+# from everything else that collides in the physics, else it is drawn again. Each is 1 mm over what the teacher's
+# start check asks (truss_teacher.SELF_CLEARANCE 2 mm, rrt.CLEARANCE 4 mm from hard things, 2 mm from trusses), so a
+# start this accepts is one the teacher accepts. Why: the folded start has the lower arm 2-3 mm off the shoulder,
+# and a plain +-3 deg draw folded the elbow into it in 3 of the first 9 scenes (r39, 2026-11-27: "start pose not
+# clear", self: shoulder / lower_arm).
+START_CLEAR_SELF_M = 0.003
+START_CLEAR_M = 0.005
+START_JITTER_TRIES = 20          # draws per scene before it starts at the exact pose (guess; 1-4 needed in 9 scenes)
+# arm parts that touch each other by design, never counted as the arm touching itself (truss_teacher.HAND_PARTS)
+HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade")
 
 
 class SO101Mujoco(Robot):
@@ -124,6 +135,33 @@ class SO101Mujoco(Robot):
         pass
 
     # --- scene ---
+    def _start_clear(self):
+        """The arm at the current joint angles keeps START_CLEAR_SELF_M from itself and START_CLEAR_M from everything
+        else that collides in the physics (the table, the crate, the house, trusses and fruit, the camera posts).
+        Read off the simulator's own contact list with the arm's contact margin widened for this one look.
+        ⚠️ Vine stems do not collide in the physics, so they are not seen here (the teacher's check sees them)."""
+        import mujoco
+        m, d = self.m, self.d
+        body = [m.body(m.geom_bodyid[g]).name for g in range(m.ngeom)]
+        arm = np.array([b.startswith("arm/") for b in body])
+        hand = np.array([any(h in b for h in HAND_PARTS) for b in body])
+        keep = m.geom_margin.copy()
+        m.geom_margin[arm & (m.geom_contype > 0)] = START_CLEAR_M
+        try:
+            mujoco.mj_kinematics(m, d)
+            mujoco.mj_collision(m, d)
+            for c in d.contact[:d.ncon]:
+                a, b = c.geom1, c.geom2
+                if arm[a] and arm[b]:
+                    if (m.geom_bodyid[a] != m.geom_bodyid[b] and not (hand[a] and hand[b])
+                            and c.dist < START_CLEAR_SELF_M):
+                        return False
+                elif (arm[a] or arm[b]) and c.dist < START_CLEAR_M:
+                    return False
+            return True
+        finally:
+            m.geom_margin[:] = keep
+
     def _build(self, seed, hold=False):
         # layout_rig: the rig whose brackets stood in the scene when the seed's plants and ripe truss were decided
         # (re-making an old dataset's pictures with another rig's cameras); None = this rig's own
@@ -135,10 +173,20 @@ class SO101Mujoco(Robot):
         self.qidx, self.uidx = scene.arm_ids(self.m)
         if self.config.start_jitter_deg > 0:      # own stream: the scene's other draws stay as they were
             import mujoco
-            j = np.random.default_rng([seed, 0x517]).uniform(-1, 1, 5) * np.radians(self.config.start_jitter_deg)
-            self.d.qpos[self.qidx[:5]] += j
+            rng = np.random.default_rng([seed, 0x517])
+            q_start = self.d.qpos[self.qidx[:5]].copy()
+            j, tries = np.zeros(5), 0
+            while tries < START_JITTER_TRIES:                   # the first draw is the plain one of before
+                tries += 1
+                cand = rng.uniform(-1, 1, 5) * np.radians(self.config.start_jitter_deg)
+                self.d.qpos[self.qidx[:5]] = q_start + cand
+                if self._start_clear():
+                    j = cand
+                    break
+            self.d.qpos[self.qidx[:5]] = q_start + j            # no clear draw: the exact start pose (j = 0)
             mujoco.mj_forward(self.m, self.d)
             self.info["start_jitter_deg"] = np.round(np.degrees(j), 2).tolist()
+            self.info["start_jitter_tries"] = tries
         self.det = tm.Detacher(self.m, self.d, self.info["fruit"])
         # One cutter per truss: a cut on the wrong truss shows up as that truss's cut.
         self.cutters = [tr.TrussCutter(self.m, self.d, t) for t in self.info["trusses"]]
