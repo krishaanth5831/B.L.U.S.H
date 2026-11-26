@@ -57,10 +57,12 @@ LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"     # as genera
 # Old episodes a re-make leaves out, by seed. ⚠️ ONLY these: any other episode whose scene does not come back stops
 # the part, because a wrong world, another MuJoCo or missing logs would otherwise give a quiet, nearly empty part.
 LEFT_OUT = {
-    # v5 episode 353 (part 14): its seed gives a scene of 4 trusses today (nq 399, neq 45), the log has nq 498,
-    # neq 54; the same with the old bracket's rig, twice in a row. The other 799 rebuild as recorded
-    # (dry --start-only over all 800, 2026-11-27). Cause not chased (v5 was recorded on MuJoCo 3.8.1).
-    10014003: "its seed no longer gives the recorded scene",
+    # v5 episode 353 (part 14): on MuJoCo 4.0.1 its seed gives a scene of 4 trusses (nq 399, neq 45), the log has
+    # nq 498, neq 54; the same with the old bracket's rig, twice in a row. On MuJoCo 3.8.1 (env lerobot, which v5
+    # was recorded on) the same code builds the recorded scene (nq 498, neq 54, 5 trusses): the simulator version
+    # flips which draw of this seed's layout has a truss in reach. The other 799 rebuild as recorded on 4.0.1
+    # (dry --start-only over all 800, 2026-11-27).
+    10014003: "MuJoCo 4.0.1 draws another scene for this seed than 3.8.1 recorded",
 }
 
 
