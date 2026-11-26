@@ -102,7 +102,7 @@ def kept_so_far(logs):
     for f in logs:
         for line in open(f):
             r = json.loads(line) if line.strip() else {}
-            if r.get("kept"):
+            if r.get("kept") and "seed" in r:           # the log's last line is a summary with its own "kept"
                 c["hold" if r.get("hold") else r.get("cell", "?")] += 1
     return c
 
