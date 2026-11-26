@@ -202,6 +202,15 @@ CARRY_SLOW_BIG = 0.6
 V6_TEACHER = True            # False (A/B only, 2026-11-26): a v6-jaw scene planned with the v5 teacher's logic, i.e.
 #                              every V6_* change below off at once; with BLUSH_V6 {"V6_CARRY": ["rigid", 0]} too
 #                              that is "old teacher, new jaw" (the aim point stays the v6 jaw's, truss_ik)
+V6_MEET_FROM_M = None        # None = off: the slide ends at the aim point. A value (A/B 2026-11-26: 0.008 together with
+#                              V6_AIM_FROM_PAD_M 0.002): slide in with the stalk THIS far from the fixed pad (room for
+#                              an aim error on the fixed finger's side), then move the jaw sideways until the stalk is
+#                              V6_AIM_FROM_PAD_M from the pad, then close. Why: with the stalk 8 mm from the fixed pad
+#                              the closing jaw pushes it ~11 mm sideways before the cut (carry_bump_trace.py on the cut
+#                              legs, 8 scenes: the stalk tilts 8-15 deg and the truss swings into its neighbours; v5
+#                              jaw, aimed 1 mm off its pad: 5-8 deg). Catch map (v6): held 9/9 with the stalk 2-5 mm
+#                              from the pad, 4-5/9 at 8-11 mm
+V6_MEET_STEPS = 4            # IK way-points along that sideways move (6 mm: 2 mm apart; design choice)
 V6_CARRY_SCALE = 0.67        # every carry at 0.67 x v4's pace = 0.4 x the joint speed (v5: 0.6, 8-fruit trusses 0.36)
 V6_SETTLE_ABOVE_S = 0.8      # hold above the crate before lowering, so the swing dies down (guess: ~2 swings of a
 #                              12-15 cm pendulum)
@@ -709,13 +718,22 @@ class TrussTeacher(tx.TrussPlanner):
             _, R = self.ik.frame(x_cut, r)
             b = np.radians(beta)
             f = np.cos(b) * -R[:, 2] + np.sin(b) * R[:, 1]
+            # V6_MEET_FROM_M: the slide runs with the jaw off sideways (gripper -x: the fixed pad further from the
+            # stalk) and its last way-points bring the pad to the stalk
+            off = np.zeros(3)
+            if self.v6 and V6_MEET_FROM_M is not None:
+                off = -(V6_MEET_FROM_M - truss_ik.V6_AIM_FROM_PAD_M) * R[:, 0]
             slide = None
             for L in SLIDE_M:
-                slide = self._line(p_cut - f * L, p_cut, s, r, x_cut, tx.SLIDE_STEPS, tilt, fast)
+                slide = self._line(p_cut + off - f * L, p_cut + off, s, r, x_cut, tx.SLIDE_STEPS, tilt, fast)
+                if slide is not None and off.any():
+                    meet = self._line(p_cut + off, p_cut, s, r, slide[-1], V6_MEET_STEPS, tilt, fast)
+                    slide = None if meet is None else slide + meet[1:-1] + [x_cut]
                 if slide is not None:
                     break
             self._geom_c[key] = "no IK along the slide" if slide is None else dict(
-                x_cut=x_cut, p_cut=p_cut, s=s, f=f, slide=slide, slide_m=L, u=u, beta=beta, tilt=tilt, lines={})
+                x_cut=x_cut, p_cut=p_cut, s=s, f=f, slide=slide, slide_m=L, off=off, u=u, beta=beta, tilt=tilt,
+                lines={})
         return self._geom_c[key]
 
     def _cut_leg(self, u, beta, r, tilt=0.0, fast=False):
@@ -742,13 +760,14 @@ class TrussTeacher(tx.TrussPlanner):
                 approaches.append(([slide[0]], 0.0))
                 continue
             if so not in g["lines"]:
-                g["lines"][so] = self._line(p_cut - f * (L + so), p_cut - f * L, s, r, slide[0], APPROACH_STEPS,
-                                            tilt, fast)
+                o = g["off"]
+                g["lines"][so] = self._line(p_cut + o - f * (L + so), p_cut + o - f * L, s, r, slide[0],
+                                            APPROACH_STEPS, tilt, fast)
             xs = g["lines"][so]
             if xs is not None and self.chk.path_ok(xs, **self.kw):
                 approaches.append((xs, so))
         return dict(x_cut=g["x_cut"], p_cut=p_cut, s=s, f=f, slide=slide, slide_m=L, approaches=approaches, u=u,
-                    beta=beta, tilt=tilt, fast=fast)
+                    beta=beta, tilt=tilt, fast=fast, meet_m=float(np.linalg.norm(g["off"])))
 
     def vias(self):
         """The fixed via-poses, 5 joints in rad (VIA_NORM)."""
@@ -1339,7 +1358,7 @@ class TrussTeacher(tx.TrussPlanner):
             L.append(Leg("approach", n5(leg["approach"]), jaw=g_open, servo=True,
                          lead=cart_lead(leg["approach"], leg["standoff_m"], APPROACH_M_S)))
         L.append(Leg("slide_in", n5(leg["slide"]), jaw=g_open, servo=True,
-                     lead=cart_lead(leg["slide"], leg["slide_m"], CART_M_S)))
+                     lead=cart_lead(leg["slide"], leg["slide_m"] + leg.get("meet_m", 0.0), CART_M_S)))
         L.append(Leg("settle_at_stalk", hold=cut, jaw=g_open, servo=True, frames=f(SETTLE_S)))
         L.append(Leg("close_cut", hold=cut, jaw_to=(g_open, CLOSE_NORM), servo=True, frames=f(CLOSE_S)))
         L.append(Leg("squeeze", hold=cut, jaw=CLOSE_NORM, servo=True, frames=f(SQUEEZE_S)))
