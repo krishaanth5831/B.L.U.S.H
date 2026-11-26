@@ -471,6 +471,10 @@ truss: 75 episodes spread over every target slot, every 3rd frame):
 | **Chosen upright: 35 cm left, 10 cm toward the row (`g_0.02_0.30`), lens at 5 cm** | 10.9 cm | 0 | 9.1 cm |
 | **the same upright, lens at 34-50 cm** | 4.5 cm (seed 10005040) | 0 | 7.1 cm (seed 10009015) |
 
+⚠️ These two sweeps were coarse (the arm every 4th frame, the plants in 75 episodes). The fine ones over every
+episode are in section 26: the arm's nearest stays 4.4 cm, but a carried truss came as near as 1.7 cm to the chosen
+upright's line, not 7.1 cm; with the real bracket in the model nothing touches it.
+
 After both sweeps 19 grid positions are left with the lens at or below 34 cm (21 up to 50 cm); all but five of them
 are on the outrigger 35 cm to the arm's left. Nothing between the arm and the row survives: the arm folds out to
 its left on the way to a truss and the carried truss swings through the middle.

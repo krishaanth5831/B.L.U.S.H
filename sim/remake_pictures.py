@@ -54,6 +54,14 @@ PART_EPISODES = 25             # sim/scripts/record_parts.sh: v5 was recorded in
 STATE_TOL = 1e-3               # norm units: a re-made frame's joint readings against the dataset's (float32 rounding
 #                                is 4e-6, measured over all 383,877 frames 2026-11-26; a wrong frame is off by ~1)
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"     # as generate_truss.LOG_DIR
+# Old episodes a re-make leaves out, by seed. ⚠️ ONLY these: any other episode whose scene does not come back stops
+# the part, because a wrong world, another MuJoCo or missing logs would otherwise give a quiet, nearly empty part.
+LEFT_OUT = {
+    # v5 episode 353 (part 14): its seed gives a scene of 4 trusses today (nq 399, neq 45), the log has nq 498,
+    # neq 54; the same with the old bracket's rig, twice in a row. The other 799 rebuild as recorded
+    # (dry --start-only over all 800, 2026-11-27). Cause not chased (v5 was recorded on MuJoCo 3.8.1).
+    10014003: "its seed no longer gives the recorded scene",
+}
 
 
 class Mismatch(Exception):
@@ -277,29 +285,23 @@ def part(a):
     try:
         for x in mine:
             t0 = time.time()
+            if x["seed"] in LEFT_OUT:                # by name only (LEFT_OUT's comment)
+                left_out.append((x["e"], x["seed"], LEFT_OUT[x["seed"]]))
+                log.write(json.dumps(dict(seed=x["seed"], hold=x["hold"], target=x["target"], kept=False,
+                                          reason=f"not re-made: {LEFT_OUT[x['seed']]}", part=pid,
+                                          from_dataset=x["dataset"], from_episode=int(x["episode"]),
+                                          from_merged=x["e"])) + "\n")
+                log.flush()
+                print(f"⚠️ v5 episode {x['e']} (seed {x['seed']}) is left out: {LEFT_OUT[x['seed']]}", flush=True)
+                continue
             st, act, _ = J[x["e"]]
             pg.drop()
-            env, cue, added = None, None, 0
-            try:
-                for k, o in frames(robot, x, st):
-                    if env is None:
-                        env, cue = robot.env_state(), cue_facts(robot)   # this rig's cue, fixed at the start frame
-                    pg.note(o)
-                    ds.add_frame(frame_of(features, tap, rop, o, st[k], act[k], env))
-                    added += 1
-            except Mismatch as err:
-                if added:           # frames of it are already in the episode buffer: stop, nothing half-right is kept
-                    raise
-                # the scene the log describes does not come back (before the first frame): this episode is left
-                # out and the part goes on. Known: v5 episode 353 (seed 10014003), whose seed draws another layout
-                # today, with the old bracket too (dry --start-only over all 800, 2026-11-27: 799 come back).
-                left_out.append((x["e"], x["seed"], str(err)))
-                log.write(json.dumps(dict(seed=x["seed"], hold=x["hold"], target=x["target"], kept=False,
-                                          reason=f"not re-made: {err}", part=pid, from_dataset=x["dataset"],
-                                          from_episode=int(x["episode"]), from_merged=x["e"])) + "\n")
-                log.flush()
-                print(f"⚠️ v5 episode {x['e']} (seed {x['seed']}) is left out: {err}", flush=True)
-                continue
+            env, cue = None, None
+            for k, o in frames(robot, x, st):       # a Mismatch stops the part: nothing half-right is kept
+                if env is None:
+                    env, cue = robot.env_state(), cue_facts(robot)   # this rig's cue, fixed at the start frame
+                pg.note(o)
+                ds.add_frame(frame_of(features, tap, rop, o, st[k], act[k], env))
             ds.save_episode(parallel_encoding=False)
             pg.keep(ds.root, ds.meta.total_episodes - 1)
             # ⚠️ an all-zero box means "nothing ripe" to the policy and to eval_truss --start-guard
@@ -318,7 +320,7 @@ def part(a):
         ds.finalize()
         log.close()
     print(f"💾 part {pid} finalized: {done} of {len(mine)} episodes"
-          + (f"\n⚠️ left out (their scene does not rebuild as recorded): {left_out}" if left_out else "")
+          + (f"\n⚠️ left out by name (LEFT_OUT): {left_out}" if left_out else "")
           + (f"\n⚠️ {no_cue} cut episodes have an all-zero box in the cue numbers: the first camera of rig {a.rig} "
              f"does not see their truss at the start (they would read as 'nothing ripe')" if no_cue else ""))
 
@@ -352,7 +354,7 @@ def dry(a):
     # cue feature's list shape [6] fails every frame (the first dry run, 2026-11-26).
     checked = {k: {**v, "shape": tuple(v["shape"])} for k, v in features.items()}
     cams = list(robot.cam_names)
-    bad, n_frames, t_frames, tally = [], 0, 0.0, {c: [0, 0] for c in robot.fixed}
+    bad, known, n_frames, t_frames, tally = [], [], 0, 0.0, {c: [0, 0] for c in robot.fixed}
     no_cue, n_cut = [], 0
     if a.shots:
         import cv2
@@ -377,9 +379,12 @@ def dry(a):
                     if a.shots and k in want:
                         shots[k] = np.hstack([o[c] for c in cams])
             except Mismatch as err:
-                bad.append((x["e"], x["seed"], str(err)))
-                print(f"DIFF v5 episode {x['e']} (seed {x['seed']}): {err}", flush=True)
+                (known if x["seed"] in LEFT_OUT else bad).append((x["e"], x["seed"], str(err)))
+                print(f"{'LEFT OUT (known)' if x['seed'] in LEFT_OUT else 'DIFF'} v5 episode {x['e']} "
+                      f"(seed {x['seed']}): {err}", flush=True)
                 continue
+            if x["seed"] in LEFT_OUT:
+                print(f"⚠️ v5 episode {x['e']} (seed {x['seed']}) is on LEFT_OUT but rebuilt as recorded", flush=True)
             if not x["hold"]:
                 n_cut += 1
                 for c, (b, u) in cue.items():
@@ -410,8 +415,9 @@ def dry(a):
     finally:
         robot.disconnect()
     print(f"\ndry ({'start frames' if a.start_only else 'whole episodes'}, rig {a.rig}, cameras {cams}): "
-          f"{len(pick) - len(bad)} of {len(pick)} episodes rebuilt as recorded" + (f", {len(bad)} NOT: {bad}" if bad
-                                                                                 else ""))
+          f"{len(pick) - len(bad) - len(known)} of {len(pick)} episodes rebuilt as recorded"
+          + (f", {len(known)} left out by name (LEFT_OUT): {known}" if known else "")
+          + (f", {len(bad)} NOT: {bad}" if bad else ""))
     print(f"cut episodes: {n_cut}; per fixed camera, a box / the cut pixel inside the frame at the start: "
           + ", ".join(f"{c} {v[0]} / {v[1]}" for c, v in tally.items())
           + f"; all-zero box in the cue numbers (reads as 'nothing ripe'): {len(no_cue)} {no_cue[:20]}")

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# sim_queue.sh PREFIX JOBFILE: run a list of sim jobs a few at a time without eating the laptop's memory (the night
+# runs of 2026-11-26/27: camera sweeps, the re-make's dry runs, the scene census). Each line of JOBFILE is
+# "NAME|COMMAND", run from sim/ in env lerobot-mj4 with MUJOCO_GL=egl. Every job is a systemd unit
+# blush-v6-PREFIX_NAME (MemoryMax 7G, no swap: K7's memory rule); a new one starts only while fewer than MAXJ
+# blush-v6 units run and MemAvailable >= 13 GB (so 8 GB stay free once it has grown). A job whose done marker
+# (outputs/v6/.done_PREFIX_NAME, written only on exit 0) exists is skipped, so a stopped queue can be started again.
+#   MAXJ=5 sim/scripts/sim_queue.sh cen6 jobs.txt        # watch: systemctl --user list-units 'blush-v6-*'
+# The census of dataset v6's fresh scenes was 24 lines of (seed starts 10100000, 10100300, ... 10106900):
+#   cN|python -u base_grid.py --base 0.37,0.20 --jaw v5 --old-start --world crate23 --rig base --build-only \
+#      --seed-start <S> --scenes 300 --out ../outputs/v6/census_v6/cen_<S>.jsonl > ../outputs/v6/census_v6/cen_<S>.log 2>&1
+R=$(cd "$(dirname "$0")/../.." && pwd)
+PREFIX=${1:?prefix}; JOBS=${2:?job file}
+MAXJ=${MAXJ:-4}          # 4: five teacher jobs took MemAvailable to 7.9 GB (2026-11-26); 5-6 is fine for build-only jobs (1.5 GB each)
+active() { systemctl --user list-units 'blush-v6-*' --state=active --no-legend | wc -l; }
+avail_gb() { awk '/MemAvailable/ {printf "%d", $2/1048576}' /proc/meminfo; }
+wait_slot() { while [ "$(active)" -ge "$MAXJ" ] || [ "$(avail_gb)" -lt 13 ]; do sleep 30; done; }
+while IFS='|' read -r NAME CMD; do
+  [ -z "$NAME" ] && continue
+  [ -e "$R/outputs/v6/.done_${PREFIX}_${NAME}" ] && continue
+  wait_slot
+  systemd-run --user --unit="blush-v6-${PREFIX}_${NAME}" --collect -q -p MemoryMax=7G -p MemorySwapMax=0 systemd-inhibit --what=sleep:idle --why="B.L.U.S.H $PREFIX" bash -c "source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4 && cd $R/sim && export MUJOCO_GL=egl OMP_NUM_THREADS=2 && unset BLUSH_V6 && $CMD && touch $R/outputs/v6/.done_${PREFIX}_${NAME}"
+  echo "started ${PREFIX}_${NAME} $(date +%H:%M) avail $(avail_gb) GB"; sleep 30
+done < "$JOBS"
+while systemctl --user list-units "blush-v6-${PREFIX}_*" --state=active --no-legend | grep -q .; do sleep 60; done
+echo "all done $(date +%H:%M)"

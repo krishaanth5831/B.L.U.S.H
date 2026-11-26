@@ -198,9 +198,12 @@ BASE_POST_R = 0.008                  # bracket post from the table to the camera
 # side, 35 cm to the left of the arm base and 10 cm toward the row. From whatif/camera_score.py on dataset v5's own
 # 734 cut scenes (world crate23, old start) and whatif/camera_sweep_logs.py on its 800 recorded episodes:
 #   - every spot nearer the arm was in the way in the recorded episodes: the best-scoring one (on the deck by the
-#     crate) had the arm within 4 cm in 561 of 800 episodes and through it. At this upright the arm never came under
-#     4 cm (nearest 4.5 cm) and no plant or carried truss under 7 cm (sweeps of every 4th frame; section 24 has the
-#     fine ones).
+#     crate) had the arm within 4 cm in 561 of 800 episodes and through it. At this upright, over every frame of all
+#     800 episodes, the arm never came under 4 cm of the line under the lens (nearest 4.4 cm). A carried truss came
+#     as near as 1.7 cm to that line (under 4 cm in 10 of the 735 cut episodes, every 3rd frame); the post itself
+#     stands about 1.8 cm behind the lens, further from both. With the real post and housings in the model nothing
+#     touches them in any of the 32 episodes that came within 6 cm (section 26; today's base bracket: a carried
+#     truss under 4 cm in 85 episodes, the arm in 314).
 #   - "high" (lens 42 cm above the deck top; first in the rig, so the cue numbers are its): sees the cut point at
 #     the start in 98 % of the scenes (the base camera: 79 %), the stalk and a blade just before the cut in 98 %
 #     (57 %), and has the cut point inside the picture in all 734.
@@ -211,7 +214,7 @@ BASE_POST_R = 0.008                  # bracket post from the table to the camera
 #   the base tie below 3 cm). Static on static and behind both lenses, so nothing collides or shows. 0.02 is the
 #   position that was scored and swept; 1 cm further in would leave the arm under 4 cm.
 # ⚠️ With both on one upright, "high"'s post runs through "low"'s housing, 1-2 cm behind its lens: one post in real
-#   life too. Neither bracket shows in the other's picture (checked on the re-make's first pictures, section 24).
+#   life too. Neither bracket shows in the other's picture (checked on the re-make's first pictures, section 26).
 # ⚠️ Real cart: an upright on an outrigger batten that reaches 21 cm past the deck's left end (the deck ends 14 cm
 #   from the arm base). On the plank rig as designed (hardware/greenhouse/pipe_rail_rig/README.md: end frames about
 #   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame, and arm B needs the mirror image at the other end.
