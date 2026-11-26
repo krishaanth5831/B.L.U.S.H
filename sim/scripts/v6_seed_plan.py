@@ -39,8 +39,10 @@ CELLS = [f"x{i}z{j}" for j in range(len(gt.CELL_Z_EDGES) + 1) for i in range(gt.
 OVERSUPPLY = 2.5        # seeds listed per episode wanted, where the census has them. Dataset v5's log: the teacher
 #                         kept 736 of 1,044 cut scenes it tried = 70 %; per slot 17-83 %, so 2.5 leaves room for a
 #                         cell at 40 %
-MIN_SUPPLY = 1.6        # a cell is planned only as far as the census has this many seeds per episode (1 / 1.6 = 63 %
-#                         kept: just under the teacher's 70 % overall, guess)
+MIN_SUPPLY = 1.8        # a cell is planned only as far as the census has this many seeds per episode (1 / 1.8 = 56 %
+#                         kept). Dataset v5's recording kept 60-83 % per cell, the lowest x2z2 60 % and x3z0 61 %
+#                         (its attempt logs; the refused scenes' cells from the logged cut_x and the cue pixel
+#                         against the kept ones, 96 % right on those; 2026-11-27), so 1.6 was too tight for two cells
 
 
 def census(files):
