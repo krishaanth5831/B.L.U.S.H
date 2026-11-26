@@ -375,9 +375,9 @@ def main():
                     help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, base + claw (2026-11-06), or "
                          "trio = low + high + claw (2026-11-26)")
     ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
-                    help="the dataset world (truss_scene.WORLDS: the crate, and with it every seed's plants). v5 = "
-                         "dataset v5's 23 x 28 cm crate: episodes added to that dataset must be recorded in it. "
-                         "Default: the code's own (v6, 30 x 28)")
+                    help="the world (truss_scene.WORLDS: the crate, and with it every seed's plants). crate23 = "
+                         "dataset v5's 23 x 28 cm crate: episodes added to that dataset must be recorded in it "
+                         "(⚠️ so dataset v6 is recorded with --world crate23). Default: the code's own, crate30")
     ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
     ap.add_argument("--hold-share", type=float, default=0.0,
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")

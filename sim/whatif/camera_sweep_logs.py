@@ -60,7 +60,7 @@ def arm(a):
     import truss_scene as ts
     names, pos = cam_positions(a.cams)
     P, own = cs.post_points(pos)
-    ts.set_world("v5")
+    ts.set_world("crate23")
     S = rc.v5_scenes()
     m, d, _ = ts.build(S[1]["seed"], base_mount=True, jaw="v5")     # any scene: only the arm is posed
     S = S[:a.limit] if a.limit else S
@@ -102,7 +102,7 @@ def plants(a):
 
     import truss_scene as ts
     names, pos = cam_positions(a.cams)
-    ts.set_world("v5")
+    ts.set_world("crate23")
     S = [x for x in rc.v5_scenes() if not x["hold"]]
     # the scenes whose target hangs nearest the cameras first (the logged cue has no 3D point: by the target's stem,
     # s0 is the stem nearest the robot's left), then every k-th of the rest

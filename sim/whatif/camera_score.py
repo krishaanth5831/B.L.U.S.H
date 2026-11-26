@@ -104,7 +104,7 @@ def setup(base, jaw, old_start, world=None):
 
 def seeds_of(spec):
     """'a:b' = seeds a..b-1, 'a,b,c' = those, 'v5:K/M' = every M-th scene of the v5 recording's kept cut episodes
-    starting at the K-th (whatif/rebuild_v5_check.py v5_scenes; use with --world v5 --old-start)."""
+    starting at the K-th (whatif/rebuild_v5_check.py v5_scenes; use with --world crate23 --old-start)."""
     if spec.startswith("v5:"):
         import rebuild_v5_check as rc
         k, m = (int(x) for x in spec[3:].split("/"))
@@ -436,7 +436,7 @@ def mountable(D, zmax=Z_MAX_M, anywhere=False):
     CLEAR_MIN_M of the arm (at the poses visited) or of a plant, in any scene."""
     import truss_scene as ts
     p = D["pos"]
-    (cx, cy), (sx, sy, _) = D["setup"].get("crate") or ts.WORLDS["v6"]     # files before the world switch: v6
+    (cx, cy), (sx, sy, _) = D["setup"].get("crate") or ts.WORLDS["crate30"]     # files from before the world switch
     carry_x = cx - sx / 2 - CARRY_MARGIN_M
     b = np.asarray(D["setup"]["base"].split(","), float)
     why = {
@@ -723,7 +723,8 @@ if __name__ == "__main__":
         s.add_argument("--base", default="0.37,0.20")
         s.add_argument("--jaw", default="v5", choices=scene.JAWS)
         s.add_argument("--old-start", action="store_true", help="keep scene.START_NORM (else base_grid.find_start)")
-        s.add_argument("--world", choices=("v5", "v6"), default=None, help="the dataset world (truss_scene.WORLDS)")
+        s.add_argument("--world", choices=("crate23", "crate30"), default=None,
+                       help="the world (truss_scene.WORLDS): crate23 = dataset v5's, crate30 = the code default")
         s.add_argument("--seeds", required=True, help="a:b (range) or a comma list")
         if name != "selftest":
             s.add_argument("--out", required=True)

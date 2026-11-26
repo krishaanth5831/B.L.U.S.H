@@ -451,8 +451,20 @@ def main():
                     help="one jsonl row per frame: the gripper's command and position, and where the "
                          "target truss is (rescue.truss_where). For finding when and why a carried truss drops")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
+    ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
+                    help="the world of the policy's dataset (truss_scene.WORLDS: the crate, and with it every seed's "
+                         "plants). ⚠️ A policy trained on dataset v5, or on v6 = v5's 800 + 600 more (K7 "
+                         "2026-11-26), is tested with --world crate23. Default: the code's own, crate30, which "
+                         "matches no dataset yet (the default crate grew to 30 x 28 on 2026-11-24).")
+    ap.add_argument("--layout-rig", choices=tuple(RIG_FIXED), default=None,
+                    help="decide every scene with THIS rig's camera brackets standing in it, show the policy's own "
+                         "(SO101MujocoConfig.layout_rig). For seeds recorded with another rig: dataset v5's 800 "
+                         "training scenes were decided with rig base, so a trio policy's test on them needs "
+                         "--layout-rig base, or a seed can ripen another truss than the recorded one.")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
+    if a.world:
+        ts.set_world(a.world)
     if a.record and not (a.hybrid and a.rejoin):
         sys.exit("--record needs --hybrid --rejoin (it records the teacher's finish)")
     if a.trigger == "failing" and not (a.hybrid and a.rejoin) or a.teacher_drives and a.trigger != "failing":
@@ -624,7 +636,7 @@ def main():
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
         fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
-        yolo_weights=yolo, state_log_dir=None, rig=rig))
+        yolo_weights=yolo, state_log_dir=None, rig=rig, layout_rig=a.layout_rig))
     robot.connect()
     ds, kept, rec_gate = None, 0, None
     if a.record:
@@ -1024,6 +1036,7 @@ def main():
                            finisher_n_action_steps=None if fin_path is None else getattr(fcfg, "n_action_steps", None),
                            finisher_ensemble=None if fin_path is None else fcfg.temporal_ensemble_coeff,
                            crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)],   # which world: the crate changes
+                           world=ts.world_name(), layout_rig=a.layout_rig,
                            trigger=a.trigger if a.hybrid else None, teacher_drives=a.teacher_drives,
                            infer=infer, clean_cut=sum(bool(r.get("clean_cut")) for r in results),
                            cmd_clipped=sum(r.get("cmd_clipped", 0) for r in results), clip_actions=a.clip_actions,

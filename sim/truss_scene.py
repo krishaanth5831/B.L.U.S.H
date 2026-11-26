@@ -114,19 +114,20 @@ KEEP_OUT_CRATE = None            # what-if only (base_grid.py --crate, 2026-11-2
                                  # seed's plants as they are and only the crate differs
 
 
-# The crate a dataset's world has. A seed draws its plants around the crate (_over_crate), so the crate decides the
-# scene of every seed: a dataset, its held-out sets and every test of a policy trained on it belong to ONE world.
-# K7 2026-11-26: v6's 600 new episodes go into the same dataset as v5's 800, so they have to be recorded in v5's
-# world. The code default stays the 30 x 28 crate (CRATE_CENTRE / CRATE_SIZE above = WORLDS["v6"]).
-WORLDS = {"v5": ((0.6175, 0.17), (0.23, 0.28, 0.05)),    # dataset v5, heldout_v5*.jsonl (commit 2efd61b, 2026-11-18)
-          "v6": ((0.5825, 0.17), (0.30, 0.28, 0.05))}    # since 2026-11-24
+# The worlds, named after their crate. A seed draws its plants around the crate (_over_crate), so the crate decides
+# the scene of every seed: a dataset, its held-out sets and every test of a policy trained on it belong to ONE world.
+# ⚠️ The names are NOT dataset versions. Dataset v5 lives in "crate23". K7 2026-11-26: v6's 600 new episodes go into
+# the same dataset as v5's 800, so they are recorded in "crate23" too, and so is every test of a policy trained on
+# it. "crate30" is the code default (CRATE_CENTRE / CRATE_SIZE above) and belongs to no dataset yet.
+WORLDS = {"crate23": ((0.6175, 0.17), (0.23, 0.28, 0.05)),   # dataset v5, heldout_v5*.jsonl (commit 2efd61b, 18 Nov)
+          "crate30": ((0.5825, 0.17), (0.30, 0.28, 0.05))}   # the code default since 2026-11-24
 
 
 def set_world(name):
     """Switch to a dataset's world (WORLDS) before any scene is built: the crate, and with it every seed's plants.
     Every module reads ts.CRATE_CENTRE / ts.CRATE_SIZE when it needs them, so this one call switches them all.
-    Checked for "v5" on 2026-11-26 (whatif/rebuild_v5_check.py): 14 of 14 logged scenes of the v5 recording rebuild
-    to the logged model, target and cue."""
+    Checked for "crate23" on 2026-11-26 (whatif/rebuild_v5_check.py): 14 of 14 logged scenes of the v5 recording rebuild
+    to the logged model, target and cue (then still named "v5")."""
     global CRATE_CENTRE, CRATE_SIZE, KEEP_OUT_CRATE
     CRATE_CENTRE, CRATE_SIZE = WORLDS[name]
     KEEP_OUT_CRATE = None

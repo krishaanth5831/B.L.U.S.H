@@ -17,7 +17,7 @@ picture_store.py, while every joint reading and every command stays exactly the 
 `picture_store.py gate` on it and a look at its pictures, before the other 31.
 
 How an episode is re-made (frames()):
-  1. The scene is rebuilt from its seed in v5's world (truss_scene.set_world("v5")) and decided with the bracket
+  1. The scene is rebuilt from its seed in v5's world (truss_scene.set_world("crate23")) and decided with the bracket
      that stood there when it was recorded (layout_rig="base"): the same plants, the same ripe truss. Checked
      against the log: number of joints and constraints, the target's name.
   2. The logged state of frame 0 is set and the start frame taken: the target's box + cut point are fixed on each
@@ -87,7 +87,7 @@ def make_robot(rig, layout_rig, seed):
     import expert
     import truss_scene as ts
     from lerobot.utils.import_utils import register_third_party_plugins
-    ts.set_world("v5")
+    ts.set_world("crate23")
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
     robot = SO101Mujoco(SO101MujocoConfig(

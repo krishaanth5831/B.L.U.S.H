@@ -179,9 +179,9 @@ def main():
     ap.add_argument("--rig", default="base", choices=("base", "trio"),
                     help="whose camera brackets stand in the scene (cameras.RIG_FIXED): the teacher plans around "
                          "them, and they decide with the rest of the scene which truss is ripe")
-    ap.add_argument("--world", choices=("v5", "v6"), default=None,
-                    help="the dataset world (truss_scene.WORLDS): v5 = the 23 x 28 cm crate of dataset v5 and its "
-                         "held-out sets, v6 = the code default. Each seed draws different plants in each world.")
+    ap.add_argument("--world", choices=("crate23", "crate30"), default=None,
+                    help="the world (truss_scene.WORLDS): crate23 = the 23 x 28 cm crate of dataset v5 and its "
+                         "held-out sets, crate30 = the code default. A seed draws different plants in each world.")
     ap.add_argument("--crate", help="WHAT-IF ONLY: 'sx,sy,cx,cy' (m) = another crate size and centre; the plants stay "
                                     "as with the standard crate (truss_scene.KEEP_OUT_CRATE). ⚠️ 30 x 28 is the most "
                                     "that fits the greenhouse (truss_scene.CRATE_SIZE note)")
