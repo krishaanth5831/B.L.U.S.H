@@ -179,6 +179,14 @@ def main():
     ap.add_argument("--rig", default="base", choices=("base", "trio"),
                     help="whose camera brackets stand in the scene (cameras.RIG_FIXED): the teacher plans around "
                          "them, and they decide with the rest of the scene which truss is ripe")
+    ap.add_argument("--start-jitter-deg", type=float, default=0.0,
+                    help="each arm joint starts up to this far off the start pose, drawn per seed "
+                         "(SO101MujocoConfig.start_jitter_deg, as generate_truss.py --start-jitter-deg): what the "
+                         "teacher scores when the recorder varies the start pose")
+    ap.add_argument("--layout-rig", choices=("base", "trio"), default=None,
+                    help="decide each scene with THIS rig's brackets standing in it, then swap in --rig's "
+                         "(SO101MujocoConfig.layout_rig): seeds recorded or held out with rig base keep their "
+                         "scene, the teacher plans around the new brackets")
     ap.add_argument("--world", choices=("crate23", "crate30"), default=None,
                     help="the world (truss_scene.WORLDS): crate23 = the 23 x 28 cm crate of dataset v5 and its "
                          "held-out sets, crate30 = the code default. A seed draws different plants in each world.")
@@ -230,7 +238,8 @@ def main():
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
     cfg = SO101MujocoConfig(id="sim", seed=0, viewer=False, overlay="true_box", realtime=False, fps=expert.FPS,
                             domain_rand=False, settle_s=1.0, snap_to_first_action=False, rig=a.rig,
-                            start_jitter_deg=0.0, yolo_weights=None, jaw=a.jaw)
+                            layout_rig=a.layout_rig, start_jitter_deg=a.start_jitter_deg, yolo_weights=None,
+                            jaw=a.jaw)
     robot = SO101Mujoco(cfg)
     robot.connect()
     out = a.out.open("a") if a.out else None
@@ -244,7 +253,8 @@ def main():
     for seed in seeds:
         t_s = time.time()
         rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE),
-                   world=ts.world_name(), rig=a.rig)
+                   world=ts.world_name(), rig=a.rig, layout_rig=a.layout_rig,
+                   start_jitter_deg=a.start_jitter_deg)
         robot.new_scene(seed, log=False)
         robot.get_observation()
         if robot._tgt_k is not None:
