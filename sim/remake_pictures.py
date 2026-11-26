@@ -331,6 +331,10 @@ def dry(a):
         pick = list({x["e"]: x for x in pick if x is not None}.values())
     robot = make_robot(a.rig, "base", pick[0]["seed"])
     features, tap, rop = dataset_features(robot)
+    # what a dataset checks its frames against: its info turns the shapes into tuples when it is created (lerobot
+    # DatasetInfo.__post_init__), and validate_frame compares a frame's shape with that. ⚠️ Against the raw dict the
+    # cue feature's list shape [6] fails every frame (the first dry run, 2026-11-26).
+    checked = {k: {**v, "shape": tuple(v["shape"])} for k, v in features.items()}
     cams = list(robot.cam_names)
     bad, n_frames, t_frames, tally = [], 0, 0.0, {c: [0, 0] for c in robot.fixed}
     no_cue, n_cut = [], 0
@@ -353,7 +357,7 @@ def dry(a):
                     if a.start_only:
                         break
                     if k % a.every == 0:
-                        validate_frame(frame_of(features, tap, rop, o, st[k], act[k], env), features)
+                        validate_frame(frame_of(features, tap, rop, o, st[k], act[k], env), checked)
                     if a.shots and k in want:
                         shots[k] = np.hstack([o[c] for c in cams])
             except Mismatch as err:

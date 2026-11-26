@@ -497,10 +497,11 @@ aimed at (0.34, 0.37, 0.26). High is first in the rig, so the six cue numbers ar
 - Against today's base camera: the cut point is seen at the start in 98 % instead of 79 %, stalk and blade just
   before the cut in 98-99 % instead of 57 %, and the post is out of the arm's way (today's bracket had the arm
   within 4 cm in 291 of the 800 recorded episodes).
-- ⚠️ 0.42 or 0.34 for the high lens is the owner's call. 0.42 is above the truss band (cut points 0.13-0.31 m),
-  where a real crop has leaves; the plank rig has none. The gain of 0.42 over 0.34 is small (the pair's rows
-  above). Both are the same post, so changing it later is a re-render from the state logs, not a re-recording:
-  the new episodes must be recorded with state logging on.
+- 0.42 or 0.34 for the high lens: the owner, shown both (`outputs/v6/cams/cameras_today_vs_new.png`), 2026-11-26:
+  "stick with 42". ⚠️ 0.42 is above the truss band (cut points 0.13-0.31 m), where a real crop has leaves; the
+  plank rig has none. The gain over 0.34 is small (the pair's rows above). Both are the same post, so changing it
+  later is a re-render from the state logs, not a re-recording: the new episodes must be recorded with state
+  logging on.
 - ⚠️ Real cart: an upright on an outrigger batten reaching 21 cm past the deck's left end. On the plank rig as
   designed the end frames stand about 225 mm from the arm, so this upright is 12.5 cm outside the end frame, and
   arm B needs the mirror image at the other end. Nothing is built.

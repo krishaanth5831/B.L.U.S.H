@@ -216,10 +216,10 @@ BASE_POST_R = 0.008                  # bracket post from the table to the camera
 #   from the arm base). On the plank rig as designed (hardware/greenhouse/pipe_rail_rig/README.md: end frames about
 #   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame, and arm B needs the mirror image at the other end.
 #   Nothing built, nothing checked on hardware.
-# ⚠️ Height of "high": 0.42 stands above the truss band (cut points 0.13-0.31 m), where a real crop has leaves (the
-#   plank rig has none). At 0.34 on the same post the pair still sees stalk and blade before the cut in 95 % (99 %
-#   here) and at the cut in 91 % (95 %). The owner's call; moving the lens down the post later is a re-render from
-#   the state logs (remake_pictures.py), not a re-recording.
+# ⚠️ Height of "high": 0.42 (K7 2026-11-26, shown 0.34 beside it: "stick with 42"). It stands above the truss band
+#   (cut points 0.13-0.31 m), where a real crop has leaves (the plank rig has none). At 0.34 on the same post the
+#   pair still sees stalk and blade before the cut in 95 % (99 % here) and at the cut in 91 % (95 %). Moving the
+#   lens down the post later is a re-render from the state logs (remake_pictures.py), not a re-recording.
 CART_CAMS = {
     "high": ((-0.35, 0.10, 0.42), (0.30, 0.37, 0.22)),
     "low": ((-0.35, 0.10, 0.05), (0.34, 0.37, 0.26)),
