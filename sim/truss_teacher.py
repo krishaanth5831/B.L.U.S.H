@@ -199,6 +199,9 @@ CARRY_SLOW_BIG = 0.6
 # crate in 3-4 of 30 scenes at every base, and on the way HOME in 1-2 (the way home ignores the dropped truss); with the
 # new start poses also while carrying (2-4 of 30). The v6 jaw lets the held truss swing more than v5's (catch map: drift
 # 0.5 s after the cut median 13.7 mm, v5 8.0). ---
+V6_TEACHER = True            # False (A/B only, 2026-11-26): a v6-jaw scene planned with the v5 teacher's logic, i.e.
+#                              every V6_* change below off at once; with BLUSH_V6 {"V6_CARRY": ["rigid", 0]} too
+#                              that is "old teacher, new jaw" (the aim point stays the v6 jaw's, truss_ik)
 V6_CARRY_SCALE = 0.67        # every carry at 0.67 x v4's pace = 0.4 x the joint speed (v5: 0.6, 8-fruit trusses 0.36)
 V6_SETTLE_ABOVE_S = 0.8      # hold above the crate before lowering, so the swing dies down (guess: ~2 swings of a
 #                              12-15 cm pendulum)
@@ -456,7 +459,7 @@ class TrussTeacher(tx.TrussPlanner):
         self._R_cut = None                     # the gripper at the cut (planned), for that swing
         self._pool = None                      # the last v6 fit: (poses that fit, of them under V6_PAD_SWING_MAX_DEG)
         self.q_home = np.asarray(scene.START_NORM, float)
-        self.v6 = scene.jaw_of(m) == "v6"      # the v6 world's carry, settle and lift (V6_*)
+        self.v6 = scene.jaw_of(m) == "v6" and V6_TEACHER      # the v6 world's carry, settle and lift (V6_*)
         self._vias = []
         self._search, self._skip, self.n_plans, self._avoid = None, True, 0, set()
         self._legs_c, self._std_c = {}, {}     # (mode, u, beta[, tilt]) -> cut leg / route to the standoff

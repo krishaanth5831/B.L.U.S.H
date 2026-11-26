@@ -20,6 +20,7 @@ Run in the lerobot-mj4 env, outside the Claude sandbox.
 """
 import argparse
 import json
+import os
 import pathlib
 import sys
 import time
@@ -182,7 +183,7 @@ def main():
     if len(b) > 2:
         scene.ARM_YAW_DEG = b[2]
     head = dict(base=list(scene.ARM_BASE), yaw_deg=scene.ARM_YAW_DEG, jaw=a.jaw, old_start=a.old_start,
-                whatif_weld=a.whatif_weld)
+                whatif_weld=a.whatif_weld, blush_v6=os.environ.get("BLUSH_V6"))   # the A/B switches of this run
     if not a.old_start:
         st = find_start(a.jaw)
         if st is None:

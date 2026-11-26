@@ -39,10 +39,15 @@ def main():
     ap.add_argument("--base", default="0.34,0.14")
     ap.add_argument("--noslip", type=int, default=0, help="DIAGNOSTIC: MuJoCo noslip iterations for this run")
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--legs", default=",".join(LEGS),
+                    help="legs to read (default: the carry). The cut: slide_in,settle_at_stalk,close_cut,squeeze")
+    ap.add_argument("--jaw", default="v6", choices=scene.JAWS, help="v5 = the old jaw on the same scenes (control)")
     a = ap.parse_args()
+    global LEGS
+    LEGS = tuple(a.legs.split(","))
     b = [float(v) for v in a.base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
-    scene.START_NORM = tuple(float(v) for v in bg.find_start("v6")[1])
+    scene.START_NORM = tuple(float(v) for v in bg.find_start(a.jaw)[1])
 
     import expert
     import generate_truss as gt
@@ -54,7 +59,7 @@ def main():
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=0, viewer=False, overlay="true_box", realtime=False, fps=expert.FPS, domain_rand=False,
-        settle_s=1.0, snap_to_first_action=False, rig="base", start_jitter_deg=0.0, yolo_weights=None, jaw="v6"))
+        settle_s=1.0, snap_to_first_action=False, rig="base", start_jitter_deg=0.0, yolo_weights=None, jaw=a.jaw))
     robot.connect()
     out = a.out.open("a") if a.out else None
     for seed in [int(s) for s in a.seeds.split(",")]:
@@ -103,7 +108,7 @@ def main():
         st = dict(prev=None, n=0, ref=None, rows=[], f6=np.zeros(6))
 
         def on_frame(_sent, st=st, plan=plan, name=name, own=own, own_ids=own_ids, kind=kind, R_model=R_model, bt=bt,
-                     models=models, fruit_ids=fruit_ids if models else None, m=m, d=d):
+                     models=models, fruit_ids=fruit_ids if models else None, m=m, d=d, bgr=bgr):
             leg = plan.leg
             st["n"] = st["n"] + 1 if leg == st["prev"] else 0
             st["prev"] = leg
