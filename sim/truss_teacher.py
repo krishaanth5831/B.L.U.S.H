@@ -721,7 +721,7 @@ class TrussTeacher(tx.TrussPlanner):
             # V6_MEET_FROM_M: the slide runs with the jaw off sideways (gripper -x: the fixed pad further from the
             # stalk) and its last way-points bring the pad to the stalk
             off = np.zeros(3)
-            if self.v6 and V6_MEET_FROM_M is not None:
+            if truss_ik.JAW == "v6" and V6_MEET_FROM_M is not None:      # the jaw's, also with V6_TEACHER off
                 off = -(V6_MEET_FROM_M - truss_ik.V6_AIM_FROM_PAD_M) * R[:, 0]
             slide = None
             for L in SLIDE_M:
