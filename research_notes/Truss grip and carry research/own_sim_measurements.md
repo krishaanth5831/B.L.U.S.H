@@ -139,7 +139,10 @@ The owner's direction since 2026-11-25: keep the old teacher and only adjust it 
 - With the neighbour-swing rule left out (second reading only): old jaw 84 %, new jaw with the old logic 79 %, new jaw
   today 73 %. The rule is worth 5-11 points to every run; it does not close the gap.
 - ⚠️ The old jaw's 78 % is on today's layout. Its 87/100 and 163/200 were measured on the old base (0.37/0.20), the
-  old start pose and the old crate. Old jaw on the old base and start pose, same 180 scenes: running (r22).
+  old start pose and the old crate. Old jaw on the old base and start pose, same 180 scenes: section 14 (86 %).
+- ⚠️ "Same 180 scenes" is not "same truss" everywhere: in 31 of the 180 the two jaws get a different target truss
+  (section 12). On the 149 scenes with the same target: 118 (79 %) / 104 (70 %) / 100 (67 %), old jaw against the new
+  jaw with the old logic won 23, lost 9. The reading above stands.
 
 ## 11. What the closing jaw does to the stalk (`whatif/carry_bump_trace.py --legs slide_in,settle_at_stalk,close_cut,squeeze,retreat`)
 
@@ -165,3 +168,82 @@ both jaws (`--jaw v5` for the old one). Medians over the eight:
   is the jaw: flat pads, 3 mm proud of the blades, 5.5 mm of travel.
 - `V6_MEET_FROM_M` (off by default): the slide runs with the stalk 8 mm from the fixed pad, the last way-points of
   `slide_in` move the jaw sideways until it is `V6_AIM_FROM_PAD_M` away. No new leg name.
+
+## 12. The same seed is not the same truss across jaws, aim points and bases (found 2026-11-26)
+
+`truss_scene.build` draws the vines and trusses from the seed, then makes ripe only trusses the arm can cut from where
+it stands (`cut_ik` at three points of the cut zone and `truss_expert.approach_ok`). Both depend on the jaw, the aim
+point in the jaw, the base and the start pose. So the layout of a seed is the same in every run, but which truss is
+ripe, and so the target, is not:
+
+| Compared runs | Scenes of 180 with a different target truss |
+|---|---|
+| Old jaw against new jaw (same base, same start pose) | 31 |
+| New jaw, aim 2 mm against aim 8 mm | 14 |
+| Old base and start pose against today's (old jaw) | 132 |
+| New jaw, old logic against today's logic | 0 |
+
+- Every paired count across those settings is a count per scene, not per truss. Each comparison below also gives the
+  scenes with the same target.
+- The traces: release trace (section 15) same truss in 5 of 6 scenes (9730075 is another truss for the old jaw); cut
+  trace (section 11) the 2 mm aim has another truss in 2 of 8 (9730012, 9730053), the old jaw in 2 of 8 (9730012,
+  9730117).
+
+## 13. The closer aim, scored (r19: `BLUSH_V6='{"V6_AIM_FROM_PAD_M": 0.002}'`, today's teacher otherwise)
+
+| Scenes | Aim 8 mm (today) | Aim 2 mm | Won | Lost |
+|---|---|---|---|---|
+| 9730000-089, the half the aim was first scored on | 54/90 | 64/90 | 12 | 2 |
+| 9730090-179, held out | 66/90 | 67/90 | 6 | 5 |
+| All 180 | 120 (66.7 %) | 131 (72.8 %) | 18 | 7 |
+| Same target only: first half / held out / all | 50/81, 63/85, 113/166 | 58/81, 62/85, 120/166 | 9, 4, 13 | 1, 5, 6 |
+
+- The mechanism holds: scenes that end on a neighbour pushed while the jaw slides in, closes, squeezes or retreats go
+  from 7 to 0. Six of those 7 sit in the first half, which is why the held-out half shows no gain. As a score gain the
+  closer aim is not confirmed on the held-out half.
+- What it costs: plans that end with the truss not (all) in the crate go from 104 to 123 (scenes ending on it 6 ->
+  11); plans that lose own fruit go from 158 to 125. The 7 lost scenes end on own fruit off in the carry or the
+  return (3), the crate missed (2), a neighbour pushed in the return (1) and no plan (1, slide hits). With the 8 mm
+  aim all 7 passed on their first or second plan.
+- No stale copy of the aim: every user reads it at call time through `truss_ik.cut_point_in_gripper` (IK, carry
+  check, hanging model, release fit, the scene builder).
+- The default stays 8 mm until the owner decides.
+
+## 14. Old jaw on the old base and the old start pose (r22: `--jaw v5 --base 0.37,0.20 --old-start`, crate 30 x 28)
+
+| Old jaw, old teacher | Solved | On the first plan | No plan | Damage or miss |
+|---|---|---|---|---|
+| Old base 0.37/0.20 and old start pose | 155/180 = 86.1 % | 139 | 23 | 2 |
+| Base 0.34/0.14 and its searched start pose (r17) | 141/180 = 78.3 % | 106 | 13 | 26 |
+
+- This is where the remembered "high 80 %" comes from: old base and old start pose, even with the new crate. It
+  solves 155 of the 157 scenes it finds a plan for.
+- The kind of failure changes: at the old base almost nothing goes wrong once a plan exists (plans that lose own
+  fruit: 25 against 131; plans that miss the crate: 9 against 38). What fails is planning: slide hits 10, no IK along
+  the slide 8, retreat -> crate blocked 4, 1 other.
+- ⚠️ Not truss for truss: 132 of the 180 scenes have a different target (section 12; the old base gets truss t0 in 81
+  scenes and t1 in 88, base 0.34/0.14 gets t0 in 18 and t1 in 146). All 180: won 37, lost 23. The 48 scenes with the
+  same target: 42 against 36 solved (won 12, lost 6), damage or miss 0 against 5.
+- ⚠️ Base and start pose changed together; this run cannot say which of the two it is.
+- Without the neighbour-swing rule (second reading only): 87 % against 84 %.
+- Base 0.34/0.14 was picked on the plan rate (plan-only census 91 %) and the claw camera's angle to the row (11 deg),
+  with scores that could not be told apart at 30 scenes (21-23 of 30). Going back is the owner's decision.
+- Queued 2026-11-26 12:40: new jaw with the old teacher's logic on the old base and start pose, aim 2 mm (r23) and
+  aim 8 mm (r24). The "slide wide, move over" variant (r20) is paused at 28 of 180 scenes.
+
+## 15. Where the truss is when the jaw opens over the crate (`whatif/release_trace.py`)
+
+Six scenes that keep missing the crate with the new jaw (9730047/051/054/058/075/080), three plans each, today's
+teacher logic:
+
+| | Plans ok | Own fruit's room to the crate's inner walls when the jaw opens |
+|---|---|---|
+| New jaw, aim 8 mm | 0 of 18 | outside in 16 of 18 plans (-4 to -214 mm); +48 and +86 mm in two plans of 9730051 |
+| New jaw, aim 2 mm | 0 of 18 | outside in 18 of 18 plans (-3 to -210 mm) |
+| Old jaw | 4 of 9 | +22 to +72 mm in the 4 plans that pass; -61 to -80 mm in 4 that fail, +32 mm in 1 |
+
+- With the new jaw the fruit are already outside the walls when the jaw opens (34 of 36 plans), often with the truss
+  hanging straight down and touching the table outside the wall, while the planner's fit expected it inside.
+- ⚠️ This reads today's teacher logic (the `V6_*` changes), not the jaw alone: section 10's first plans miss the crate
+  18 times with the old logic and 33 times with today's. The run that separates the two is r21 (new jaw, old logic,
+  aim 2 mm).
