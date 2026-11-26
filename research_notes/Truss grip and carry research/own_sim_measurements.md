@@ -586,8 +586,8 @@ old start, no start change):
   both). The attempt records are the same in 89 of 90; in the last one (9730013) a fruit an early failed attempt
   knocked off a neighbour rolled 392 mm instead of 249 mm. One no-plan scene (9730061) counts 81 blocked crate
   routes instead of 88. So the post costs the teacher nothing on these scenes.
-- `scratchpad compare_runs.py` pairs the runs by seed; files `outputs/v6/base_grid_r37_CRATE23_BASE_*.jsonl`,
-  `..._r38_TRIO_*.jsonl`.
+- `sim/scripts/grid_ab.py "r37=outputs/v6/base_grid_r37_CRATE23_BASE_[0-9]*.jsonl"
+  "r38=outputs/v6/base_grid_r38_TRIO_[0-9]*.jsonl"` pairs the runs by seed: won 0, lost 0, the same failure list.
 
 **The start change (`--start-jitter-deg 3`): a plain draw does not work, a clear-aware one does.**
 - r39 (new post + each arm joint drawn within 3 deg of the start pose, first 15 tuning scenes): 6 of 15 work, where
