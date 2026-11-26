@@ -13,8 +13,7 @@ arm:    per camera, the smallest distance over every logged frame from its lens 
         The arm's pose comes from the logged joint readings, so no scene is rebuilt.
 plants: per camera, the smallest distance over the logged frames from its post to any plant part: stems, every
         truss's stalk and fruit, the cut truss while the arm carries it. Needs the scene rebuilt from its seed
-        (v5's world), so it runs on --n episodes: those whose cut point is nearest the cameras first (the trusses a
-        post could touch), then spread over the rest.
+        (v5's world), so it runs on --n episodes, spread over every target position and height.
 
 Also why it matters for re-making v5's pictures with new cameras: a post the arm or a truss passed through in a
 recorded episode would show that in the re-made pictures.
@@ -104,11 +103,13 @@ def plants(a):
     names, pos = cam_positions(a.cams)
     ts.set_world("crate23")
     S = [x for x in rc.v5_scenes() if not x["hold"]]
-    # the scenes whose target hangs nearest the cameras first (the logged cue has no 3D point: by the target's stem,
-    # s0 is the stem nearest the robot's left), then every k-th of the rest
-    near = sorted(S, key=lambda x: x["target"])[:a.n // 2]
-    rest = [x for x in S if x not in near]
-    pick = near + rest[::max(1, len(rest) // max(1, a.n - len(near)))][:a.n - len(near)]
+    # spread over every position and height: the k-th recorded episode of each target slot in turn (s0t0, s0t1, ...,
+    # s4t1; s0 is the stem nearest the robot's left). ⚠️ Until 2026-11-26 the first half was "sorted by target
+    # name", which is 30 times s0t0. Every scene tests all its plants; the slot only decides the carried truss's way.
+    by = {}
+    for x in S:
+        by.setdefault(x["target"], []).append(x)
+    pick = [by[t][k] for k in range(max(len(v) for v in by.values())) for t in sorted(by) if k < len(by[t])][:a.n]
 
     def to_post(c, r):
         dz = c[None, :, 2] - np.clip(c[None, :, 2], 0.0, pos[:, None, 2])

@@ -10,6 +10,10 @@ picture_store.py, while every joint reading and every command stays exactly the 
     python remake_pictures.py align                       # read-only: logs against the dataset's joint data, all 800
     python remake_pictures.py check --n 3                  # read-only: re-renders the OLD rig, compares with the
                                                            #   old videos (downloads those episodes' video files)
+    python remake_pictures.py dry --shots DIR              # read-only: the re-make's own path with the NEW rig on a
+                                                           #   few episodes, frames built and validated, no dataset
+    python remake_pictures.py dry --start-only --shard 0/4 # read-only: every episode's start frame with the new rig:
+                                                           #   same target as recorded? does each camera get a cue?
     python remake_pictures.py part --part 0 --repo-id krish5831/blush_sim_teacher_v6r
                                                            # ⚠️ WRITES a dataset part: only with K7's go
 
@@ -54,6 +58,10 @@ LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"     # as genera
 
 class Mismatch(Exception):
     pass
+
+
+def nums(v, n=3):
+    return [round(float(x), n) for x in v]
 
 
 def old_episodes():
@@ -132,6 +140,50 @@ def frames(robot, x, state):
         yield k, o
 
 
+def dataset_features(robot):
+    """(features, tap, rop): the dataset's features exactly as generate_truss.py builds them for this robot's rig."""
+    import truss_target as ttg
+    from lerobot.datasets import aggregate_pipeline_dataset_features, create_initial_features
+    from lerobot.processor import make_default_processors
+    from lerobot.utils.constants import OBS_ENV_STATE
+    from lerobot.utils.feature_utils import combine_feature_dicts
+    tap, _, rop = make_default_processors()
+    features = combine_feature_dicts(
+        aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(
+            action=robot.action_features), use_videos=True),
+        aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(
+            observation=robot.observation_features), use_videos=True))
+    features[OBS_ENV_STATE] = {"dtype": "float32", "shape": [len(ttg.ENV_NAMES)], "names": ttg.ENV_NAMES}
+    return features, tap, rop
+
+
+def frame_of(features, tap, rop, o, st_k, act_k, env):
+    """One dataset frame as generate_truss.py's recording callback builds it, then the joint readings and the command
+    replaced by the dataset's own (bit for bit): the new pictures, the old numbers, this rig's cue."""
+    import arm_map
+    import generate_truss as gt
+    from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STR
+    from lerobot.utils.feature_utils import build_dataset_frame
+    obs_feats = {k: v for k, v in features.items() if k != OBS_ENV_STATE}
+    sent = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, act_k)}
+    fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),
+          **build_dataset_frame(features, tap((sent, o)), prefix=ACTION), "task": gt.TASK}
+    assert fr["observation.state"].shape == st_k.shape and fr[ACTION].shape == act_k.shape
+    fr["observation.state"], fr[ACTION] = st_k, act_k
+    fr[OBS_ENV_STATE] = env
+    return fr
+
+
+def cue_facts(robot):
+    """Per fixed camera of the rig, at the start frame: (has a box, cut pixel inside the frame)."""
+    import truss_target as ttg
+    out = {}
+    for c in robot.fixed:
+        box, cut = robot._views.get(c, (None, None))
+        out[c] = (box is not None, cut is not None and 0 <= cut[0] < ttg.W and 0 <= cut[1] < ttg.H)
+    return out
+
+
 def align(a):
     """Read-only, no rendering: per episode the logged joint readings against the dataset's, frame by frame."""
     S, J = old_episodes(), joint_data()
@@ -206,55 +258,39 @@ def part(a):
     """⚠️ WRITES a dataset part (K7's go first): the old episodes part*25 .. part*25+24, re-made."""
     import cameras
     import expert
-    import generate_truss as gt
     import picture_store
-    import truss_target as ttg
-    from lerobot.datasets import LeRobotDataset, aggregate_pipeline_dataset_features, create_initial_features
-    from lerobot.processor import make_default_processors
-    from lerobot.utils.constants import ACTION, HF_LEROBOT_HOME, OBS_ENV_STATE, OBS_STR
-    from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
+    from lerobot.datasets import LeRobotDataset
+    from lerobot.utils.constants import HF_LEROBOT_HOME
     S, J = old_episodes(), joint_data()
     mine = [x for x in S if x["part"] == a.part]
     pid = f"{a.repo_id}_p{a.part:02d}"
     if (HF_LEROBOT_HOME / pid).exists():
         sys.exit(f"⚠️ {HF_LEROBOT_HOME / pid} exists already: nothing was written")
     robot = make_robot(a.rig, "base", mine[0]["seed"])
-    # the features exactly as generate_truss.py builds them for a recording with this rig
-    tap, _, rop = make_default_processors()
-    features = combine_feature_dicts(
-        aggregate_pipeline_dataset_features(pipeline=tap, initial_features=create_initial_features(
-            action=robot.action_features), use_videos=True),
-        aggregate_pipeline_dataset_features(pipeline=rop, initial_features=create_initial_features(
-            observation=robot.observation_features), use_videos=True))
-    features[OBS_ENV_STATE] = {"dtype": "float32", "shape": [len(ttg.ENV_NAMES)], "names": ttg.ENV_NAMES}
+    features, tap, rop = dataset_features(robot)
     ds = LeRobotDataset.create(pid, expert.FPS, root=HF_LEROBOT_HOME / pid, robot_type=robot.name, features=features,
                                use_videos=True, rgb_encoder=picture_store.encoder(), image_writer_threads=4)
     pg = picture_store.Gate(cameras.RIG_CAMERAS[a.rig])
-    obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log = (LOG_DIR / f"{pid.split('/')[-1]}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl").open("w")
-    done = 0
+    done, no_cue = 0, 0
     try:
         for x in mine:
             t0 = time.time()
             st, act, _ = J[x["e"]]
             pg.drop()
-            env = None
+            env, cue = None, None
             for k, o in frames(robot, x, st):       # a Mismatch stops the part: nothing half-right is kept
                 if env is None:
-                    env = robot.env_state()         # this rig's cue numbers, fixed at the start frame
+                    env, cue = robot.env_state(), cue_facts(robot)   # this rig's cue, fixed at the start frame
                 pg.note(o)
-                fr = {**build_dataset_frame(obs_feats, rop(o), prefix=OBS_STR),
-                      **build_dataset_frame(ds.features, tap(({f"{j}.pos": float(v) for j, v in
-                                                               zip(expert.arm_map.JOINTS, act[k])}, o)),
-                                            prefix=ACTION), "task": gt.TASK}
-                assert fr["observation.state"].shape == st[k].shape and fr[ACTION].shape == act[k].shape
-                fr["observation.state"], fr[ACTION] = st[k], act[k]      # the dataset's own numbers, bit for bit
-                fr[OBS_ENV_STATE] = env
-                ds.add_frame(fr)
+                ds.add_frame(frame_of(features, tap, rop, o, st[k], act[k], env))
             ds.save_episode(parallel_encoding=False)
             pg.keep(ds.root, ds.meta.total_episodes - 1)
-            log.write(json.dumps(dict(seed=x["seed"], hold=x["hold"], target=x["target"], env=env.round(4).tolist(),
+            # ⚠️ an all-zero box means "nothing ripe" to the policy and to eval_truss --start-guard
+            no_cue += bool(not x["hold"] and not np.any(env[:4]))
+            log.write(json.dumps(dict(seed=x["seed"], hold=x["hold"], target=x["target"], env=nums(env, 4),
+                                      cue={c: list(map(bool, v)) for c, v in cue.items()},
                                       kept=True, reason="re-made", episode_index=done, part=pid,
                                       from_dataset=x["dataset"], from_episode=int(x["episode"]), from_merged=x["e"],
                                       frames=len(st), wall_s=round(time.time() - t0, 1))) + "\n")
@@ -266,7 +302,103 @@ def part(a):
         robot.disconnect()
         ds.finalize()
         log.close()
-    print(f"💾 part {pid} finalized: {done} of {len(mine)} episodes")
+    print(f"💾 part {pid} finalized: {done} of {len(mine)} episodes"
+          + (f"\n⚠️ {no_cue} cut episodes have an all-zero box in the cue numbers: the first camera of rig {a.rig} "
+             f"does not see their truss at the start (they would read as 'nothing ripe')" if no_cue else ""))
+
+
+def dry(a):
+    """Read-only, no dataset is created: the re-make's own path with the NEW rig.
+    Default: a few episodes (a hold, a far stem, a near one, a high truss, the last one) frame by frame; every
+    --every-th frame is built into the dataset frame `part` would add and checked by LeRobot's own validate_frame;
+    seconds per frame; --shots DIR writes each episode's start / before the cut / cut / carry frames, all cameras as
+    the policy gets them (the cue drawn, the new brackets in the scene).
+    --start-only [--shard i/n]: only the start frame, of every episode: is the rebuilt scene's target the recorded
+    one, and does each fixed camera get a box and a cut pixel inside its frame."""
+    from lerobot.datasets.feature_utils import validate_frame
+    S, J = old_episodes(), joint_data()
+    if a.start_only:
+        i, n = (int(v) for v in a.shard.split("/"))
+        pick = S[i::n]
+    elif a.episodes:
+        pick = [S[int(e)] for e in a.episodes.split(",")]
+    else:
+        cuts = [x for x in S if not x["hold"]]
+        first = lambda f: next((x for x in cuts if f(x["target"])), None)   # noqa: E731
+        pick = [next(x for x in S if x["hold"]), first(lambda t: t.startswith("s4")) or
+                first(lambda t: t.startswith("s3")), first(lambda t: t == "s0t0"), first(lambda t: t.endswith("t2")),
+                cuts[-1]]
+        pick = list({x["e"]: x for x in pick if x is not None}.values())
+    robot = make_robot(a.rig, "base", pick[0]["seed"])
+    features, tap, rop = dataset_features(robot)
+    cams = list(robot.cam_names)
+    bad, n_frames, t_frames, tally = [], 0, 0.0, {c: [0, 0] for c in robot.fixed}
+    no_cue, n_cut = [], 0
+    if a.shots:
+        import cv2
+        os.makedirs(a.shots, exist_ok=True)
+    try:
+        for x in pick:
+            st, act, _ = J[x["e"]]
+            z = np.load(x["npz"], allow_pickle=True)
+            ch = np.flatnonzero((np.asarray(z["eq_active"])[1:] != np.asarray(z["eq_active"])[:-1]).any(1))
+            cut_k = int(ch[0]) + 1 if len(ch) else None          # the first frame after a constraint let go: the cut
+            want = {0, len(st) // 2} if cut_k is None else {0, max(0, cut_k - 15), min(cut_k, len(st) - 1),
+                                                            min(len(st) - 1, cut_k + (len(st) - cut_k) // 2)}
+            env, cue, shots, t0 = None, None, {}, time.time()
+            try:
+                for k, o in frames(robot, x, st):
+                    if env is None:
+                        env, cue = robot.env_state(), cue_facts(robot)
+                    if a.start_only:
+                        break
+                    if k % a.every == 0:
+                        validate_frame(frame_of(features, tap, rop, o, st[k], act[k], env), features)
+                    if a.shots and k in want:
+                        shots[k] = np.hstack([o[c] for c in cams])
+            except Mismatch as err:
+                bad.append((x["e"], x["seed"], str(err)))
+                print(f"DIFF v5 episode {x['e']} (seed {x['seed']}): {err}", flush=True)
+                continue
+            if not x["hold"]:
+                n_cut += 1
+                for c, (b, u) in cue.items():
+                    tally[c][0] += b
+                    tally[c][1] += u
+                if not np.any(env[:4]):
+                    no_cue.append(x["e"])
+            if a.start_only:
+                print(f"ok {x['e']} seed {x['seed']} {'HOLD' if x['hold'] else x['target']} cue "
+                      f"{ {c: list(map(int, v)) for c, v in cue.items()} } env {nums(env)}", flush=True)
+                continue
+            n_frames += len(st)
+            t_frames += time.time() - t0
+            if a.shots:
+                import cv2
+                rows = []
+                for k in sorted(shots):
+                    im = np.ascontiguousarray(shots[k][..., ::-1])
+                    cv2.putText(im, f"v5 episode {x['e']} seed {x['seed']} {'HOLD' if x['hold'] else x['target']} "
+                                f"frame {k}" + (" (cut)" if k == cut_k else ""), (8, 20), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.55, (255, 255, 255), 1, cv2.LINE_AA)
+                    rows.append(im)
+                f = os.path.join(a.shots, f"remake_{a.rig}_e{x['e']:03d}.png")
+                cv2.imwrite(f, np.vstack(rows))
+            print(f"OK   v5 episode {x['e']} (seed {x['seed']}, {'HOLD' if x['hold'] else x['target']}): {len(st)} "
+                  f"frames in {time.time() - t0:.0f} s, cue {nums(env)}, per camera (box, cut pixel in "
+                  f"frame) {cue}" + (f", pictures {f}" if a.shots else ""), flush=True)
+    finally:
+        robot.disconnect()
+    print(f"\ndry ({'start frames' if a.start_only else 'whole episodes'}, rig {a.rig}, cameras {cams}): "
+          f"{len(pick) - len(bad)} of {len(pick)} episodes rebuilt as recorded" + (f", {len(bad)} NOT: {bad}" if bad
+                                                                                 else ""))
+    print(f"cut episodes: {n_cut}; per fixed camera, a box / the cut pixel inside the frame at the start: "
+          + ", ".join(f"{c} {v[0]} / {v[1]}" for c, v in tally.items())
+          + f"; all-zero box in the cue numbers (reads as 'nothing ripe'): {len(no_cue)} {no_cue[:20]}")
+    if n_frames:
+        print(f"{n_frames} frames at {t_frames / n_frames:.3f} s each (scene build included): all 383,877 frames "
+              f"would take {383877 * t_frames / n_frames / 3600:.1f} h on one process, before storing")
+    print("dry:", "PASS" if not bad else "FAIL")
 
 
 if __name__ == "__main__":
@@ -280,9 +412,16 @@ if __name__ == "__main__":
     s.add_argument("--max-diff", type=float, default=8.0,
                    help="largest mean difference of a frame, grey levels of 255 (guess: v5's AV1 storage alone is "
                         "about 2; a truss or the arm in another place is far more)")
+    s = sub.add_parser("dry")
+    s.add_argument("--rig", default="trio", choices=("trio", "base"))
+    s.add_argument("--episodes", help="these merged v5 episode numbers, comma list (default: five chosen ones)")
+    s.add_argument("--every", type=int, default=5, help="build and validate every k-th frame")
+    s.add_argument("--shots", help="a folder for one picture sheet per episode")
+    s.add_argument("--start-only", action="store_true", help="only the start frame, of every episode (see --shard)")
+    s.add_argument("--shard", default="0/1", help="i/n: every n-th episode from the i-th (parallel start-only runs)")
     s = sub.add_parser("part")
     s.add_argument("--part", type=int, required=True, help=f"0-31: the old episodes part*{PART_EPISODES} and up")
     s.add_argument("--repo-id", required=True, help="the parts are <repo-id>_pNN (merge_parts.py merges them)")
     s.add_argument("--rig", default="trio", choices=("trio", "base"))
     a = ap.parse_args()
-    dict(align=align, check=check, part=part)[a.mode](a)
+    dict(align=align, check=check, part=part, dry=dry)[a.mode](a)

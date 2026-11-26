@@ -660,7 +660,9 @@ def selftest(a):
 
 def render(a):
     """A contact sheet: one row per scene and pose (START, CUT), one column per camera named in --cams, each the
-    640 x 480 frame through the lens model with a cross on the cut point."""
+    640 x 480 frame through the lens model with a cross on the cut point. --aims: a `rank --json` file; the cameras
+    it lists are aimed as rank aimed them (without it every grid camera points at scene.BASE_CAM_AIM, which is NOT
+    what rank scored unless it ran with --keep-aim)."""
     import cv2
     import mujoco
     import truss_expert as tx
@@ -668,6 +670,16 @@ def render(a):
     rob = setup(a.base, a.jaw, a.old_start, a.world)
     names, pos, aim = candidates()
     pick = [names.index(c) for c in a.cams.split(",")]
+    if a.aims:
+        js = json.load(open(a.aims))
+        known = {r["name"]: r["aim"] for r in js["single"]}
+        for r in js["pairs"]:
+            known.setdefault(r["a"], r["aim_a"])
+            known.setdefault(r["b"], r["aim_b"])
+        for i in pick:
+            if i >= 2:
+                assert names[i] in known, f"{names[i]} is not in {a.aims}: its aim is unknown"
+                aim[i] = known[names[i]]
     ax = axes(pos, aim)
     lens = LENSES["base"]
     sheet = []
@@ -703,8 +715,8 @@ def render(a):
                 if np.isfinite(uv).all():
                     cv2.drawMarker(img, (int(round(uv[0, 0])), int(round(uv[0, 1]))), (0, 255, 0),
                                    cv2.MARKER_CROSS, 22, 1)
-                cv2.putText(img, f"{names[i]}  {seed} {label}", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                            (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(img, f"{names[i]}  {seed} {label} {rob.info['trusses'][rob._tgt_k]['name']}", (8, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
                 row.append(img)
             sheet.append(np.hstack(row))
         r.close()
@@ -732,6 +744,7 @@ if __name__ == "__main__":
             s.add_argument("--cart", action="store_true", help="only the grid positions the cart rule can keep")
         if name == "render":
             s.add_argument("--cams", required=True, help="comma list of camera names (base, birdseye, g_x_y_z)")
+            s.add_argument("--aims", help="a `rank --json` file: aim the listed cameras as rank aimed them")
     s = sub.add_parser("rank")
     s.add_argument("files", nargs="+")
     s.add_argument("--top", type=int, default=15)
