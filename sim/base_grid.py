@@ -176,6 +176,9 @@ def main():
                          "which the arm can cut from here and the target. ⚠️ Which truss is ripe depends on the jaw, "
                          "the aim point, the base and the start pose (truss_scene.build), and a seed's layout can "
                          "differ too (redrawn while no truss is reachable; trusses touching the arm are removed)")
+    ap.add_argument("--world", choices=("v5", "v6"), default=None,
+                    help="the dataset world (truss_scene.WORLDS): v5 = the 23 x 28 cm crate of dataset v5 and its "
+                         "held-out sets, v6 = the code default. Each seed draws different plants in each world.")
     ap.add_argument("--crate", help="WHAT-IF ONLY: 'sx,sy,cx,cy' (m) = another crate size and centre; the plants stay "
                                     "as with the standard crate (truss_scene.KEEP_OUT_CRATE). ⚠️ 30 x 28 is the most "
                                     "that fits the greenhouse (truss_scene.CRATE_SIZE note)")
@@ -213,6 +216,8 @@ def main():
     import truss_expert as tx
     import truss_scene as ts
     import truss_teacher as tt
+    if a.world:
+        ts.set_world(a.world)
     if a.crate:
         sx, sy, cx, cy = (float(v) for v in a.crate.split(","))
         ts.KEEP_OUT_CRATE = (ts.CRATE_CENTRE, ts.CRATE_SIZE)
@@ -235,7 +240,8 @@ def main():
     a.scenes = len(seeds)
     for seed in seeds:
         t_s = time.time()
-        rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE))
+        rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE),
+                   world=ts.world_name())
         robot.new_scene(seed, log=False)
         robot.get_observation()
         if robot._tgt_k is not None:

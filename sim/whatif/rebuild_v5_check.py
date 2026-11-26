@@ -51,8 +51,8 @@ def v5_scenes():
 
 def set_v5_world():
     import truss_scene as ts
-    ts.CRATE_CENTRE, ts.CRATE_SIZE = V5_CRATE
-    ts.KEEP_OUT_CRATE = None
+    ts.set_world("v5")
+    assert (ts.CRATE_CENTRE, ts.CRATE_SIZE) == V5_CRATE
 
 
 def main():

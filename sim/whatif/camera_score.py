@@ -58,8 +58,9 @@ CLEAR_MIN_M = 0.04         # rank: a lens or its post nearer than this to the ar
 Z_MAX_M = 0.34             # rank: no lens above the truss band (KNUCKLE_Z tops at 0.32). ⚠️ The sim has no leaves:
 #                            a real crop is only stripped at and below the ripening trusses, so a view down through
 #                            the head of the plant would score here and see leaves in the greenhouse.
-CARRY_X_M = 0.40           # rank: no post at x beyond this on the aisle side (y >= 0): the cut truss is carried from
-#                            the row to the crate there (crate x 0.43-0.73), poses this score does not visit
+CARRY_MARGIN_M = 0.03      # rank: no post at x beyond the crate's near edge minus this, on the aisle side (y >= 0):
+#                            the cut truss is carried from the row to the crate there, poses this score does not
+#                            visit (30 x 28 crate: x >= 0.40; dataset v5's 23 x 28 crate: x >= 0.47)
 # The cameras must ride on the CART: on the real rig (hardware/greenhouse/pipe_rail_rig) the arm rolls along the row
 # on a cart, so a camera standing on the floor would not move with it, and the row behind the arm (R0, empty in
 # this sim) carries plants there. The cart's deck is two 119 mm planks side by side, centred on the arm base
@@ -68,8 +69,11 @@ DECK_HALF_W_M = 0.119      # rank: a post stands within this of the arm base's y
 DECK_END_M = 0.140         # rank: left of base_x - this a post needs an outrigger batten past the deck's end
 
 
-def setup(base, jaw, old_start):
+def setup(base, jaw, old_start, world=None):
     import base_grid
+    import truss_scene as ts
+    if world:
+        ts.set_world(world)
     b = [float(v) for v in base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
     if not old_start:
@@ -86,6 +90,12 @@ def setup(base, jaw, old_start):
 
 
 def seeds_of(spec):
+    """'a:b' = seeds a..b-1, 'a,b,c' = those, 'v5:K/M' = every M-th scene of the v5 recording's kept cut episodes
+    starting at the K-th (whatif/rebuild_v5_check.py v5_scenes; use with --world v5 --old-start)."""
+    if spec.startswith("v5:"):
+        import rebuild_v5_check as rc
+        k, m = (int(x) for x in spec[3:].split("/"))
+        return [x["seed"] for x in rc.v5_scenes() if not x["hold"]][k::m]
     if ":" in spec:
         a, b = (int(x) for x in spec.split(":"))
         return list(range(a, b))
@@ -289,8 +299,9 @@ def one_scene(rob, T, g, pos, ax, lens, claw_lens, posts):
 
 
 def collect(a):
+    import truss_scene as ts
     from lens import LENSES
-    rob = setup(a.base, a.jaw, a.old_start)
+    rob = setup(a.base, a.jaw, a.old_start, a.world)
     names, pos, aim = candidates()
     ax = axes(pos, aim)
     posts = post_points(pos)
@@ -321,7 +332,8 @@ def collect(a):
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     np.savez_compressed(a.out, names=np.array(names), pos=pos, aim=aim, skipped=json.dumps(skipped),
                         setup=json.dumps(dict(base=a.base, jaw=a.jaw, old_start=a.old_start,
-                                              start_norm=list(scene.START_NORM))),
+                                              start_norm=list(scene.START_NORM), world=ts.world_name(),
+                                              crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)])),
                         **{k: np.array(v) for k, v in rows.items()})
     print(f"wrote {a.out}: {len(rows['seed'])} scenes, skipped {skipped}", flush=True)
 
@@ -339,17 +351,18 @@ def load(files):
 def mountable(D, zmax=Z_MAX_M, anywhere=False):
     """Grid positions a post can hold, with what rules each one out. Out: above the truss band (zmax), off the
     cart's width (DECK_HALF_W_M; lifted by anywhere=True, which then only keeps posts off row R0's rail), in the
-    carry zone (CARRY_X_M) or the crate (+3 cm), on the arm's base plate, the lens or its post within CLEAR_MIN_M of
-    the arm (at the poses visited) or of a plant, in any scene."""
+    carry zone (CARRY_MARGIN_M) or the crate (+3 cm), on the arm's base plate, the lens or its post within
+    CLEAR_MIN_M of the arm (at the poses visited) or of a plant, in any scene."""
     import truss_scene as ts
     p = D["pos"]
-    (cx, cy), (sx, sy, _) = ts.CRATE_CENTRE, ts.CRATE_SIZE
+    (cx, cy), (sx, sy, _) = D["setup"].get("crate") or ts.WORLDS["v6"]     # files before the world switch: v6
+    carry_x = cx - sx / 2 - CARRY_MARGIN_M
     b = np.asarray(D["setup"]["base"].split(","), float)
     why = {
         "above the truss band": p[:, 2] > zmax + 1e-9,
         "off the cart" if not anywhere else "on a rail": (np.abs(p[:, 1] - b[1]) > DECK_HALF_W_M + 1e-9
                                                           if not anywhere else np.abs(p[:, 1]) < 0.03),
-        "carry zone or crate": ((p[:, 0] >= CARRY_X_M) & (p[:, 1] >= 0.0)) | (
+        "carry zone or crate": ((p[:, 0] >= carry_x - 1e-9) & (p[:, 1] >= 0.0)) | (
             (np.abs(p[:, 0] - cx) < sx / 2 + 0.03) & (np.abs(p[:, 1] - cy) < sy / 2 + 0.03)),
         "on the base plate": np.hypot(p[:, 0] - b[0], p[:, 1] - b[1]) < 0.09,
         "arm too near": np.minimum(D["clear"].min(0), D["post"].min(0)) < CLEAR_MIN_M,
@@ -465,7 +478,7 @@ def selftest(a):
     render at the scene's first frame."""
     import mujoco
     from lens import LENSES
-    rob = setup(a.base, a.jaw, a.old_start)
+    rob = setup(a.base, a.jaw, a.old_start, a.world)
     names, pos, aim = candidates()
     ax = axes(pos, aim)
     lens = LENSES["base"]
@@ -505,7 +518,7 @@ def render(a):
     import mujoco
     import truss_expert as tx
     from lens import LENSES
-    rob = setup(a.base, a.jaw, a.old_start)
+    rob = setup(a.base, a.jaw, a.old_start, a.world)
     names, pos, aim = candidates()
     pick = [names.index(c) for c in a.cams.split(",")]
     ax = axes(pos, aim)
@@ -563,6 +576,7 @@ if __name__ == "__main__":
         s.add_argument("--base", default="0.37,0.20")
         s.add_argument("--jaw", default="v5", choices=scene.JAWS)
         s.add_argument("--old-start", action="store_true", help="keep scene.START_NORM (else base_grid.find_start)")
+        s.add_argument("--world", choices=("v5", "v6"), default=None, help="the dataset world (truss_scene.WORLDS)")
         s.add_argument("--seeds", required=True, help="a:b (range) or a comma list")
         if name != "selftest":
             s.add_argument("--out", required=True)
