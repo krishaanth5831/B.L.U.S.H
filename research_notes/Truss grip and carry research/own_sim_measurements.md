@@ -572,6 +572,14 @@ deck spot of section 24, seed 10017026) it reports the arm inside it in 79 frame
 where the carried truss of seed 10023057 passed, it reports that truss's fruit inside it from frame 207. So no old
 episode has to be left out because of the new upright. (`outputs/v6/cams/fine_arm_*`, `fine_plants_*`,
 `touch_trio.*`.)
+- ⚠️ The other way round (`touch --rig base --cams base`: the old bracket the episodes were recorded with, which
+  the re-made pictures no longer show): the arm never touched it (0 of the 15 episodes that came within 2.5 cm),
+  a fruit did in **3 of the 85** episodes that came within 4 cm: seed 10000046 (the carried truss, 3 frames,
+  0.9 mm deep), 10021000 (the target truss, 6 frames, 0.7 mm) and 10020046 (a neighbour's fruit resting against
+  the housing through 446 frames, 0.1 mm). In those 3 re-made episodes a fruit is held off by something the
+  pictures do not show; they stay in (grazes of under 1 mm). (`outputs/v6/cams/touch_base_*`.)
+- ⚠️ Queue trap met here: `sim_queue.sh` was edited while a queue ran it and bash read on from the changed file
+  (`unexpected EOF`, exit 2). The jobs are their own units and finished; only the queue script stopped.
 
 **The start frame of all 800 old episodes through the three-camera path** (`remake_pictures.py dry --start-only
 --shard i/4`): 799 rebuild as recorded (the model's size, the target, the first frame's joint readings). In all 735
