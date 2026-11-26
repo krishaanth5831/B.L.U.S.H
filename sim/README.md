@@ -229,6 +229,49 @@ makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of th
 dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
 lists the settings that do) and pass live pictures through the same step at test time.
 
+### Dataset v6: three cameras, the old 800 re-made + 600 new (prepared 2026-11-26/27, ⚠️ NOT RUN: needs K7's go)
+
+K7 2026-11-26: the teacher, the gripper and the base stay; "more varied episodes", "3 cameras instead of 2 but also
+placed in a more calculated location", the post-mortem's fixes, "another 600 episodes on top of the previous 800".
+Measurements and choices: `research_notes/Truss grip and carry research/own_sim_measurements.md` sections 21-27.
+
+- **Rig `trio`** = cameras `high`, `low`, `claw` (`scene.CART_CAMS`): both fixed cameras on one upright 35 cm to the
+  left of the arm base and 10 cm toward the row, lenses 42 cm and 5 cm above the deck. `high` gives the cue numbers.
+- **World** `crate23` (v5's 23 x 28 crate), scenes decided with the old camera bracket standing in them and shown
+  with the new ones: every v6 command takes `--world crate23 --rig trio --layout-rig base` (the recorder, the
+  re-make, `base_grid.py`, `view_scene.py`); `eval_truss.py` takes the rig from the checkpoint and needs
+  `--world crate23 --layout-rig base`.
+- **The old 800 get the new cameras** from the logged simulator states (`remake_pictures.py`; 799 of them: v5
+  episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ `~/.cache/blush_sim/states` is the only copy of those states.
+- **The 600 new** come from seed plans (`scripts/v6_seed_plan.py` on a census of fresh seeds 10100000-10104499):
+  old + new together level over where the truss hangs (4 row parts x 3 heights), 60 of them nothing-ripe.
+  Each scene starts up to 3 deg off the start pose, drawn again until the arm is clear (`--start-jitter-deg 3`).
+- Pictures are stored so that a frame depends on its own picture only (`picture_store.py`), and every dataset
+  carries a gate file that `merge_parts.py` checks.
+
+```bash
+python view_scene.py --cams --rig trio --world crate23 --layout-rig base --seed 10023030   # look at it (window)
+# read-only rehearsals (these HAVE run): the re-make's path on old episodes, the recorder's on a seed plan
+python remake_pictures.py dry --shots ../outputs/v6/remake_dry/shots
+python generate_truss.py --teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
+    --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds ../outputs/v6/seed_plan_v6/p00.jsonl \
+    --seed-start 10100000 --episodes 25 --dry --repo-id krish5831/v6_dry
+# after K7's go (from the repo root; <name> = K7's choice, never blush_sim_teacher_v5). First one part of each:
+sim/scripts/remake_parts.sh krish5831/<name>_old 0 1 1
+GEN_ARGS="--teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 --start-jitter-deg 3 \
+    --noise-share 0.5 --retries 6" SEEDS_DIR=outputs/v6/seed_plan_v6 \
+    sim/scripts/record_parts.sh krish5831/<name>_new 10100000 0 1 1
+python sim/merge_parts.py krish5831/<name>_trial krish5831/<name>_old krish5831/<name>_new   # merges + runs the gate
+# then the rest, three workers each (remake: parts 0-31, record: parts 0-23), and the real merge
+for w in 0 1 2; do nohup sim/scripts/remake_parts.sh krish5831/<name>_old $w 3 32 & done
+for w in 0 1 2; do GEN_ARGS="..." SEEDS_DIR=outputs/v6/seed_plan_v6 \
+    nohup sim/scripts/record_parts.sh krish5831/<name>_new 10100000 $w 3 24 & done
+python sim/merge_parts.py krish5831/<name> krish5831/<name>_old krish5831/<name>_new
+```
+
+Training: `sim/colab_train_act_v6.ipynb` (batch 64, learning rate 3e-5 constant, dropout 0; its cell 4 runs the
+gate). Tests: `EXTRA="--world crate23 --layout-rig base --start-guard --clip-actions" sim/scripts/colab_tests.sh ...`.
+
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
 The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in
