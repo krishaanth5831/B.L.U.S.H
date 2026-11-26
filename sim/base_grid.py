@@ -155,6 +155,7 @@ def attempt_record(plan, why, where):
                 release=None if rp is None else [round(float(x), 3) for x in rp],
                 fallback=str(m.get("release_fallback")), swing_deg=m.get("release_swing_deg"),
                 align_deg=m.get("carry_align_deg"), detour=str((m.get("detours") or {}).get("to_crate")),
+                detour_in=str((m.get("detours") or {}).get("to_standoff")),
                 why=str(why)[:120], damage=where)
 
 
@@ -263,7 +264,8 @@ def main():
                     rec.update(phase=plan.meta.get("phase"), crate_slack_mm=plan.meta.get("crate_slack_mm"),
                                release_fallback=plan.meta.get("release_fallback"),
                                release_swing_deg=plan.meta.get("release_swing_deg"),
-                               release_pool=plan.meta.get("release_pool"))
+                               release_pool=plan.meta.get("release_pool"),
+                               detours={k: str(v) for k, v in (plan.meta.get("detours") or {}).items()})
                 pl = np.array(tt.POOL_LOG or [(0, 0)])
                 rec["fits"] = dict(n=len(tt.POOL_LOG), capped_empty=int((pl[:, 1] == 0).sum()),
                                    median_fit=float(np.median(pl[:, 0])), median_capped=float(np.median(pl[:, 1])))

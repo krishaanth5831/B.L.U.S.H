@@ -35,6 +35,8 @@ CASES_PER_SEED = 6     # distinct blocked carries per scene that get an RRT run 
                        # hits thousands, mostly the same retreat ends and release poses again)
 ITERS = 8000           # RRT iterations per try, 2 tries (via_search.py's numbers)
 KEY_ROUND = 2          # cases are the same when retreat end + pose above the crate agree to this many decimals (rad)
+ESCAPES = 300          # start not free: random poses tried as a first hop off it (guess)
+ESC_RAD = 0.35         # ... each joint within this of the retreat's end (20 deg, guess)
 
 
 def setup(base, jaw, old_start=False):
@@ -73,9 +75,47 @@ def run(a):
     if a.mode == "score":
         cands = json.load(open(a.cands))
     out = open(a.out, "w")
-    st = dict(seed=None, seen=set(), rows=[])
+    st = dict(seed=None, seen=set(), rows=[], control=0)
+
+    def routed(self, cchk, xa, xb, seed3, kw):
+        """(route or None, facts) for one carry xa -> xb. ⚠️ rrt.plan gives up at once when xa or xb touches
+        something, but the teacher's own moves never check a path's first way-point (Checker.path_ok). So when only
+        the start touches: a first hop off it by the teacher's rule (segment_free skips its first point) onto a free
+        pose within ESC_RAD, and the RRT from there. No hop found = no via-pose can help either, the retreat's end is
+        the blocker."""
+        hs, hg = cchk.hits(xa, **kw), cchk.hits(xb, **kw)
+        facts = dict(start_free=not hs, goal_free=not hg, start_hits=sorted(hs)[:6], goal_hits=sorted(hg)[:6])
+        q0, path = xa, None
+        if hs and not hg:
+            rng = np.random.default_rng([*seed3, 99])
+            q0 = None
+            for _ in range(ESCAPES):
+                q = np.clip(xa + rng.uniform(-ESC_RAD, ESC_RAD, 5), self.lo, self.hi)
+                if cchk.free(q, **kw) and cchk.segment_free(xa, q, **kw):
+                    q0 = q
+                    break
+            facts.update(escape=q0 is not None)
+        if q0 is not None and not hg:
+            for k in range(2):
+                path = rrt.plan(cchk, q0, xb, np.random.default_rng([*seed3, k]), lo=self.lo, hi=self.hi,
+                                iters=ITERS, **kw)
+                if path is not None:
+                    break
+            if path is not None and q0 is not xa:
+                path = [xa] + list(path)
+        return path, facts
 
     def wrapped(self, rel, ret, opt, cchk, r, alternate, extra=False):
+        n5 = lambda q: self.fm.rad_to_norm(np.r_[q, 0.0])[:5].round(2).tolist()   # noqa: E731
+        if a.control and st["control"] < a.control:      # a carry the teacher CAN do: does the RRT find one too?
+            xa, xb = np.asarray(ret[-1], float), np.asarray(rel[1], float)
+            kw = dict(soft_clearance=tx.CARRY_CLEAR_MIN_M)
+            fm_path, label = self.free_move(xa, xb, cchk, r, extra=extra, **kw)
+            if fm_path is not None:
+                st["control"] += 1
+                path, facts = routed(self, cchk, xa, xb, [st["seed"], 500 + st["control"]], kw)
+                st["rows"].append(dict(seed=st["seed"], control=True, teacher=str(label), rrt=path is not None,
+                                       via=[] if path is None else [n5(x) for x in path[1:-1]], **facts))
         res = orig(self, rel, ret, opt, cchk, r, alternate, extra=extra)
         if res != "retreat -> crate blocked, via-pose too" or len(st["seen"]) >= CASES_PER_SEED:
             return res
@@ -85,17 +125,11 @@ def run(a):
             return res
         st["seen"].add(key)
         kw = dict(soft_clearance=tx.CARRY_CLEAR_MIN_M)        # free_move's looser clearance, the last it tries
-        n5 = lambda q: self.fm.rad_to_norm(np.r_[q, 0.0])[:5].round(2).tolist()   # noqa: E731
         row = dict(seed=st["seed"], case=len(st["seen"]) - 1, retreat_end=n5(xa), above_crate=n5(xb),
                    soft_clearance=self.kw.get("soft_clearance"))
         if a.mode == "collect":
-            path = None
-            for k in range(2):
-                path = rrt.plan(cchk, xa, xb, np.random.default_rng([st["seed"], row["case"], k]), lo=self.lo,
-                                hi=self.hi, iters=ITERS, **kw)
-                if path is not None:
-                    break
-            row.update(rrt=path is not None, via=[] if path is None else [n5(x) for x in path[1:-1]])
+            path, facts = routed(self, cchk, xa, xb, [st["seed"], row["case"]], kw)
+            row.update(rrt=path is not None, via=[] if path is None else [n5(x) for x in path[1:-1]], **facts)
         else:
             V = [self.fm.norm_to_rad(np.r_[v, 0.0])[:5] for v in cands]
             old = self.vias() + (self.vias_v5() if extra else [])
@@ -110,7 +144,7 @@ def run(a):
 
     tt.TrussTeacher._via = wrapped
     for seed in seeds_of(a.seeds):
-        st.update(seed=seed, seen=set(), rows=[])
+        st.update(seed=seed, seen=set(), rows=[], control=0)
         rob.new_scene(seed, log=False)
         rob.get_observation()
         if rob._tgt_k is None:
@@ -124,10 +158,10 @@ def run(a):
         if a.scenes:                        # one line per scene: did it plan, and why not (the census of this run)
             with open(a.scenes, "a") as f:
                 f.write(json.dumps(dict(seed=seed, planned=planned, why=why)) + "\n")
-        if not planned or a.all:            # the vias are for scenes with no plan at all (--all: every scene)
-            for row in st["rows"]:
+        for row in st["rows"]:              # the vias are for scenes with no plan at all (--all: every scene);
+            if not planned or a.all or row.get("control"):          # control rows always
                 out.write(json.dumps(dict(row, planned=planned)) + "\n")
-            out.flush()
+        out.flush()
         print(f"{seed}: plan {planned}, {len(st['rows'])} blocked carries", flush=True)
     rob.disconnect()
 
@@ -143,4 +177,7 @@ if __name__ == "__main__":
     ap.add_argument("--all", action="store_true", help="keep the cases of scenes that found a plan too")
     ap.add_argument("--old-start", action="store_true", help="keep scene.START_NORM (the old setup: --base 0.37,0.20)")
     ap.add_argument("--scenes", help="append one line per scene here: seed, planned, why not")
+    ap.add_argument("--control", type=int, default=0,
+                    help="collect: also run the RRT on the first N carries per scene that the teacher CAN do (rows "
+                         "with control=true): the check that 'no route' is not the search's own fault")
     run(ap.parse_args())

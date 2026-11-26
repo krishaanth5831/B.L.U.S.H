@@ -117,7 +117,19 @@ VIA_NORM_V5 = ((-48.1, -35.1, -61.0, 88.0, 42.8),   # unblocked 7 of the 18 scen
 # via-poses, found as before from offline RRT routes (whatif/via_search.py with VIA_EXTRA=1 for the way in,
 # whatif/via_search_crate.py for the carry) on scenes 9740000+, which nothing else uses. ⚠️ Used ONLY in a last pass
 # after phase C found nothing more (_search_plans), so a scene that had a plan keeps exactly that plan; alone or
-# chained with any other via ("v5b:<i>", "v5b:<i>-<j>"). Empty = off (the teacher as it was).
+# chained with any other via ("v5b:<i>", "v5b:<i>-<j>").
+# The search (outputs/v6/via_old/, notes section 20): 294 scenes with a target, 33 with no plan. The way in: 329
+# blocked candidates in 29 scenes, an RRT route for 116 of them in 18 scenes; 247 candidate poses, 6 of the 29 scenes
+# cleared by one of them alone or chained with one existing via; kept greedily by new scenes unblocked: 3, 2, 1. The
+# carry: no pose found (notes section 20).
+# Scored (same scenes, same seeds, retries 6): tuning 9730000-179 155 -> 159 of 180, fresh 9730180-359 143 -> 145,
+# none lost; 7 no-plan scenes get a plan, 6 of them succeed. A scene with no plan takes about twice as long to give up.
+VIA_NORM_V5B_FOUND = ((3.0, -48.0, 63.6, -15.7, 60.8),      # unblocked 3 of the 29 search scenes
+                      (-94.3, -59.1, 65.7, -18.6, 20.8),    # +2
+                      (-23.3, -26.3, 52.2, -65.2, 5.1))     # +1
+# OFF (K7 2026-11-26, before the result: "if this test doesnt seem to give good results then we ... just stick with
+# this teacher"): +6 of 360 is not that. Empty = the teacher as it was (30 tuning scenes reproduce record for record,
+# r33). To use the poses: VIA_NORM_V5B = VIA_NORM_V5B_FOUND.
 VIA_NORM_V5B = ()
 # --- timing: fixed, the middle of v2's ranges ---
 CLOSE_S = 0.65                             # v2 0.5-0.8
