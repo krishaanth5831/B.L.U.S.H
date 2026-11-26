@@ -228,8 +228,7 @@ ripe, and so the target, is not:
 - Without the neighbour-swing rule (second reading only): 87 % against 84 %.
 - Base 0.34/0.14 was picked on the plan rate (plan-only census 91 %) and the claw camera's angle to the row (11 deg),
   with scores that could not be told apart at 30 scenes (21-23 of 30). Going back is the owner's decision.
-- Queued 2026-11-26 12:27: new jaw with the old teacher's logic on the old base and start pose, aim 2 mm (r23) and
-  aim 8 mm (r24). The "slide wide, move over" variant (r20) is paused at 28 of 180 scenes.
+- New jaw on the old base and start pose: section 16.
 
 ## 15. Where the truss is when the jaw opens over the crate (`whatif/release_trace.py`)
 
@@ -247,3 +246,33 @@ teacher logic:
 - ⚠️ This reads today's teacher logic (the `V6_*` changes), not the jaw alone: section 10's first plans miss the crate
   18 times with the old logic and 33 times with today's. The run that separates the two is r21 (new jaw, old logic,
   aim 2 mm).
+
+## 16. New jaw with the old teacher's logic, both bases, both aims (r18, r21, r23, r24; 2026-11-26)
+
+All on the 180 tuning scenes, up to 6 retries, crate 30 x 28. "Old logic" = `{"V6_TEACHER": false, "V6_CARRY":
+["rigid", 0]}`; aim = `V6_AIM_FROM_PAD_M`; old base = `--base 0.37,0.20 --old-start`.
+
+| Jaw | Teacher logic | Stalk aimed | Old base and old start pose | Base 0.34/0.14 and its start pose |
+|---|---|---|---|---|
+| Old | old | 1 mm off the fixed pad | 155 = 86.1 % (first plan 139) | 141 = 78.3 % (106) |
+| New | old | 8 mm | 142 = 78.9 % (110) | 122 = 67.8 % (75) |
+| New | old | 2 mm | 145 = 80.6 % (114) | 128 = 71.1 % (77) |
+| New | today's (`V6_*` on) | 8 mm | not run | 120 = 66.7 % (73) |
+| New | today's (`V6_*` on) | 2 mm | not run | 131 = 72.8 % (73) |
+
+- **Where the arm stands is the largest effect, for either jaw:** old base against 0.34/0.14 is +14 scenes with the
+  old jaw, +20 with the new jaw at 8 mm (won 48, lost 28) and +17 at 2 mm (won 44, lost 27). On the scenes with the
+  same target truss (section 12): 37 against 33 of 49, and 43 against 36 of 50.
+- **The jaw's gap on the old base:** 13 scenes at 8 mm (won 2, lost 15), 10 scenes at 2 mm (won 3, lost 13). Same
+  target truss only: 132 against 141 of 160 (won 0, lost 9) and 138 against 143 of 163 (won 1, lost 6), so 85 %
+  against 88 % with the closer aim.
+- **What the new jaw still loses on the old base (2 mm):** own fruit knocked off with the truss in hand in 9 scenes
+  (to the crate 6, lowering 2, 1 other) against 1 with the old jaw; plans that lose own fruit 82 against 25. No plan
+  is the same for both jaws (24 against 23: slide hits 10, no IK along the slide 9, retreat -> crate blocked 4).
+- **The closer aim, three paired readings:** old base +3 (won 9, lost 6; same target won 4, lost 3); base 0.34/0.14
+  with the old logic +6 (won 17, lost 11; first half 54 -> 62, held-out half 68 -> 66; same target won 10, lost 10);
+  with today's logic +11 (section 13). Never worse on all 180, never confirmed on a held-out half or on the same
+  trusses. It does end the cut-stage failures in every run (old base: 1 -> 0; 0.34/0.14 old logic: 6 -> 0).
+- **The `V6_*` teacher changes as a package:** nothing measurable at 0.34/0.14 (aim 8 mm: won 12, lost 14; aim 2 mm:
+  won 13, lost 10). Not run on the old base.
+- Without the neighbour-swing rule (second reading only), old base: old jaw 87 %, new jaw 83 % at either aim.
