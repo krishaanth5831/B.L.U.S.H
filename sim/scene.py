@@ -194,10 +194,35 @@ BASE_CAM_AIM = (0.34, 0.37, 0.22)   # middle of the truss band's cut points (tru
 BASE_POST_R = 0.008                  # bracket post from the table to the camera housing (printed, guess)
 # Cart cameras (rig "trio": two fixed cameras + the claw, K7 2026-11-26 "3 cameras instead of 2 but also placed in a
 # more calculated location and position"). name: (offset from ARM_BASE, aim in world coordinates), as the base camera.
-# ⚠️ PROVISIONAL until the pick is made (whatif/camera_score.py on dataset v5's own scenes): do not record with these.
+# The pick (2026-11-26, own_sim_measurements.md section 24): both on ONE upright at the cart's far left on the row
+# side, 35 cm to the left of the arm base and 10 cm toward the row. From whatif/camera_score.py on dataset v5's own
+# 734 cut scenes (world crate23, old start) and whatif/camera_sweep_logs.py on its 800 recorded episodes:
+#   - every spot nearer the arm was in the way in the recorded episodes: the best-scoring one (on the deck by the
+#     crate) had the arm within 4 cm in 561 of 800 episodes and through it. At this upright the arm never came under
+#     4 cm (nearest 4.5 cm) and no plant or carried truss under 7 cm (sweeps of every 4th frame; section 24 has the
+#     fine ones).
+#   - "high" (lens 42 cm above the deck top; first in the rig, so the cue numbers are its): sees the cut point at
+#     the start in 98 % of the scenes (the base camera: 79 %), the stalk and a blade just before the cut in 98 %
+#     (57 %), and has the cut point inside the picture in all 734.
+#   - "low" (5 cm): 85 % and 56 %, inside the picture in all 734. Together: one of the two sees stalk and blade just
+#     before the cut in 99 % and at the cut in 95 %; their lines of sight cross at 61 deg (median).
+# Aims: per camera the best of the scorer's aim grid (on the stems' line y 0.37).
+# ⚠️ At x 0.02 the post and the housings' backs reach 3-6 mm into the simulated house's end frame (ply at x <= 0:
+#   the base tie below 3 cm). Static on static and behind both lenses, so nothing collides or shows. 0.02 is the
+#   position that was scored and swept; 1 cm further in would leave the arm under 4 cm.
+# ⚠️ With both on one upright, "high"'s post runs through "low"'s housing, 1-2 cm behind its lens: one post in real
+#   life too. Neither bracket shows in the other's picture (checked on the re-make's first pictures, section 24).
+# ⚠️ Real cart: an upright on an outrigger batten that reaches 21 cm past the deck's left end (the deck ends 14 cm
+#   from the arm base). On the plank rig as designed (hardware/greenhouse/pipe_rail_rig/README.md: end frames about
+#   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame, and arm B needs the mirror image at the other end.
+#   Nothing built, nothing checked on hardware.
+# ⚠️ Height of "high": 0.42 stands above the truss band (cut points 0.13-0.31 m), where a real crop has leaves (the
+#   plank rig has none). At 0.34 on the same post the pair still sees stalk and blade before the cut in 95 % (99 %
+#   here) and at the cut in 91 % (95 %). The owner's call; moving the lens down the post later is a re-render from
+#   the state logs (remake_pictures.py), not a re-recording.
 CART_CAMS = {
-    "low": ((-0.35, 0.10, 0.05), (0.34, 0.37, 0.22)),
-    "high": ((-0.35, 0.00, 0.34), (0.34, 0.37, 0.22)),
+    "high": ((-0.35, 0.10, 0.42), (0.30, 0.37, 0.22)),
+    "low": ((-0.35, 0.10, 0.05), (0.34, 0.37, 0.26)),
 }
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
 CLAW_FOVY = LENSES["claw"].fovy

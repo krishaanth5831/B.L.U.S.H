@@ -127,7 +127,7 @@ def cameras(path):
 
 def trained_on(path):
     """(dataset repo id, rig) a checkpoint was trained on: the rig whose fixed cameras (cameras.RIG_FIXED) are all
-    among its inputs ("trio": low + high, "base": base), else "birdseye"; the dataset from its train_config.json."""
+    among its inputs ("trio": high + low, "base": base), else "birdseye"; the dataset from its train_config.json."""
     have = {c.split(".")[-1] for c in cameras(path)}
     rig = next((r for r in ("trio", "base") if set(RIG_FIXED[r]) <= have), "birdseye")
     cfg = path / "train_config.json"

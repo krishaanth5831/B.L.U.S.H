@@ -48,8 +48,8 @@ class SO101MujocoConfig(RobotConfig):
     #               picked on the birdseye's first frame (the truss YOLO was trained on birdseye views); its box + cut
     #               point go onto the base camera from the sim's truth. The claw camera stays clean (SockBot: a box on
     #               the wrist camera is noise).
-    #   "trio"      low + high + claw (K7 2026-11-26): two fixed cameras on the cart (scene.CART_CAMS), each with
-    #               the target's box + cut point as it sees them; the cue numbers come from the first ("low").
+    #   "trio"      high + low + claw (K7 2026-11-26): two fixed cameras on the cart (scene.CART_CAMS), each with
+    #               the target's box + cut point as it sees them; the cue numbers come from the first ("high").
     rig: str = "birdseye"
     # Re-making an old dataset's pictures with another rig's cameras: the rig whose camera brackets stood in the scene
     # when the seed's plants and ripe truss were decided ("base" for dataset v5). The scene is decided with those

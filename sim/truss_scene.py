@@ -3,7 +3,7 @@
     m, d, info = build(seed)            the greenhouse, 4-5 stems with 2-3 trusses each, the cut-and-hold arm
     build(seed, hold=True)              nothing ready ("stay home" episodes)
     build(seed, base_mount=True)        + the base camera's bracket (rig "base")
-    build(seed, mounts=("low", "high")) + the cart cameras' brackets (rig "trio", cameras.RIG_FIXED)
+    build(seed, mounts=("high", "low")) + the cart cameras' brackets (rig "trio", cameras.RIG_FIXED)
     info["trusses"]                     truss.truss_xml infos, each with "ready", "cut_ik" (a cut pose exists)
     info["ready"]                       indices of the ready trusses the arm can cut (1-2 per scene)
     in_crate(info, d, m, k)             every fruit of truss k inside the (bigger) truss crate

@@ -408,7 +408,7 @@ def main():
                          "and no test can reproduce it. Only to rebuild an old dataset as it was.")
     ap.add_argument("--rig", default="base", choices=tuple(cameras.RIG_CAMERAS),
                     help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, base + claw (2026-11-06), or "
-                         "trio = low + high + claw (2026-11-26)")
+                         "trio = high + low + claw (2026-11-26)")
     ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
                     help="the world (truss_scene.WORLDS: the crate, and with it every seed's plants). crate23 = "
                          "dataset v5's 23 x 28 cm crate: episodes added to that dataset must be recorded in it "

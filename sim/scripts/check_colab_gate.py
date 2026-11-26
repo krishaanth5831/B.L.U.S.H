@@ -26,7 +26,7 @@ NOTEBOOK = HERE.parent / "colab_train_act_v6.ipynb"
 CELL = 4
 
 
-def tiny(root, cfg, cams=("low", "high", "claw")):
+def tiny(root, cfg, cams=("high", "low", "claw")):
     """A two-episode dataset of the test pictures with the recorder's gate file, as picture_store.gatecheck's."""
     from lerobot.datasets import LeRobotDataset
     P = ps.test_pictures()

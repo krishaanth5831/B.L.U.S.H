@@ -439,3 +439,72 @@ poses stay in the code as `VIA_NORM_V5B_FOUND`.
 
 Not run: the recorder with the gate (`generate_truss.py`, any rig), `remake_pictures.py part`, `check_plugin.py`'s
 trio block (it writes a 3 s throwaway dataset), the notebook itself, a rollout of a trio policy.
+
+## 24. Where the two fixed cameras go (rig "trio"), 2026-11-26 night
+
+Owner: "3 cameras instead of 2 but also placed in a more calculated location and position", and full autonomy for
+the placement. Tools: `sim/whatif/camera_score.py` (collect, rank, render) and `sim/whatif/camera_sweep_logs.py`.
+
+**How it was scored.** On dataset v5's own cut scenes (734 of them rebuilt, world `crate23`, old start), every
+candidate lens position on a grid over the cart (deck 238 mm wide centred on the arm base, plus an outrigger past
+its left end; the row side of the carry zone and the crate left out), each with a small grid of aims. Per scene and
+camera, from the simulator's geometry with the real lens model (72 x 52 deg, 640 x 480):
+- **start**: the cut point is seen at the start frame (not hidden, at least 1 px per mm);
+- **before the cut / at the cut**: the stalk and a blade are both seen at those two arm poses;
+- **in the picture**: the cut point falls inside the frame at the start (else the cue box is empty);
+- for a pair: at least one sees stalk and blade; the angle their lines of sight cross at; how far the cut point's 3D
+  position moves when each picture is 5 px off.
+A position is dropped when the lens or its post comes within 4 cm of the arm or of a plant at those poses. The
+claw camera for reference: it sees the cut point at the start in 0 % of the scenes and just before the cut in 99 %.
+
+**Then the recorded motion.** The poses above miss the way in between and the carry, so each surviving position's
+post was swept against the 800 recorded episodes' state logs (arm: all 800, every 4th frame; plants and the carried
+truss: 75 episodes spread over every target slot, every 3rd frame):
+
+| Spot | Arm: nearest | Arm: episodes under 4 cm | Plants / carried truss: nearest |
+|---|---|---|---|
+| Today's base camera bracket | 2.2 cm | 291 of 800 | 0.6 cm (under 4 cm in 8 of 75) |
+| Best score before the sweep: on the deck by the crate (`g_0.47_0.10_0.34`) | through it (-2.0 cm) | 561 of 800 | |
+| Outrigger, 30 cm left of the arm, row side, lens 34 cm up (`g_0.07_0.30_0.34`) | 0.1 cm | 174 of 800 | |
+| Outrigger, 35 cm left, 0-10 cm toward the row, above 10 cm (`g_0.02_0.10..0.20`) | 4.6 cm | 0 | 1.8 cm (one carry, seed 10000046) |
+| **Chosen upright: 35 cm left, 10 cm toward the row (`g_0.02_0.30`), lens at 5 cm** | 10.9 cm | 0 | 9.1 cm |
+| **the same upright, lens at 34-50 cm** | 4.5 cm (seed 10005040) | 0 | 7.1 cm (seed 10009015) |
+
+After both sweeps 19 grid positions are left with the lens at or below 34 cm (21 up to 50 cm); all but five of them
+are on the outrigger 35 cm to the arm's left. Nothing between the arm and the row survives: the arm folds out to
+its left on the way to a truss and the carried truss swings through the middle.
+
+**What each camera sees** (share of the 734 scenes; aim = the best of the aim grid):
+
+| Camera | Lens (x, y, z) m | Start | Before the cut | At the cut | In the picture | px per mm (median, least) |
+|---|---|---|---|---|---|---|
+| Today's base camera | 0.09, 0.26, 0.10 | 79 % | 57 % | 50 % | 94 % | 1.8, 1.2 |
+| Birdseye (not recorded since rig `base`) | 0.37, -0.15, 0.34 | 27 % | 7 % | 7 % | 100 % | 1.0, 0.8 |
+| **low** | 0.02, 0.30, 0.05 | 85 % | 56 % | 54 % | 100 % | 1.5, 1.1 |
+| high at 0.34 | 0.02, 0.30, 0.34 | 97 % | 90 % | 74 % | 99.7 % | 1.6, 1.1 |
+| **high (0.42)** | 0.02, 0.30, 0.42 | 98 % | 98 % | 76 % | 100 % | 1.4, 1.0 |
+| high at 0.50 | 0.02, 0.30, 0.50 | 97 % | 99 % | 79 % | 100 % | 1.3, 1.0 |
+
+| Pair on the one upright | Both see the cut point at the start | One sees stalk + blade before the cut | at the cut | Crossing angle | 3D point moves (median, 90 %) |
+|---|---|---|---|---|---|
+| low + high at 0.34 | 82 % | 95 % | 91 % | 49 deg | 5, 10 mm |
+| **low + high at 0.42** | 83 % | 99 % | 95 % | 61 deg | 4, 8 mm |
+| low + high at 0.50 | 83 % | 100 % | 95 % | 71 deg | 4, 7 mm |
+
+**The pick** (`scene.CART_CAMS`, rig order high, low, claw): one upright 35 cm to the left of the arm base and
+10 cm toward the row; **high** with its lens 42 cm above the deck top, aimed at (0.30, 0.37, 0.22); **low** at 5 cm,
+aimed at (0.34, 0.37, 0.26). High is first in the rig, so the six cue numbers are its.
+- Against today's base camera: the cut point is seen at the start in 98 % instead of 79 %, stalk and blade just
+  before the cut in 98-99 % instead of 57 %, and the post is out of the arm's way (today's bracket had the arm
+  within 4 cm in 291 of the 800 recorded episodes).
+- ⚠️ 0.42 or 0.34 for the high lens is the owner's call. 0.42 is above the truss band (cut points 0.13-0.31 m),
+  where a real crop has leaves; the plank rig has none. The gain of 0.42 over 0.34 is small (the pair's rows
+  above). Both are the same post, so changing it later is a re-render from the state logs, not a re-recording:
+  the new episodes must be recorded with state logging on.
+- ⚠️ Real cart: an upright on an outrigger batten reaching 21 cm past the deck's left end. On the plank rig as
+  designed the end frames stand about 225 mm from the arm, so this upright is 12.5 cm outside the end frame, and
+  arm B needs the mirror image at the other end. Nothing is built.
+- ⚠️ In the simulated house the post and the housings' backs reach 3-6 mm into the end frame's ply (x <= 0), behind
+  both lenses; and high's post runs through low's housing (one post).
+- Files: `outputs/v6/cams/v5_*.npz` (the scores), `rank_v5_sweep.txt` / `rank_v5_sweep_z50.txt` (lens up to 0.34 /
+  0.50 m), `sweep_arm_v5.*`, `sweep_plants_v5.*`, `sheet_candidates.png` (pictures).
