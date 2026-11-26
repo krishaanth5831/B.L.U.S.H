@@ -43,6 +43,10 @@ MIN_SUPPLY = 1.8        # a cell is planned only as far as the census has this m
 #                         kept). Dataset v5's recording kept 60-83 % per cell, the lowest x2z2 60 % and x3z0 61 %
 #                         (its attempt logs; the refused scenes' cells from the logged cut_x and the cue pixel
 #                         against the kept ones, 96 % right on those; 2026-11-27), so 1.6 was too tight for two cells
+# the share of built scenes the teacher kept in dataset v5's recording, per cell (same source as MIN_SUPPLY's: 734
+# kept, 308 refused). Only used to say how many episodes the lists should give (expected_kept), not to plan
+KEEP_RATE = {"x0z0": 0.83, "x1z0": 0.75, "x2z0": 0.66, "x3z0": 0.61, "x0z1": 0.80, "x1z1": 0.83, "x2z1": 0.65,
+             "x3z1": 0.68, "x0z2": 0.68, "x1z2": 0.70, "x2z2": 0.60, "x3z2": 0.67}
 
 
 def census(files):
@@ -84,6 +88,12 @@ def level(old, n, cap):
             break
         want[min(free, key=lambda c: (old[c] + want[c], c))] += 1
     return want
+
+
+def expected_kept(q, n, p):
+    """The mean of min(q, Binomial(n, p)): the episodes n listed seeds give toward a quota of q when the teacher
+    keeps a scene with chance p."""
+    return sum(min(q, k) * math.comb(n, k) * p ** k * (1 - p) ** (n - k) for k in range(n + 1))
 
 
 def kept_so_far(logs):
@@ -168,9 +178,9 @@ def main():
     if capped:
         print(f"\n⚠️ held back by the census ({a.min_supply} seeds per episode): {capped}. Their share went to the "
               f"other cells; more census seeds would level them further")
-    if a.dry or a.out is None:
-        return
-    a.out.mkdir(parents=True, exist_ok=True)
+    write = not (a.dry or a.out is None)       # --dry deals the seeds too (for the expected count), writes nothing
+    if write:
+        a.out.mkdir(parents=True, exist_ok=True)
     # the nothing-ripe seeds first, out of the pools (any scene can be one): scenes with no ripe truss, then from the
     # far end of the cells with the most seeds to spare, so no seed is both a hold and a cut episode
     pool = {c: list(v) for c, v in pool.items()}
@@ -187,7 +197,7 @@ def main():
     # has) seeds per episode, dealt in running totals so the last part is not the one left without
     per_ep = {c: min(a.oversupply, len(pool.get(c, [])) / want[c]) for c in CELLS if want[c]}
     given, asked = collections.Counter(), collections.Counter()
-    taken, summary = set(), []
+    taken, summary, expect = set(), [], collections.Counter()
     for k, q in enumerate(parts):
         rows_by = {}
         for c in CELLS:
@@ -198,6 +208,7 @@ def main():
                 given[c] += n
                 assert not taken & {r["seed"] for r in rows_by[c]}
                 taken |= {r["seed"] for r in rows_by[c]}
+                expect[c] += expected_kept(q[c], n, KEEP_RATE[c])
         rows = [r for grp in zip_longest_lists(list(rows_by.values())) for r in grp]
         holds = []
         while len(holds) < q["hold"] + 2 and q["hold"]:
@@ -210,20 +221,32 @@ def main():
         step = max(1, len(rows) // (len(holds) + 1))
         for i, h in enumerate(holds):                      # the holds spread through the list
             rows.insert(min(len(rows), (i + 1) * step + i), h)
-        f = a.out / f"p{a.first_part + k:02d}.jsonl"
-        with open(f, "w") as out:
-            out.write(json.dumps(dict(quota={c: int(n) for c, n in q.items() if n}, part=a.first_part + k,
-                                      made_by="sim/scripts/v6_seed_plan.py", episodes=int(sum(q.values())))) + "\n")
-            for r in rows:
-                out.write(json.dumps(r) + "\n")
-        summary.append(dict(part=a.first_part + k, file=f.name, episodes=int(sum(q.values())), seeds=len(rows),
+        name = f"p{a.first_part + k:02d}.jsonl"
+        if write:
+            with open(a.out / name, "w") as out:
+                out.write(json.dumps(dict(quota={c: int(n) for c, n in q.items() if n}, part=a.first_part + k,
+                                          made_by="sim/scripts/v6_seed_plan.py",
+                                          episodes=int(sum(q.values())))) + "\n")
+                for r in rows:
+                    out.write(json.dumps(r) + "\n")
+        summary.append(dict(part=a.first_part + k, file=name, episodes=int(sum(q.values())), seeds=len(rows),
                             quota={c: int(n) for c, n in q.items() if n}))
+    # what the lists should give: a cell of a part ends short when the teacher refuses more of its seeds than the
+    # list has spare (a part's seeds are its own: the parts record side by side)
+    short = {c: want[c] - expect[c] for c in CELLS if want[c]}
+    worst = sorted(short, key=short.get, reverse=True)[:3]
+    print(f"\n{len(taken)} seeds listed. At the keep rates of dataset v5's recording ({min(KEEP_RATE.values()):.0%}-"
+          f"{max(KEEP_RATE.values()):.0%} per cell) the lists should give about {sum(expect.values()):.0f} of the "
+          f"{n_cut} cut episodes, so about {sum(short.values()):.0f} short (most in "
+          f"{', '.join(f'{c} {short[c]:.1f}' for c in worst)}): --topup plans those as one more part")
+    if not write:
+        return
     json.dump(dict(episodes=n_cut + n_hold, cut=n_cut, hold=n_hold, old=dict(old), want={c: int(v) for c, v in
                    want.items()}, pool={c: len(v) for c, v in pool.items()}, oversupply=a.oversupply,
-                   min_supply=a.min_supply, held_back=capped, census=sorted(files), parts=summary),
+                   min_supply=a.min_supply, held_back=capped, census=sorted(files), parts=summary,
+                   expected_cut_kept=round(sum(expect.values()), 1)),
               open(a.out / "plan.json", "w"), indent=1)
-    print(f"\nwrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and plan.json; "
-          f"{len(taken)} seeds listed")
+    print(f"wrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and plan.json")
 
 
 def zip_longest_lists(groups):
