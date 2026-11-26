@@ -211,7 +211,10 @@ target's position). Targets by name:
   aim all 7 passed on their first or second plan.
 - No stale copy of the aim: every user reads it at call time through `truss_ik.cut_point_in_gripper` (IK, carry
   check, hanging model, release fit, the scene builder).
-- The default stays 8 mm until the owner decides.
+- **Default since 2026-11-26: 2 mm** (the owner: "turn on the closer aim"; commit edd5fdb,
+  `truss_ik.V6_AIM_FROM_PAD_M`). ⚠️ "Today's teacher" in sections 10 to 16 means the 8 mm aim of that morning. The
+  reference for the current default is r19: 131/180 = 72.8 %. `BLUSH_V6='{"V6_AIM_FROM_PAD_M": 0.008}'` brings
+  the old aim back.
 - "Slide in 8 mm off, move sideways to 2 mm, then close" (r20: `{"V6_AIM_FROM_PAD_M": 0.002, "V6_MEET_FROM_M":
   0.008}`, today's teacher otherwise): 129/180 = 71.7 %. Against the 8 mm aim: first half 54 -> 62, held-out half
   66 -> 67 (won 18, lost 9). Against the plain 2 mm aim: won 2, lost 4, and two scenes end on a joint stalled at its
