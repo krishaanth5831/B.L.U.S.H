@@ -32,9 +32,14 @@ N_STARTS = 24
 # fixed pad's face at rest (v5 aimed 1 mm off it, which left the stalk ~1 mm of room on the fixed finger's side, the
 # side of 62 of the policy's 86 misses, post-mortem 4.2). From the jaw's own geometry (assets/cut_hold/jaw.json):
 # pad face = face_m + rest_m along the fixed finger's inner normal (+x), y between the two blade planes, z the zone's
-# middle. 8 mm: a first guess inside the 29.5 mm the pads stand apart at the teacher's open angle (25 deg); the catch
-# map (catch_map.py) decides it.
-V6_AIM_FROM_PAD_M = 0.008
+# middle. 2 mm (K7 2026-11-26, "turn on the closer aim"): with the first guess of 8 mm (mid-way in the 29.5 mm the pads
+# stand apart at the teacher's open angle, 25 deg) the closing jaw pushed the still-attached stalk ~11 mm across to the
+# fixed pad and the truss swung into its neighbours: 7 of 180 tuning scenes ended on that, 0 at 2 mm; all 180: 120 ->
+# 131 solved (first 90 scenes 54 -> 64, held-out 90 scenes 66 -> 67; research_notes/Truss grip and carry research/
+# own_sim_measurements.md sections 11, 13, 16). The catch map agrees (held 9 of 9 at 2-5 mm, 4-5 of 9 at 8-11 mm).
+# ⚠️ Costs room on the fixed finger's side, where the v5 policy missed most (post-mortem 4.2): 2 mm against v5's 1 mm.
+# BLUSH_V6 '{"V6_AIM_FROM_PAD_M": 0.008}' (truss_teacher) brings the old aim back for an A/B.
+V6_AIM_FROM_PAD_M = 0.002
 JAW = "v5"                       # set_jaw(): which jaw the solver aims (the planner sets it from its scene model)
 _V6 = None
 

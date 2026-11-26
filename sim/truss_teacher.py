@@ -209,7 +209,9 @@ V6_MEET_FROM_M = None        # None = off: the slide ends at the aim point. A va
 #                              the closing jaw pushes it ~11 mm sideways before the cut (carry_bump_trace.py on the cut
 #                              legs, 8 scenes: the stalk tilts 8-15 deg and the truss swings into its neighbours; v5
 #                              jaw, aimed 1 mm off its pad: 5-8 deg). Catch map (v6): held 9/9 with the stalk 2-5 mm
-#                              from the pad, 4-5/9 at 8-11 mm
+#                              from the pad, 4-5/9 at 8-11 mm. Scored on the 180 tuning scenes: 129, the plain 2 mm
+#                              aim 131 (won 2, lost 4; two scenes end on a stalled joint) -> stays off; the plain
+#                              2 mm aim is the default since 2026-11-26 (truss_ik.V6_AIM_FROM_PAD_M)
 V6_MEET_STEPS = 4            # IK way-points along that sideways move (6 mm: 2 mm apart; design choice)
 V6_CARRY_SCALE = 0.67        # every carry at 0.67 x v4's pace = 0.4 x the joint speed (v5: 0.6, 8-fruit trusses 0.36)
 V6_SETTLE_ABOVE_S = 0.8      # hold above the crate before lowering, so the swing dies down (guess: ~2 swings of a
