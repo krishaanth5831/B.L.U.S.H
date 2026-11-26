@@ -111,6 +111,14 @@ VIA_NORM = ((-59.0, -44.0, 8.0, -34.0, 6.0),     # grip (0.27, 0.29, 0.46): high
 VIA_NORM_V5 = ((-48.1, -35.1, -61.0, 88.0, 42.8),   # unblocked 7 of the 18 scenes
                (-92.6, -49.7, 77.8, -52.0, 5.3),    # +2
                (-55.0, -41.9, 74.0, -26.4, 17.6))   # +1
+# Round 3 (K7 2026-11-26: "apply changes 3 and 4 and see what it does"), old setup (jaw v5, base 0.37/0.20, old start
+# pose, crate 30 x 28): at 86 % (155 of 180 tuning scenes) the teacher fails by finding NO plan (22 scenes: the way in
+# from the start pose blocked in 13, the carry to the crate in 4), hardly ever once it has one (155 of 157). More fixed
+# via-poses, found as before from offline RRT routes (whatif/via_search.py with VIA_EXTRA=1 for the way in,
+# whatif/via_search_crate.py for the carry) on scenes 9740000+, which nothing else uses. ⚠️ Used ONLY in a last pass
+# after phase C found nothing more (_search_plans), so a scene that had a plan keeps exactly that plan; alone or
+# chained with any other via ("v5b:<i>", "v5b:<i>-<j>"). Empty = off (the teacher as it was).
+VIA_NORM_V5B = ()
 # --- timing: fixed, the middle of v2's ranges ---
 CLOSE_S = 0.65                             # v2 0.5-0.8
 SQUEEZE_S = 0.75                           # v2 0.6-0.9 (the cut lands ~0.45 s into the close)
@@ -476,6 +484,7 @@ class TrussTeacher(tx.TrussPlanner):
         self._vias = []
         self._search, self._skip, self.n_plans, self._avoid = None, True, 0, set()
         self._legs_c, self._std_c = {}, {}     # (mode, u, beta[, tilt]) -> cut leg / route to the standoff
+        self._more = False                     # the last pass with VIA_NORM_V5B's poses (_search_plans)
         self._xcut_c, self._geom_c = {}, {}    # (u, tilt) -> the cut pose; (u, beta, tilt, fast) -> its IK
         self._std_blocked, self._c_count = {}, 0   # phase C: standoffs no route reached, per mode; its candidates
 
@@ -551,28 +560,21 @@ class TrussTeacher(tx.TrussPlanner):
             self._mode(mode)
             self.jaw(tx.JAW_OPEN_DEG)
             clear[mode] = self.chk.free(q0, **self.kw)
-        self._c_count = 0
         order = [(mode, tilt) for mode in ("strict", "brush") for tilt in TILT_DEG]
         order = sorted(order, key=lambda mt: TILT_DEG.index(mt[1])) + [("push", tilt) for tilt in TILT_DEG]
-        for u in CUT_U_V5:
-            for mode, tilt in order:
-                if not clear[mode]:
-                    continue
-                self._mode(mode)
-                for beta in APPROACH_BLEND_DEG:
-                    if ((mode, u, beta) if tilt == 0 else (mode, u, beta, tilt)) not in done:
-                        yield from self._candidate("C", mode, u, beta, tried3[mode], late, done, tilt)
-                    if self._c_count >= PHASE_C_MAX:
-                        break
-                if self._c_count >= PHASE_C_MAX:
-                    break
-            if self._c_count >= PHASE_C_MAX:
-                break
+        yield from self._phase_c(order, clear, tried3, late, done)
         why3 = [f"{m}: start pose not clear" if not clear[m] else
                 f"{m}: " + ("; ".join(sorted(set(tried3[m]))) or "no candidate") for m in MODES]
         if self._c_count >= PHASE_C_MAX:
             why3.append(f"budget: {PHASE_C_MAX} candidates")
         why.append("v5: " + " / ".join(why3))
+        if VIA_NORM_V5B:                       # the last pass: phase C's candidates that gave no plan, once more with
+            self._more = True                  # round 3's via-poses on the way in and on the carry (free_move)
+            tried4 = {m: [] for m in MODES}
+            yield from self._phase_c(order, clear, tried4, late, done)
+            self._more = False
+            why.append("v5b: " + " / ".join(f"{m}: " + ("; ".join(sorted(set(tried4[m]))) or "no candidate")
+                                             for m in MODES if clear[m]))
         if RRT_D:                              # what-if phase D (RRT_D), off by default
             tried_d, n_d = [], 0
             for u in (0.5,):
@@ -619,6 +621,20 @@ class TrussTeacher(tx.TrussPlanner):
             why.append("rrt what-if: " + ("; ".join(sorted(set(tried_d))) or "no candidate"))
         raise PlanError(" / ".join(why))
 
+    def _phase_c(self, order, clear, tried3, late, done):
+        """Generator over phase C's candidates that gave no plan yet, at most PHASE_C_MAX past their cut leg."""
+        self._c_count = 0
+        for u in CUT_U_V5:
+            for mode, tilt in order:
+                if not clear[mode]:
+                    continue
+                self._mode(mode)
+                for beta in APPROACH_BLEND_DEG:
+                    if ((mode, u, beta) if tilt == 0 else (mode, u, beta, tilt)) not in done:
+                        yield from self._candidate("C", mode, u, beta, tried3[mode], late, done, tilt)
+                    if self._c_count >= PHASE_C_MAX:
+                        return
+
     def _seed_d(self):
         """The scene's seed for phase D's RRT (deterministic per scene)."""
         return int(self.info.get("seed", 0)) % (2 ** 31)
@@ -650,7 +666,8 @@ class TrussTeacher(tx.TrussPlanner):
             to_std, detour = self._std_c[ckey]
             if to_std is None and phase == "C" and VIA_NORM_V5:
                 leg = dict(leg)                # the cached one keeps v4's route (none)
-                to_std, detour = self._to_standoff(self.q0, leg, extra=True, memo=mode)
+                to_std, detour = self._to_standoff(self.q0, leg, extra=True,
+                                                   memo=(mode, "v5b") if self._more else mode)
             if to_std is None:
                 _log_hits("start -> standoff blocked", self.chk, self.t["name"])
                 tried.append("start -> standoff blocked, detour too")
@@ -782,6 +799,12 @@ class TrussTeacher(tx.TrussPlanner):
         if not hasattr(self, "_vias5"):
             self._vias5 = [self.fm.norm_to_rad(np.r_[v, 0.0])[:5] for v in VIA_NORM_V5]
         return self._vias5
+
+    def vias_v5b(self):
+        """VIA_NORM_V5B's poses, 5 joints in rad."""
+        if not hasattr(self, "_vias5b"):
+            self._vias5b = [self.fm.norm_to_rad(np.r_[v, 0.0])[:5] for v in VIA_NORM_V5B]
+        return self._vias5b
 
     def _cut_pitch_tilt(self):
         """The cut pose's finger pitch and jaw tilt (deg, as ArmIK.solve takes them) = gravity in the gripper frame."""
@@ -958,6 +981,17 @@ class TrussTeacher(tx.TrussPlanner):
         for i, j in pairs:
             if chk.path_ok([xa, allv[i], allv[j], xb], **kw):
                 return [xa, allv[i], allv[j], xb], f"v5:{i}-{j}"
+        if not (self._more and VIA_NORM_V5B):
+            return None, None
+        n7, allw = len(allv), allv + self.vias_v5b()          # the last pass only: round 3's poses, same two shapes
+        for i in sorted(range(n7, len(allw)), key=lambda j: dist(allw[j], xb)):
+            if chk.path_ok([xa, allw[i], xb], **kw):
+                return [xa, allw[i], xb], f"v5b:{i}"
+        pairs = sorted(((i, j) for i in range(len(allw)) for j in range(len(allw)) if i != j and max(i, j) >= n7),
+                       key=lambda ij: dist(xa, allw[ij[0]]) + dist(allw[ij[0]], allw[ij[1]]) + dist(allw[ij[1]], xb))
+        for i, j in pairs:
+            if chk.path_ok([xa, allw[i], allw[j], xb], **kw):
+                return [xa, allw[i], allw[j], xb], f"v5b:{i}-{j}"
         return None, None
 
     def _to_standoff(self, q0, leg, extra=False, memo=None):
