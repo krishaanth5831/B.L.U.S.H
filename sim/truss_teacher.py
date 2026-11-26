@@ -331,6 +331,8 @@ if os.environ.get("BLUSH_V6"):
     for _k, _v in json.loads(os.environ["BLUSH_V6"]).items():
         if _k == "V6_CARRY":
             tx.V6_CARRY = tuple(_v)
+        elif _k == "V6_AIM_FROM_PAD_M":       # the aim point in the v6 jaw lives in truss_ik
+            truss_ik.V6_AIM_FROM_PAD_M = float(_v)
         elif _k in globals() and _k.startswith("V6_"):
             globals()[_k] = _v
         else:
