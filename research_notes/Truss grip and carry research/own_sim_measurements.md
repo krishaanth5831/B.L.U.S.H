@@ -552,6 +552,41 @@ come off):
 
 No old episode has to be left out of a re-make because of the arm.
 
+**The same for the plants and the carried truss** (`camera_sweep_logs.py plants --n 0 --every 3`: the 735 cut
+episodes that rebuild, every 3rd frame; from a fruit's or stalk's surface to the line under the lens):
+
+| Post | Nearest plant part or carried truss | Episodes under 4 cm | under 2 cm |
+|---|---|---|---|
+| Chosen upright, lens at 34-50 cm | 1.7 cm (seed 10023057, frame 207: a fruit of the truss being carried) | 10 | 2 |
+| Chosen upright, lens at 5 cm | 4.7 cm | 0 | 0 |
+| Today's base camera bracket | through the line (-0.1 cm) | 85 | 23 |
+
+⚠️ The coarse sweep of section 24 (75 episodes) had said 7.1 cm for the chosen upright: the full one finds a carried
+truss passing 1.7 cm from the line under the lens. The post itself stands about 1.8 cm behind the lens.
+
+**Does anything touch the real bracket?** `camera_sweep_logs.py touch`: the 32 old episodes that came within 6 cm
+of either chosen post's line (arm or plants) replayed frame by frame with the rig's real post cylinders and camera
+housings in the model, and the simulator's own collision check asked at every frame: **0 of 32 have the arm or a
+plant part inside a bracket.** The check sees both kinds: with a post put where the arm is known to pass (the
+deck spot of section 24, seed 10017026) it reports the arm inside it in 79 frames, 29 mm deep; with a post put
+where the carried truss of seed 10023057 passed, it reports that truss's fruit inside it from frame 207. So no old
+episode has to be left out because of the new upright. (`outputs/v6/cams/fine_arm_*`, `fine_plants_*`,
+`touch_trio.*`.)
+
+**The start frame of all 800 old episodes through the three-camera path** (`remake_pictures.py dry --start-only
+--shard i/4`): 799 rebuild as recorded (the model's size, the target, the first frame's joint readings). In all 735
+cut episodes among them both fixed cameras have the target's box and its cut point inside the picture (high 735 of
+735, low 735 of 735) and none has an empty cue; the 64 nothing-ripe episodes have the empty cue they should. So
+the rig's order (high first, its box gives the cue numbers) stands.
+- ⚠️ **One old episode cannot be re-made: v5 episode 353 (seed 10014003, part 14).** MuJoCo 4.0.1 builds a scene of
+  4 trusses from its seed (399 position values), the log holds one of 5 (498). MuJoCo 3.8.1 (env `lerobot`, which
+  recorded v5) builds the recorded one from the same code, so the simulator version flips which draw of this
+  seed's layout has a truss in reach: 1 seed in 800. `remake_pictures.py` leaves it out by name (`LEFT_OUT`) and
+  stops on any other mismatch, so the re-made set is 799 episodes (735 with a cut, 64 without).
+- ⚠️ The planner's count of the old episodes per cell (section 27) comes from the camera scorer's 734 scenes: it
+  lacks two episodes the scorer found no cut pose for (seeds 10007069, 10029014; both re-make) and has 10014003 as
+  the scene 4.0.1 builds. At most one episode off in three cells.
+
 **The first three-camera pictures** (`remake_pictures.py dry --episodes 0,23,1,13,799,15,147,233 --shots`, rig trio,
 scenes decided with the old bracket; the episodes are a nothing-ripe one, a far stem, near ones, a high truss, the
 last one, and the three closest calls of the sweeps): 8 of 8 rebuilt as recorded (the logged joint readings equal
