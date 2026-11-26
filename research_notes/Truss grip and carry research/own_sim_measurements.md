@@ -117,3 +117,51 @@ Label for the report: "measured in the project's simulation".
   retries ended "truss not in the crate" with 9-11 mm swings, the seventh "moved a neighbour 17 mm").
 - `base_grid.py` now also logs, per attempt, the largest swing and the verdict with that one rule left out;
   `scripts/grid_ab.py --swing` prints what each limit would have scored. The verdict itself is unchanged.
+
+## 10. Old jaw against new jaw, same teacher, same 180 scenes (2026-11-26)
+
+The owner's direction since 2026-11-25: keep the old teacher and only adjust it for the new jaw. Three runs on the
+180 tuning scenes (9730000-179), up to 6 retries, same base (0.34/0.14), same crate (30 x 28), same start pose:
+
+| Run | Solved | On the first plan |
+|---|---|---|
+| Old jaw (v5), old teacher (`--jaw v5`) | 141/180 = 78.3 % | 106 |
+| New jaw (v6), the old teacher's logic (`BLUSH_V6='{"V6_TEACHER": false, "V6_CARRY": ["rigid", 0]}'`) | 122/180 = 67.8 % | 75 |
+| New jaw (v6), today's teacher (the `V6_*` changes on) | 120/180 = 66.7 % | 73 |
+
+- The gap is the jaw: 10.5 points with the same logic (won 13 scenes, lost 32). The `V6_*` teacher changes (slower
+  carry, settle above the crate, lift home, hanging fit) together are worth nothing measurable (120 against 122).
+- Where the new jaw loses with the same logic (172 scenes all three had finished, scenes that end failed): at the cut
+  11 against 2 (neighbour pushed or its fruit knocked off while the jaw closes, never cut), on the carry to the crate
+  28 against 19, no plan 11 against 12, at the crate 3 against 4.
+- First plans: the truss misses the crate or loses its own fruit while lowering in 30 against 20 scenes; retries
+  recover most of them.
+- With the neighbour-swing rule left out (second reading only): old jaw 84 %, new jaw with the old logic 79 %, new jaw
+  today 73 %. The rule is worth 5-11 points to every run; it does not close the gap.
+- ⚠️ The old jaw's 78 % is on today's layout. Its 87/100 and 163/200 were measured on the old base (0.37/0.20), the
+  old start pose and the old crate. Old jaw on the old base and start pose, same 180 scenes: running (r22).
+
+## 11. What the closing jaw does to the stalk (`whatif/carry_bump_trace.py --legs slide_in,settle_at_stalk,close_cut,squeeze,retreat`)
+
+Eight scenes where the new jaw damaged a neighbour at the cut (9730009/012/039/053/065/071/087/117), first plan,
+both jaws (`--jaw v5` for the old one). Medians over the eight:
+
+| | Stalk tilt in the pads' plane, peak during the close | Roll about the stalk, end of the close | Roll, end of the squeeze | Fruit off the planner's "as cut" model, end of the close |
+|---|---|---|---|---|
+| Old jaw (stalk aimed 1 mm off the fixed pad) | 6 deg | 2 deg | 9 deg | 22 mm |
+| New jaw, stalk aimed 8 mm off the fixed pad (today) | 12 deg | 22 deg | 40 deg | 37 mm (peak 46) |
+| New jaw, aimed 4 mm off | 9 deg | 14 deg | 28 deg | 32 mm |
+| New jaw, aimed 2 mm off | 8 deg | 15 deg | 21 deg | 37 mm |
+| New jaw, slide in 8 mm off, move sideways to 2 mm, close | 8 deg | 18 deg | 27 deg | 36 mm |
+
+- With the stalk 8 mm from the fixed pad, the moving side reaches it half-way through the close (one pad contact) and
+  pushes it across to the fixed pad and on into the pad's travel: about 11 mm sideways before the cut. The truss is
+  still on the plant, so it swings like a pendulum: its fruit move 15-30 mm and touch the neighbours (0.1-0.3 N), and
+  the neighbour swings past the judge's 15 mm. The old jaw's pads meet the stalk only in the last frame of the close.
+- Old catch map (`outputs/v6/catch_map_jaw_v6_*.jsonl`, 9 scenes, 2026-11-24) says the same from another side: the
+  truss stays put after the cut (drift under 15 mm) in 9 of 9 scenes with the stalk 2-5 mm from the fixed pad, in 4-5
+  of 9 with it 8-11 mm away. The 8 mm aim was chosen as the middle of the zone, for room on the fixed finger's side.
+- Aiming closer takes away about a third of the tilt and half of the roll. What is left (roll 15-27 deg against 2-9)
+  is the jaw: flat pads, 3 mm proud of the blades, 5.5 mm of travel.
+- `V6_MEET_FROM_M` (off by default): the slide runs with the stalk 8 mm from the fixed pad, the last way-points of
+  `slide_in` move the jaw sideways until it is `V6_AIM_FROM_PAD_M` away. No new leg name.
