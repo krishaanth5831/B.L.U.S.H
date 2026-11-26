@@ -616,7 +616,8 @@ with rig `base` and no start change, the recording with rig trio and the start c
   scenes, the recorder's cell equal to the plan's in 8 of 8, 4.6 min. The refusal that names the start pose (seed
   10100005, strict mode only) is not the start change's: a neighbour's fruit hangs 0.9 mm from the wrist at the
   exact start pose in that scene, no draw in 20 clears it, so the scene starts at the exact pose, and the teacher's
-  strict mode refuses that with or without a start change (dataset v5's recording has the same line in 8 scenes).
+  strict mode refuses that with or without a start change (dataset v5's recording, which had no start change,
+  has the same line in 18 of its 1,736 scene records).
 - The recorder's log now carries what each scene drew (`start_drawn_deg`, `start_draws`; all zeros = exact start).
 
 **The teacher with the new post standing in the scene** (same 90 tuning scenes 9730000-9730089, world `crate23`,
