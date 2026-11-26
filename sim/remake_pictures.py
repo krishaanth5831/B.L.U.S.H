@@ -273,18 +273,33 @@ def part(a):
     pg = picture_store.Gate(cameras.RIG_CAMERAS[a.rig])
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log = (LOG_DIR / f"{pid.split('/')[-1]}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl").open("w")
-    done, no_cue = 0, 0
+    done, no_cue, left_out = 0, 0, []
     try:
         for x in mine:
             t0 = time.time()
             st, act, _ = J[x["e"]]
             pg.drop()
-            env, cue = None, None
-            for k, o in frames(robot, x, st):       # a Mismatch stops the part: nothing half-right is kept
-                if env is None:
-                    env, cue = robot.env_state(), cue_facts(robot)   # this rig's cue, fixed at the start frame
-                pg.note(o)
-                ds.add_frame(frame_of(features, tap, rop, o, st[k], act[k], env))
+            env, cue, added = None, None, 0
+            try:
+                for k, o in frames(robot, x, st):
+                    if env is None:
+                        env, cue = robot.env_state(), cue_facts(robot)   # this rig's cue, fixed at the start frame
+                    pg.note(o)
+                    ds.add_frame(frame_of(features, tap, rop, o, st[k], act[k], env))
+                    added += 1
+            except Mismatch as err:
+                if added:           # frames of it are already in the episode buffer: stop, nothing half-right is kept
+                    raise
+                # the scene the log describes does not come back (before the first frame): this episode is left
+                # out and the part goes on. Known: v5 episode 353 (seed 10014003), whose seed draws another layout
+                # today, with the old bracket too (dry --start-only over all 800, 2026-11-27: 799 come back).
+                left_out.append((x["e"], x["seed"], str(err)))
+                log.write(json.dumps(dict(seed=x["seed"], hold=x["hold"], target=x["target"], kept=False,
+                                          reason=f"not re-made: {err}", part=pid, from_dataset=x["dataset"],
+                                          from_episode=int(x["episode"]), from_merged=x["e"])) + "\n")
+                log.flush()
+                print(f"⚠️ v5 episode {x['e']} (seed {x['seed']}) is left out: {err}", flush=True)
+                continue
             ds.save_episode(parallel_encoding=False)
             pg.keep(ds.root, ds.meta.total_episodes - 1)
             # ⚠️ an all-zero box means "nothing ripe" to the policy and to eval_truss --start-guard
@@ -303,6 +318,7 @@ def part(a):
         ds.finalize()
         log.close()
     print(f"💾 part {pid} finalized: {done} of {len(mine)} episodes"
+          + (f"\n⚠️ left out (their scene does not rebuild as recorded): {left_out}" if left_out else "")
           + (f"\n⚠️ {no_cue} cut episodes have an all-zero box in the cue numbers: the first camera of rig {a.rig} "
              f"does not see their truss at the start (they would read as 'nothing ripe')" if no_cue else ""))
 
