@@ -176,6 +176,9 @@ def main():
                          "which the arm can cut from here and the target. ⚠️ Which truss is ripe depends on the jaw, "
                          "the aim point, the base and the start pose (truss_scene.build), and a seed's layout can "
                          "differ too (redrawn while no truss is reachable; trusses touching the arm are removed)")
+    ap.add_argument("--rig", default="base", choices=("base", "trio"),
+                    help="whose camera brackets stand in the scene (cameras.RIG_FIXED): the teacher plans around "
+                         "them, and they decide with the rest of the scene which truss is ripe")
     ap.add_argument("--world", choices=("v5", "v6"), default=None,
                     help="the dataset world (truss_scene.WORLDS): v5 = the 23 x 28 cm crate of dataset v5 and its "
                          "held-out sets, v6 = the code default. Each seed draws different plants in each world.")
@@ -226,7 +229,7 @@ def main():
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig
     cfg = SO101MujocoConfig(id="sim", seed=0, viewer=False, overlay="true_box", realtime=False, fps=expert.FPS,
-                            domain_rand=False, settle_s=1.0, snap_to_first_action=False, rig="base",
+                            domain_rand=False, settle_s=1.0, snap_to_first_action=False, rig=a.rig,
                             start_jitter_deg=0.0, yolo_weights=None, jaw=a.jaw)
     robot = SO101Mujoco(cfg)
     robot.connect()
@@ -241,7 +244,7 @@ def main():
     for seed in seeds:
         t_s = time.time()
         rec = dict(seed=seed, base=list(scene.ARM_BASE), old_start=a.old_start, crate=list(ts.CRATE_SIZE),
-                   world=ts.world_name())
+                   world=ts.world_name(), rig=a.rig)
         robot.new_scene(seed, log=False)
         robot.get_observation()
         if robot._tgt_k is not None:

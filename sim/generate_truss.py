@@ -371,8 +371,13 @@ def main():
                     help="store the pictures as every dataset up to v5 did (LeRobot's default AV1). ⚠️ Fails the "
                          "picture rule (picture_store.py): a stored frame then carries a trace of its neighbours "
                          "and no test can reproduce it. Only to rebuild an old dataset as it was.")
-    ap.add_argument("--rig", default="base", choices=("birdseye", "base"),
-                    help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, or base + claw (2026-11-06)")
+    ap.add_argument("--rig", default="base", choices=tuple(cameras.RIG_CAMERAS),
+                    help="cameras recorded (SO101MujocoConfig.rig): birdseye + claw, base + claw (2026-11-06), or "
+                         "trio = low + high + claw (2026-11-26)")
+    ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
+                    help="the dataset world (truss_scene.WORLDS: the crate, and with it every seed's plants). v5 = "
+                         "dataset v5's 23 x 28 cm crate: episodes added to that dataset must be recorded in it. "
+                         "Default: the code's own (v6, 30 x 28)")
     ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
     ap.add_argument("--hold-share", type=float, default=0.0,
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
@@ -390,6 +395,8 @@ def main():
                     help="finalize a dataset every N kept episodes, into <repo-id>_p00, _p01, ... (merge them after "
                          "with lerobot's aggregate); a killed run then keeps its finished parts. 0 = one dataset")
     a = ap.parse_args()
+    if a.world:
+        ts.set_world(a.world)
     if a.no_yolo:
         a.yolo_weights = None
     seed_list = None

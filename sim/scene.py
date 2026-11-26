@@ -192,6 +192,13 @@ LENS_R, LENS_LEN = 0.008, 0.012
 BASE_CAM_OFFSET = (-0.28, 0.06, 0.10)
 BASE_CAM_AIM = (0.34, 0.37, 0.22)   # middle of the truss band's cut points (truss_scene STEM_X, KNUCKLE_Z)
 BASE_POST_R = 0.008                  # bracket post from the table to the camera housing (printed, guess)
+# Cart cameras (rig "trio": two fixed cameras + the claw, K7 2026-11-26 "3 cameras instead of 2 but also placed in a
+# more calculated location and position"). name: (offset from ARM_BASE, aim in world coordinates), as the base camera.
+# ⚠️ PROVISIONAL until the pick is made (whatif/camera_score.py on dataset v5's own scenes): do not record with these.
+CART_CAMS = {
+    "low": ((-0.35, 0.10, 0.05), (0.34, 0.37, 0.22)),
+    "high": ((-0.35, 0.00, 0.34), (0.34, 0.37, 0.22)),
+}
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
 CLAW_FOVY = LENSES["claw"].fovy
 OFF_W, OFF_H = pinhole_size()    # offscreen buffer must fit the pinhole renders, not just 640x480
@@ -268,28 +275,45 @@ def _look_xyaxes(pos, aim):
     return x, y, f
 
 
-def base_cam_xml():
-    p = base_cam_pos()
-    x, y, _ = _look_xyaxes(p, BASE_CAM_AIM)
+def fixed_cam(name):
+    """(lens position, aim) of a fixed camera that travels with the arm: "base", or one of CART_CAMS."""
+    if name == "base":
+        return base_cam_pos(), np.asarray(BASE_CAM_AIM, float)
+    off, aim = CART_CAMS[name]
+    return np.asarray(ARM_BASE, float) + np.asarray(off, float), np.asarray(aim, float)
+
+
+def fixed_cam_xml(name):
+    p, aim = fixed_cam(name)
+    x, y, _ = _look_xyaxes(p, aim)
     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
-    return f'<camera name="base" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
+    return f'<camera name="{name}" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
 
 
-def base_mount_xml():
-    """The base camera's bracket: a post from the table and the camera housing behind the lens. Solid (the planner
-    avoids it like the rest of the scenery). Only in rig "base" scenes (truss_scene.build base_mount), so scenes of the
-    birdseye rig are unchanged."""
-    p = base_cam_pos()
-    x, y, f = _look_xyaxes(p, BASE_CAM_AIM)
+def cam_mount_xml(name):
+    """A fixed camera's bracket: a post from the table and the camera housing behind the lens. Solid (the planner
+    avoids it like the rest of the scenery). Only in the scenes of a rig that has this camera (truss_scene.build
+    mounts), so scenes of the other rigs are unchanged."""
+    p, aim = fixed_cam(name)
+    x, y, f = _look_xyaxes(p, aim)
     c = p - f * (MAST_LENS_GAP + CAM_BOARD[2] / 2)
     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
     grey = "0.25 0.25 0.27 1"
     return "\n".join([
-        f'<geom name="base_cam_housing" type="box" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}" xyaxes="{ax}" '
+        f'<geom name="{name}_cam_housing" type="box" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}" xyaxes="{ax}" '
         f'size="{CAM_BOARD[0] / 2} {CAM_BOARD[1] / 2} {CAM_BOARD[2] / 2}" rgba="{grey}"/>',
-        f'<geom name="base_cam_post" type="cylinder" fromto="{c[0]:.4f} {c[1]:.4f} 0 {c[0]:.4f} {c[1]:.4f} '
+        f'<geom name="{name}_cam_post" type="cylinder" fromto="{c[0]:.4f} {c[1]:.4f} 0 {c[0]:.4f} {c[1]:.4f} '
         f'{c[2] - CAM_BOARD[1] / 2:.4f}" size="{BASE_POST_R}" rgba="{grey}"/>',
     ])
+
+
+def base_cam_xml():
+    return fixed_cam_xml("base")
+
+
+def base_mount_xml():
+    """The base camera's bracket (rig "base"): see cam_mount_xml."""
+    return cam_mount_xml("base")
 
 
 def _birdseye_xyaxes():
@@ -351,6 +375,7 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}"
             xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {base_cam_xml()}
+    {" ".join(fixed_cam_xml(n) for n in CART_CAMS)}
     {greenhouse_xml() if scenery else ''}
     {crate_xml(*crate) if scenery and crate else ''}
     {static}

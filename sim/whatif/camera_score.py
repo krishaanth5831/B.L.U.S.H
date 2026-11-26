@@ -51,7 +51,20 @@ STALK_NEAR_M = (-0.012, -0.006, 0.006, 0.012)   # CUT: points along the stalk ei
 STALK_AT_M = (-0.004, 0.0, 0.004)   # START / PRE: "the cut point" = the stalk here; one ray alone called a stalk hidden
 #                                     that the segmentation render showed 3 px from the cut point (selftest, 9730001)
 GROUPS = np.array([1, 1, 1, 0, 0, 0], np.uint8)   # what a MuJoCo camera draws by default (geom groups 0-2)
+OLD_BRACKET = ("base_cam_housing", "base_cam_post")   # scene.base_mount_xml
 PPM_MIN = 1.0              # post-mortem step 5: at least 1 pixel per mm
+# rank: where a camera can point. The collect scores every position aimed at scene.BASE_CAM_AIM, but only "inside
+# the frame" and pixels per mm depend on the aim (a line of sight does not), so rank tries these aims per position
+# and keeps the one that leaves the cut points the most room to the frame's edge (AIM_PCT). y = the stems' side of
+# the truss band; x and z span the band (truss_scene STEM_X 0.20-0.48, KNUCKLE_Z 0.14-0.32).
+AIM_X = (0.26, 0.30, 0.34, 0.38, 0.42)
+AIM_Z = (0.14, 0.18, 0.22, 0.26, 0.30)
+AIM_Y = 0.37
+AIM_PCT = 2.0              # the aim is judged by this percentile of the cut points' distance to the frame edge (px):
+#                            nearly the worst scene, without one odd scene deciding it (guess)
+AIM_CENTRE_PX_PER_M = 100.0   # ... minus this per metre the aim is off the band's middle (8 cm off costs 8 px; guess)
+SIGMA_PX = 5.0             # rank: the pixel error assumed per camera for "how well two views pin the cut point"
+#                            (post-mortem 5.5: 5 px is the best published detector, 12 px a more usual one)
 CROSS_DEG = 45.0           # post-mortem 5.5: lines of sight that cross at 45 deg or more place a point in 3D
 CLEAR_MIN_M = 0.04         # rank: a lens or its post nearer than this to the arm's or the plants' bounding spheres
 #                            is out (guess; the spheres overestimate both)
@@ -102,16 +115,22 @@ def seeds_of(spec):
     return [int(x) for x in spec.split(",")]
 
 
-def candidates():
-    """(names, lens positions (n, 3), aims (n, 3)): today's two cameras first, then the grid."""
+def candidates(cart=False):
+    """(names, lens positions (n, 3), aims (n, 3)): today's two cameras first, then the grid. cart=True: only the
+    grid positions the cart rule can keep (within the deck's width of the arm base, short of the carry zone), which
+    is all `rank` ever picks from without --anywhere; a third of the cameras, so a scene takes a third of the time."""
+    import truss_scene as ts
     bp = np.asarray(scene.base_cam_pos(), float)
     be = np.asarray(scene.BIRDSEYE_POS, float)
     t = np.radians(scene.BIRDSEYE_TILT_DEG)
     names = ["base", "birdseye"]
     pos = [bp, be]
     aim = [np.asarray(scene.BASE_CAM_AIM, float), be + np.array([0.0, np.cos(t), -np.sin(t)])]   # level, at the row
+    carry_x = ts.CRATE_CENTRE[0] - ts.CRATE_SIZE[0] / 2 - CARRY_MARGIN_M
     for x in GX:
         for y in GY:
+            if cart and (abs(y - scene.ARM_BASE[1]) > DECK_HALF_W_M + 1e-9 or x >= carry_x - 1e-9):
+                continue
             for z in GZ:
                 names.append(f"g_{x:.2f}_{y:.2f}_{z:.2f}")
                 pos.append(np.array([x, y, z]))
@@ -142,6 +161,60 @@ def project(lens, pos, ax, p):
 def inside(lens, uv):
     return ((uv[:, 0] >= IN_MARGIN_PX) & (uv[:, 0] <= lens.w - 1 - IN_MARGIN_PX)
             & (uv[:, 1] >= IN_MARGIN_PX) & (uv[:, 1] <= lens.h - 1 - IN_MARGIN_PX))
+
+
+def edge_room(lens, uv):
+    """Per pixel: how far inside the frame it is (px to the nearest edge; negative outside, -1e9 behind the lens)."""
+    r = np.minimum(np.minimum(uv[:, 0], lens.w - 1 - uv[:, 0]), np.minimum(uv[:, 1], lens.h - 1 - uv[:, 1]))
+    return np.where(np.isfinite(r), r, -1e9)
+
+
+def best_aims(lens, pos, aim, P, fixed=2):
+    """Per camera the aim (of AIM_X x AIM_Z, or its own for the first `fixed` cameras) that leaves the cut points P
+    (scenes, 3) the most room to the frame's edge at the AIM_PCT percentile. Returns (aims (n, 3), room (n,))."""
+    n = len(pos)
+    best = np.full(n, -np.inf)
+    out = aim.copy()
+    opts = [np.array([x, AIM_Y, z]) for x in AIM_X for z in AIM_Z]
+    for k in range(len(opts) + 1):
+        a_k = aim if k == len(opts) else np.tile(opts[k], (n, 1))     # last: the aim the collect used
+        ax = axes(pos, a_k)
+        room = np.array([edge_room(lens, project(lens, pos, ax, p)[0]) for p in P])     # scenes x cameras
+        # a few px in favour of the band's middle: without it two neighbouring positions took opposite ends of
+        # the aim grid for 1-2 px of room (2026-11-26)
+        q = np.percentile(room, AIM_PCT, axis=0) - AIM_CENTRE_PX_PER_M * np.linalg.norm(
+            a_k - np.asarray(scene.BASE_CAM_AIM, float), axis=1)
+        take = q > best + 1e-9
+        if k < len(opts):
+            take[:fixed] = False                                        # today's cameras keep their aim
+        best = np.where(take, q, best)
+        out[take] = a_k[take]
+    return out, best
+
+
+def pixel_jacobians(lens, pos, ax, P, cams):
+    """J[s, c] (2 x 3): how far (px) the pixel of cut point s moves in camera cams[c] per metre the point moves in
+    x, y, z. From it: how well views pin a point (pin_mm)."""
+    sub = (pos[cams], tuple(a[cams] for a in ax))
+    J = np.zeros((len(P), len(cams), 2, 3))
+    for si, p in enumerate(P):
+        uv0 = project(lens, sub[0], sub[1], p)[0]
+        for k in range(3):
+            dp = np.zeros(3)
+            dp[k] = 0.001
+            J[si, :, :, k] = (project(lens, sub[0], sub[1], p + dp)[0] - uv0) / 0.001
+    return np.nan_to_num(J)
+
+
+def pin_mm(Ja, Jb=None):
+    """Per scene: the 1-sigma error (mm) along the WORST direction of a 3D point seen by one or two cameras whose
+    pixels are each off by SIGMA_PX: sigma / sqrt(smallest eigenvalue of J^T J). One camera alone cannot tell
+    distance, so alone it is infinite."""
+    M = np.einsum("sij,sik->sjk", Ja, Ja)
+    if Jb is not None:
+        M = M + np.einsum("sij,sik->sjk", Jb, Jb)
+    lam = np.linalg.eigvalsh(M)[:, 0]
+    return np.where(lam > 1e-6, 1000.0 * SIGMA_PX / np.sqrt(np.maximum(lam, 1e-6)), np.inf)
 
 
 def arrive(m, d, origin, pts, tol, want=None, exclude=-1):
@@ -243,6 +316,13 @@ def one_scene(rob, T, g, pos, ax, lens, claw_lens, posts):
     claw_body = cm.camera("arm/claw").bodyid[0]
     clear, post = np.full(n, np.inf), np.full(n, np.inf)
     out = {}
+    # ⚠️ Today's base-camera bracket stands in the scene (rig "base": the seed's plants are drawn with it there), 7 cm
+    # in front of the grid positions behind it. Another rig would not have it, so no ray is stopped by it: its geoms
+    # go to a group the rays skip (GROUPS). Until 2026-11-26 21:30 it did block them (files without "no_bracket").
+    for nm in OLD_BRACKET:
+        gid = mujoco.mj_name2id(cm, mujoco.mjtObj.mjOBJ_GEOM, nm)
+        if gid >= 0:
+            cm.geom_group[gid] = 3
 
     def to_post(c, r):
         """Per camera: distance of its post (the vertical line from the table up to the lens) to spheres (c, r)."""
@@ -302,7 +382,7 @@ def collect(a):
     import truss_scene as ts
     from lens import LENSES
     rob = setup(a.base, a.jaw, a.old_start, a.world)
-    names, pos, aim = candidates()
+    names, pos, aim = candidates(a.cart)
     ax = axes(pos, aim)
     posts = post_points(pos)
     keys = ("p_cut", "claw", "s_in", "s_vis", "s_ppm", "p_vis", "p_blade", "c_in", "c_stalk", "c_blade", "clear",
@@ -333,6 +413,7 @@ def collect(a):
     np.savez_compressed(a.out, names=np.array(names), pos=pos, aim=aim, skipped=json.dumps(skipped),
                         setup=json.dumps(dict(base=a.base, jaw=a.jaw, old_start=a.old_start,
                                               start_norm=list(scene.START_NORM), world=ts.world_name(),
+                                              no_bracket=True, cart=bool(a.cart),
                                               crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)])),
                         **{k: np.array(v) for k, v in rows.items()})
     print(f"wrote {a.out}: {len(rows['seed'])} scenes, skipped {skipped}", flush=True)
@@ -387,20 +468,44 @@ def neighbours(pos):
 
 
 def rank(a):
+    from lens import LENSES
     D = load(a.files)
     names, pos = D["names"], D["pos"]
+    lens = LENSES["base"]
     N = len(D["seed"])
     base = np.asarray(D["setup"]["base"].split(","), float)
-    A = D["s_in"] & D["s_vis"] & (D["s_ppm"] >= PPM_MIN)        # START: the cut point is in view, sharp enough
-    P = D["c_in"] & D["p_vis"] & D["p_blade"]                    # PRE: the cut point and a blade
-    B = D["c_in"] & D["c_stalk"] & D["c_blade"]                  # CUT: the stalk next to the cut and a blade
     ok, why = mountable(D, a.zmax, a.anywhere)
+    if a.list_mountable:
+        open(a.list_mountable, "w").write(",".join(names[i] for i in range(len(names)) if ok[i]))
+    if a.sweep:
+        # the recorded episodes' whole motion against each post (camera_sweep_logs.py), not only the poses visited
+        sw = {}
+        for f in a.sweep:
+            for k, v in json.load(open(f)).items():
+                sw[k] = min(v, sw.get(k, np.inf))
+        hit = np.array([sw.get(nm, np.inf) < CLEAR_MIN_M for nm in names])
+        hit[:2] = False
+        why["in the way in a recorded episode"] = int((hit & ok).sum())
+        why["not swept"] = int(sum(ok[i] and names[i] not in sw for i in range(2, len(names))))
+        ok &= ~hit
+    aim, room = (D["aim"].copy(), None) if a.keep_aim else best_aims(lens, pos, D["aim"], D["p_cut"])
+    ax = axes(pos, aim)
+    uvp = [project(lens, pos, ax, p) for p in D["p_cut"]]
+    s_in = np.array([inside(lens, uv) for uv, _ in uvp])       # scenes x cameras, with the aim chosen here
+    s_ppm = np.array([q for _, q in uvp])
+    if a.keep_aim:
+        assert (s_in == D["s_in"]).all(), "rank's projection differs from the collect's"
+    A = s_in & D["s_vis"] & (s_ppm >= PPM_MIN)                 # START: the cut point is in view, sharp enough
+    P = s_in & D["p_vis"] & D["p_blade"]                       # PRE: the cut point and a blade
+    B = s_in & D["c_stalk"] & D["c_blade"]                     # CUT: the stalk next to the cut and a blade
     nb = neighbours(pos)
     claw = D["claw"].astype(bool)
     print(f"{N} scenes ({D['setup']}), {len(names)} cameras, {int(ok.sum()) - 2} mountable grid positions "
           f"(lens <= {a.zmax:.2f} m, {'anywhere in the house' if a.anywhere else 'on the cart'}; ruled out, "
-          f"overlapping: {why})")
-    print(f"per scene: {D['ntruss'].mean():.1f} trusses, {D['nfruit'].mean():.0f} fruit")
+          f"overlapping: {why}); aim: {'as collected' if a.keep_aim else 'best of the AIM grid per position'}")
+    print(f"per scene: {D['ntruss'].mean():.1f} trusses, {D['nfruit'].mean():.0f} fruit; cut points x "
+          f"{D['p_cut'][:, 0].min():.2f}-{D['p_cut'][:, 0].max():.2f}, z {D['p_cut'][:, 2].min():.2f}-"
+          f"{D['p_cut'][:, 2].max():.2f}")
     print(f"claw camera: cut point in frame and not hidden at START {100 * (claw[:, 0] & claw[:, 1]).mean():.0f} %, "
           f"at PRE {100 * (claw[:, 2] & claw[:, 3]).mean():.0f} %")
 
@@ -412,14 +517,16 @@ def rank(a):
 
     def line(i):
         return (f"{names[i]:>18s}  start {100 * A[:, i].mean():3.0f} %  pre {100 * P[:, i].mean():3.0f} %  "
-                f"cut {100 * B[:, i].mean():3.0f} %  in frame {100 * D['s_in'][:, i].mean():3.0f} %  "
-                f"px/mm {np.median(D['s_ppm'][:, i]):.1f} (min {D['s_ppm'][:, i].min():.1f})  "
+                f"cut {100 * B[:, i].mean():3.0f} %  in frame {100 * s_in[:, i].mean():3.0f} %  "
+                f"px/mm {np.median(s_ppm[:, i]):.1f} (min {s_ppm[:, i].min():.1f})  "
+                f"aim {aim[i, 0]:.2f} {aim[i, 2]:.2f}  "
                 f"arm {100 * min(D['clear'][:, i].min(), D['post'][:, i].min()):.0f} cm  "
                 f"plants {100 * D['plant'][:, i].min():.0f} cm  {mount(i)}")
 
     one = A.mean(0) + B.mean(0)                                  # one fixed camera: start and cut, equal weight
     order = [i for i in np.argsort(-one) if ok[i]]
-    print("\nOne fixed camera (start = sees the cut point at >= 1 px/mm; pre / cut = sees the stalk and a blade):")
+    print("\nOne fixed camera (start = sees the cut point at >= 1 px/mm; pre / cut = sees the stalk and a blade; "
+          "aim = the x and z it points at):")
     for i in (0, 1):
         print(line(i))
     for i in order[:a.top]:
@@ -431,45 +538,85 @@ def rank(a):
                       set([i for i in np.argsort(-B.mean(0)) if ok[i]][:150]) | {0, 1})
     unit = D["p_cut"][:, None, :] - pos[None, :, :]              # scene x camera: line of sight to the cut point
     unit /= np.linalg.norm(unit, axis=2, keepdims=True)
+    J = pixel_jacobians(lens, pos, ax, D["p_cut"], cand)
+    at = {c: k for k, c in enumerate(cand)}
 
-    def pair(i, j):
+    def score(i, j):
         ang = np.degrees(np.arccos(np.clip((unit[:, i] * unit[:, j]).sum(1), -1, 1)))
         both = A[:, i] & A[:, j] & (ang >= CROSS_DEG)            # START: a 3D fix of the cut point
         cut = B[:, i] | B[:, j]                                  # CUT: at least one sees stalk and blade
-        pre = P[:, i] | P[:, j]
-        return both.mean() + cut.mean(), both.mean(), pre.mean(), cut.mean(), float(np.median(ang))
+        return both.mean() + cut.mean(), both, cut, ang
 
-    best = sorted(((*pair(i, j), i, j) for q, i in enumerate(cand) for j in cand[q + 1:]), reverse=True)
-    ref = [b for b in best if {b[5], b[6]} == {0, 1}]
-    rows = []
-    for sc, both, pre, cut, ang, i, j in ref + best[:max(a.top, 60)]:
+    def pair(i, j):
+        sc, both, cut, ang = score(i, j)
+        see = A[:, i] & A[:, j]
+        err = pin_mm(J[:, at[i]], J[:, at[j]])
+        return dict(score=float(sc), fix3d=float(both.mean()), pre=float((P[:, i] | P[:, j]).mean()),
+                    cut=float(cut.mean()), crossing=float(np.median(ang)), see=float(see.mean()),
+                    pin_mm=[float(np.median(err[see])), float(np.percentile(err[see], 90))] if see.any() else None,
+                    i=i, j=j, both=both)
+
+    best = sorted((pair(i, j) for q, i in enumerate(cand) for j in cand[q + 1:]), key=lambda r: -r["score"])
+    for r in best:
+        i, j = r["i"], r["j"]
         # plateau, not peak (the lens is a guess and a mount is never exact): the worst score when either camera
-        # sits one grid step (5 cm, or one height step) away
-        worst = min(pair(i2, j2)[0] for i2 in [i] + nb[i] for j2 in [j] + nb[j]) if i >= 2 and j >= 2 else sc
-        rows.append(dict(a=names[i], b=names[j], pos_a=pos[i].tolist(), pos_b=pos[j].tolist(), score=sc, fix3d=both,
-                         pre=pre, cut=cut, crossing=ang, worst_neighbour=worst,
-                         ppm_min=[float(D["s_ppm"][:, i].min()), float(D["s_ppm"][:, j].min())],
-                         mount=[mount(i), mount(j)],
-                         arm_cm=[100 * float(min(D["clear"][:, k].min(), D["post"][:, k].min())) for k in (i, j)]))
+        # sits one grid step (5 cm, or one height step) away. Today's cameras are not on the grid: no such check.
+        r["worst_neighbour"] = (min(score(i2, j2)[0] for i2 in [i] + nb[i] for j2 in [j] + nb[j])
+                                if i >= 2 and j >= 2 else None)
+        r.update(a=names[i], b=names[j], pos_a=pos[i].tolist(), pos_b=pos[j].tolist(), aim_a=aim[i].tolist(),
+                 aim_b=aim[j].tolist(), ppm_min=[float(s_ppm[:, i].min()), float(s_ppm[:, j].min())],
+                 mount=[mount(i), mount(j)],
+                 arm_cm=[100 * float(min(D["clear"][:, k].min(), D["post"][:, k].min())) for k in (i, j)])
+    grid = [r for r in best if r["worst_neighbour"] is not None]
+    ref = [r for r in best if {r["i"], r["j"]} == {0, 1}] + [r for r in best if 0 in (r["i"], r["j"])][:2]
+
+    def show(r):
+        pin = "  -  " if r["pin_mm"] is None else f"{r['pin_mm'][0]:3.0f} / {r['pin_mm'][1]:3.0f}"
+        wn = " none" if r["worst_neighbour"] is None else f"{r['worst_neighbour']:.2f}"
+        print(f"{r['a']:>18s} + {r['b']:<18s}  3D {100 * r['fix3d']:3.0f} %  both see {100 * r['see']:3.0f} %  pre "
+              f"{100 * r['pre']:3.0f} %  cut {100 * r['cut']:3.0f} %  crossing {r['crossing']:3.0f} deg  pinned to "
+              f"{pin} mm  score {r['score']:.2f} worst {wn}  px/mm min {r['ppm_min'][0]:.1f} / "
+              f"{r['ppm_min'][1]:.1f}  arm {r['arm_cm'][0]:.0f} / {r['arm_cm'][1]:.0f} cm  {r['mount'][0]} / "
+              f"{r['mount'][1]}")
+
     print("\nTwo fixed cameras (3D = both see the cut point at START and their lines of sight cross at >= 45 deg; "
-          "pre / cut = at least one sees stalk and blade; worst = the score of 2 with either camera one grid step "
-          "off):")
-    shown = rows[:len(ref)] + sorted(rows[len(ref):], key=lambda r: (-r["worst_neighbour"], -r["score"]))[:a.top]
-    for r in shown:
-        print(f"{r['a']:>18s} + {r['b']:<18s}  3D {100 * r['fix3d']:3.0f} %  pre {100 * r['pre']:3.0f} %  cut "
-              f"{100 * r['cut']:3.0f} %  crossing {r['crossing']:3.0f} deg  worst {r['worst_neighbour']:.2f}  "
-              f"px/mm min {r['ppm_min'][0]:.1f} / {r['ppm_min'][1]:.1f}  arm {r['arm_cm'][0]:.0f} / "
-              f"{r['arm_cm'][1]:.0f} cm  {r['mount'][0]} / {r['mount'][1]}")
+          f"pre / cut = at least one sees stalk and blade; pinned to = with each view {SIGMA_PX:.0f} px off, the "
+          "error of the 3D point along its worst direction, median / 90 % of scenes; worst = the score with either "
+          "camera one grid step off):")
+    print("with today's base camera (not on the grid: no neighbour check):")
+    for r in ref:
+        show(r)
+    print("by the worst neighbour (a position that still scores when the mount is a step off):")
+    top = sorted(grid, key=lambda r: (-r["worst_neighbour"], -r["score"]))[:a.top]
+    for r in top:
+        show(r)
+    print("by the score itself:")
+    for r in grid[:a.top]:
+        show(r)
+    # where the top pairs are blind: the 3D share by the cut point's place along the row and its height
+    xb = np.array([0.0, 0.27, 0.34, 0.41, 9.0])
+    zb = np.array([0.0, 0.20, 0.26, 9.0])
+    px, pz = np.digitize(D["p_cut"][:, 0], xb) - 1, np.digitize(D["p_cut"][:, 2], zb) - 1
+    print("\n3D share by where the cut point is (x along the row: <0.27 | 0.27-0.34 | 0.34-0.41 | >0.41; per "
+          "height z: <0.20, 0.20-0.26, >0.26); scenes per cell first:")
+    print("   scenes   " + "   ".join(" ".join(f"{int(((px == k) & (pz == q)).sum()):3d}" for k in range(4))
+                                      for q in range(3)))
+    for r in top[:6] + ref[:1]:
+        cells = "   ".join(" ".join(f"{100 * r['both'][(px == k) & (pz == q)].mean():3.0f}"
+                                     if ((px == k) & (pz == q)).any() else "  -" for k in range(4)) for q in range(3))
+        print(f"   {r['a']} + {r['b']}:  {cells}")
     if a.json:
-        js = dict(scenes=N, setup=D["setup"], zmax=a.zmax, anywhere=a.anywhere, ruled_out=why,
+        keep = top + [r for r in grid[:max(a.top, 40)] if r not in top] + ref
+        js = dict(scenes=N, setup=D["setup"], zmax=a.zmax, anywhere=a.anywhere, ruled_out=why, keep_aim=a.keep_aim,
                   claw=dict(start=float((claw[:, 0] & claw[:, 1]).mean()), pre=float((claw[:, 2] & claw[:, 3]).mean())),
-                  single=[dict(name=names[i], pos=pos[i].tolist(), start=float(A[:, i].mean()),
+                  single=[dict(name=names[i], pos=pos[i].tolist(), aim=aim[i].tolist(), start=float(A[:, i].mean()),
                                pre=float(P[:, i].mean()), cut=float(B[:, i].mean()),
-                               in_frame=float(D["s_in"][:, i].mean()), ppm=float(np.median(D["s_ppm"][:, i])),
-                               ppm_min=float(D["s_ppm"][:, i].min()), clear=float(D["clear"][:, i].min()),
+                               in_frame=float(s_in[:, i].mean()), ppm=float(np.median(s_ppm[:, i])),
+                               ppm_min=float(s_ppm[:, i].min()), clear=float(D["clear"][:, i].min()),
                                post=float(D["post"][:, i].min()), plant=float(D["plant"][:, i].min()),
+                               room_px=None if room is None else float(room[i]),
                                mount=mount(i)) for i in [0, 1] + order[:60]],
-                  pairs=rows)
+                  pairs=[{k: v for k, v in r.items() if k not in ("both", "i", "j")} for r in keep])
         json.dump(js, open(a.json, "w"), indent=1)
 
 
@@ -580,6 +727,8 @@ if __name__ == "__main__":
         s.add_argument("--seeds", required=True, help="a:b (range) or a comma list")
         if name != "selftest":
             s.add_argument("--out", required=True)
+        if name == "collect":
+            s.add_argument("--cart", action="store_true", help="only the grid positions the cart rule can keep")
         if name == "render":
             s.add_argument("--cams", required=True, help="comma list of camera names (base, birdseye, g_x_y_z)")
     s = sub.add_parser("rank")
@@ -589,6 +738,11 @@ if __name__ == "__main__":
     s.add_argument("--anywhere", action="store_true",
                    help="lift the cart rule (DECK_HALF_W_M): posts anywhere in the house. For comparison only: such "
                         "a camera does not move with the arm on the real rig.")
+    s.add_argument("--keep-aim", action="store_true", help="score every position with the aim the collect used "
+                   "(scene.BASE_CAM_AIM) instead of the best of the AIM grid")
+    s.add_argument("--list-mountable", help="write the mountable positions' names here (for camera_sweep_logs.py)")
+    s.add_argument("--sweep", nargs="*", help="camera_sweep_logs.py --json files: positions whose post the arm or a "
+                   "plant came nearer than CLEAR_MIN_M to in a recorded episode are out")
     s.add_argument("--json")
     a = ap.parse_args()
     dict(collect=collect, rank=rank, selftest=selftest, render=render)[a.mode](a)

@@ -3,6 +3,7 @@
     m, d, info = build(seed)            the greenhouse, 4-5 stems with 2-3 trusses each, the cut-and-hold arm
     build(seed, hold=True)              nothing ready ("stay home" episodes)
     build(seed, base_mount=True)        + the base camera's bracket (rig "base")
+    build(seed, mounts=("low", "high")) + the cart cameras' brackets (rig "trio", cameras.RIG_FIXED)
     info["trusses"]                     truss.truss_xml infos, each with "ready", "cut_ik" (a cut pose exists)
     info["ready"]                       indices of the ready trusses the arm can cut (1-2 per scene)
     in_crate(info, d, m, k)             every fruit of truss k inside the (bigger) truss crate
@@ -241,27 +242,35 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
                                  # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
 
 
-def build(seed=0, arm=True, hold=False, base_mount=False, jaw="v5"):
+def build(seed=0, arm=True, hold=False, base_mount=False, jaw="v5", mounts=None, show_mounts=None):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model, not in the XML.
     The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
     hold: nothing is ready (every truss a decoy or unripe), for "nothing to pick, stay home" episodes (K7
     2026-11-06, SockBot's lesson: the policy has to see what not reaching looks like).
     base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml).
+    mounts: the fixed cameras whose brackets stand in the scene (cameras.RIG_FIXED of the rig; base_mount=True is
+        mounts=("base",)). ⚠️ A bracket is solid, so it decides with everything else which trusses the arm can
+        reach and with that which one is ripe: the same seed can give another target with other brackets.
+    show_mounts: brackets to SHOW instead, after the scene was decided with `mounts` (re-making an old dataset's
+        pictures with other cameras: the plants and the ripe truss must stay the recorded ones). Same joints, same
+        state; only the scenery's brackets differ.
     jaw: the arm's cut-and-hold jaw, "v5" or "v6" (scene.JAWS; K7 2026-11-24)."""
     global JAW
     JAW = jaw
+    mounts = (("base",) if base_mount else ()) if mounts is None else tuple(mounts)
     for j in range(LAYOUT_TRIES if arm and not hold else 1):
-        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, base_mount)
+        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, mounts,
+                          None if show_mounts is None else tuple(show_mounts))
         if out[2]["ready"]:
             break
     return out
 
 
-def _build_once(seed, arm, rng, hold=False, base_mount=False):
+def _build_once(seed, arm, rng, hold=False, mounts=(), show_mounts=None):
     static, parts, trusses = vines_xml(rng)
-    if base_mount:
-        static = static + [scene.base_mount_xml()]
+    plain = static
+    static = static + [scene.cam_mount_xml(n) for n in mounts]
     m, d = _compose(static, parts, arm)
     if arm:
         _start_pose(m, d)
@@ -307,6 +316,14 @@ def _build_once(seed, arm, rng, hold=False, base_mount=False):
         for f, r in zip(t["fruit"], rip):
             f["ripeness"] = r
             m.geom_rgba[m.geom(f["geom"]).id] = tm.RIPENESS_RGBA[r]
+    if show_mounts is not None and show_mounts != mounts:
+        # the same plants and arm with other brackets: joints, constraints and state carry over one to one
+        m2, d2 = _compose(plain + [scene.cam_mount_xml(n) for n in show_mounts], parts, arm)
+        assert (m2.nq, m2.nv, m2.neq) == (m.nq, m.nv, m.neq)
+        d2.qpos[:], d2.qvel[:], d2.eq_active[:] = d.qpos, d.qvel, d.eq_active
+        for f in (f for t in trusses for f in t["fruit"]):
+            m2.geom_rgba[m2.geom(f["geom"]).id] = m.geom_rgba[m.geom(f["geom"]).id]
+        m, d = m2, d2
     if arm:
         _start_pose(m, d)
     mujoco.mj_forward(m, d)

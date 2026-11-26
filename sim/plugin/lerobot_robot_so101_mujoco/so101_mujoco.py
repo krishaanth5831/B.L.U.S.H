@@ -48,7 +48,7 @@ import tomato as tm  # noqa: E402
 import truss as tr  # noqa: E402
 import truss_scene as ts  # noqa: E402
 import truss_target as ttg  # noqa: E402
-from cameras import RIG_CAMERAS, SimCameras  # noqa: E402
+from cameras import RIG_CAMERAS, RIG_FIXED, SimCameras  # noqa: E402
 from harvest import yolo_overlay as ov  # noqa: E402  (target.py, via truss_target, put the repo root on sys.path)
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,9 @@ class SO101Mujoco(Robot):
             raise ValueError(f"rig={config.rig!r}: one of {tuple(RIG_CAMERAS)}")
         self.config = config
         self.cam_names = RIG_CAMERAS[config.rig]  # what the policy sees, in order; [0] carries the target box
+        self.fixed = RIG_FIXED[config.rig]        # its fixed cameras with the box + cross drawn from the sim's truth
+        if config.layout_rig is not None and config.layout_rig not in RIG_FIXED:
+            raise ValueError(f"layout_rig={config.layout_rig!r}: one of {tuple(RIG_FIXED)}")
         self.cameras = dict.fromkeys(self.cam_names)   # names only; lerobot-rollout counts them
         self._lock = threading.RLock()
         self._thread = None
@@ -122,7 +125,12 @@ class SO101Mujoco(Robot):
 
     # --- scene ---
     def _build(self, seed, hold=False):
-        self.m, self.d, self.info = ts.build(seed, hold=hold, base_mount=self.config.rig == "base", jaw=self.config.jaw)
+        # layout_rig: the rig whose brackets stood in the scene when the seed's plants and ripe truss were decided
+        # (re-making an old dataset's pictures with another rig's cameras); None = this rig's own
+        lay = self.config.layout_rig
+        self.m, self.d, self.info = ts.build(seed, hold=hold, mounts=RIG_FIXED[lay or self.config.rig],
+                                             show_mounts=RIG_FIXED[self.config.rig] if lay else None,
+                                             jaw=self.config.jaw)
         self.info["dr"] = randomize.apply(self.m, seed, self.info["fruit"]) if self.config.domain_rand else None
         self.qidx, self.uidx = scene.arm_ids(self.m)
         if self.config.start_jitter_deg > 0:      # own stream: the scene's other draws stay as they were
@@ -142,6 +150,7 @@ class SO101Mujoco(Robot):
         self._box = None
         self._box_info = None
         self._view = (None, None)            # rig="base": the target's box + cut point on the base camera
+        self._views = {}                     # ... on every fixed camera of the rig (RIG_FIXED); [0]'s is _view
         self._tgt_k = None                   # the target truss, picked on the scene's first frame
         self._dropped = False
         self._log = []
@@ -343,7 +352,7 @@ class SO101Mujoco(Robot):
               f"cut point from {info['cut_source']}", flush=True)
 
     def get_observation(self):
-        if self.config.rig == "base":
+        if self.fixed:
             return self._observation_base()
         with self._lock:
             state = self._present_norm()
@@ -383,7 +392,8 @@ class SO101Mujoco(Robot):
         """rig="base": base + claw frames. On the scene's first frame the birdseye is rendered once more (not returned)
         and the target picked there exactly as in the birdseye rig (truss YOLO, true-box fallback). The chosen truss's
         box + cut point as the BASE camera sees them (sim truth, truss_target.view_target) are fixed then and drawn on
-        every base frame. The claw frame stays clean."""
+        every base frame. The claw frame stays clean.
+        rig="trio": the same with two fixed cameras; each gets the box + cut point as IT sees them."""
         with self._lock:
             state = self._present_norm()
             obs = {f"{j}.pos": float(v) for j, v in zip(arm_map.JOINTS, state)}
@@ -401,13 +411,12 @@ class SO101Mujoco(Robot):
             self._pick_target(dets, ids, gen)
             with self._lock:
                 if gen == self._gen:
-                    k = self._tgt_k
-                    self._view = ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], self.cam_names[0],
-                                                 u=self.cut_u) if k is not None else (None, None)
-        box, cut = self._view if self._box_info is not None else (None, None)
-        if self.config.overlay != "none" and box is not None:
+                    self._set_views(cams)
+        for c0 in self.fixed if self.config.overlay != "none" and self._box_info is not None else ():
+            box, cut = self._views.get(c0, (None, None))
+            if box is None:
+                continue
             import cv2
-            c0 = self.cam_names[0]
             obs[c0] = ov.draw_overlay(obs[c0], [], {}, target=box)
             if cut is not None:
                 u, v = (int(round(c)) for c in cut)
@@ -416,6 +425,13 @@ class SO101Mujoco(Robot):
             if self.config.state_log_dir and gen == self._gen and self._log_on:
                 self._log.append(row + (json.dumps({"birdseye": dets}) if need_target else "",))
         return obs
+
+    def _set_views(self, cams):
+        """The target's box + cut point on every fixed camera of the rig, from the sim's state right now."""
+        k = self._tgt_k
+        self._views = {} if k is None else {
+            c: ttg.view_target(cams, self.d, self.m, self.info["trusses"][k], c, u=self.cut_u) for c in self.fixed}
+        self._view = self._views.get(self.cam_names[0], (None, None))
 
     def set_cut_u(self, u):
         """Move the cue to u along the target's cut zone after the start frame picked the target (eval_truss: the
@@ -426,8 +442,8 @@ class SO101Mujoco(Robot):
             if self._box_info is None or self._tgt_k is None:
                 return
             t = self.info["trusses"][self._tgt_k]
-            if self.config.rig == "base":
-                self._view = ttg.view_target(self._cameras(), self.d, self.m, t, self.cam_names[0], u=self.cut_u)
+            if self.fixed:
+                self._set_views(self._cameras())
             elif self._box_info.get("cut_source") == "true":
                 cut = ttg.cut_pixel(self._cameras(), self.d, self.m, t, u=self.cut_u)
                 self._box_info["cut"] = None if cut is None else [round(c, 1) for c in cut]
@@ -436,7 +452,7 @@ class SO101Mujoco(Robot):
     def env_state(self):
         """The target truss's box + cut point as numbers (truss_target.ENV_NAMES); zeros before the start frame.
         What the generator records as observation.environment_state."""
-        if self.config.rig == "base":
+        if self.fixed:
             box, cut = self._view if self._box_info is not None else (None, None)
             return ttg.env_vector(box, cut)
         info = self._box_info or {}

@@ -10,13 +10,19 @@ import numpy as np
 
 from lens import LENSES
 
-CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw", "base": "base"}
+CAM_IN_MODEL = {"birdseye": "birdseye", "claw": "arm/claw", "base": "base", "low": "low", "high": "high"}
 # What the policy sees, per rig (SO101MujocoConfig.rig). "birdseye": the mast behind row R0, every dataset up to
 # blush_sim_truss_v1. "base" (K7 2026-11-06): a camera on a bracket off the arm's base, low and to its left, looking
 # up at the trusses, so the blades and the stalk are side-on at the cut (the birdseye looks along the reach and the
 # arm hides them: 0 blade pixels at the cut in 11 of 11 probe scenes). The birdseye stays in the model to pick the
 # target on the first frame, but isn't recorded.
-RIG_CAMERAS = {"birdseye": ("birdseye", "claw"), "base": ("base", "claw")}
+# "trio" (K7 2026-11-26): two fixed cameras on the cart (scene.CART_CAMS: "low" and "high", placed by
+# whatif/camera_score.py so that both see the cut point from directions at least 45 deg apart) + the claw.
+RIG_CAMERAS = {"birdseye": ("birdseye", "claw"), "base": ("base", "claw"), "trio": ("low", "high", "claw")}
+# Per rig, its fixed cameras besides the birdseye: their brackets stand in the scene (truss_scene.build mounts) and
+# the target's box + cut-point cross are drawn on them from the sim's truth. The first one gives the cue numbers
+# (observation.environment_state, 6 numbers: one more camera does not make it 12, post-mortem 5.11).
+RIG_FIXED = {"birdseye": (), "base": ("base",), "trio": ("low", "high")}
 
 
 def pinhole_size():

@@ -97,6 +97,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+from cameras import CAM_IN_MODEL, RIG_FIXED  # noqa: E402
 import picture_store  # noqa: E402
 import rescue  # noqa: E402
 import truss_ik  # noqa: E402
@@ -114,6 +115,9 @@ HOLD_MOVE_NORM = 3.0      # --holds: the arm "stayed home" within this on every 
 HOLD_SEED_START = 9_950_000   # --holds: outside every recorded range (step 2 ended at 9722070)
 
 
+ALL_CAMS = tuple(CAM_IN_MODEL)     # every camera a rig can hand the policy, in a fixed order (for the videos)
+
+
 def cameras(path):
     """The camera features a checkpoint takes, from its config.json input_features (e.g. observation.images.base)."""
     cfg = path / "config.json"
@@ -122,9 +126,10 @@ def cameras(path):
 
 
 def trained_on(path):
-    """(dataset repo id, rig) a checkpoint was trained on: the rig is "base" when the base camera is among its inputs
-    (rig "base", 2026-11-06), else "birdseye"; the dataset from its train_config.json."""
-    rig = "base" if "observation.images.base" in cameras(path) else "birdseye"
+    """(dataset repo id, rig) a checkpoint was trained on: the rig whose fixed cameras (cameras.RIG_FIXED) are all
+    among its inputs ("trio": low + high, "base": base), else "birdseye"; the dataset from its train_config.json."""
+    have = {c.split(".")[-1] for c in cameras(path)}
+    rig = next((r for r in ("trio", "base") if set(RIG_FIXED[r]) <= have), "birdseye")
     cfg = path / "train_config.json"
     return (json.loads(cfg.read_text())["dataset"]["repo_id"] if cfg.exists() else TRAIN_DATASET), rig
 
@@ -298,7 +303,7 @@ class SceneVideo:
 
     def add(self, obs, label, n=1):
         self.r.update_scene(self.robot.d, self.cam)
-        imgs = [self.r.render()] + [obs[c] for c in ("birdseye", "base", "claw") if c in obs]
+        imgs = [self.r.render()] + [obs[c] for c in ALL_CAMS if c in obs]
         h = min(i.shape[0] for i in imgs) // 2 * 2
         img = np.hstack([i[:h] for i in imgs])
         img = np.ascontiguousarray(img[:, :img.shape[1] // 2 * 2])
@@ -320,7 +325,7 @@ class SceneVideo:
 
 
 def show(obs, label):
-    for c in [c for c in ("birdseye", "base", "claw") if c in obs]:   # whichever rig the policy uses
+    for c in [c for c in ALL_CAMS if c in obs]:   # whichever rig the policy uses
         img = cv2.cvtColor(obs[c], cv2.COLOR_RGB2BGR)
         cv2.putText(img, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.imshow(f"{c} camera (what the policy sees)", img)
@@ -700,6 +705,7 @@ def main():
                 cut1 = None if cut0 is None else (cut0[0] + du, cut0[1] + dv)
                 if a.cue_shift_what in ("both", "overlay"):
                     robot._view = ([int(round(v)) for v in box1], cut1)
+                    robot._views[robot.cam_names[0]] = robot._view     # what the plugin draws (its first camera)
                     obs = robot.get_observation()      # the start frame again (no physics step since), cue redrawn
                 if a.cue_shift_what in ("both", "numbers"):
                     env = ttg.env_vector(box1, cut1)

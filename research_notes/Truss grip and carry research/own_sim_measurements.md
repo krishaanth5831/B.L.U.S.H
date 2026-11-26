@@ -379,6 +379,10 @@ poses stay in the code as `VIA_NORM_V5B_FOUND`.
   can do (4 of them needed a via-pose). Re-check of the blocked ones (`crate_diag_blocked.jsonl`), first scene
   (9740086): in 4 of 6 the retreat ends with the carried truss within 1 cm of a neighbour's fruit and no first hop
   off it exists in 300 tries (no via-pose can help; it is the retreat's end, not the route), in 2 start and goal are
-  free and the RRT finds nothing. The other two scenes: running when this was written.
+  free and the RRT finds nothing. The other two scenes (9740204, 9740281, finished 21:25): 12 of 12 the same first
+  kind, the carried truss on a neighbour's fruit (`s2t2_t6_g`, `s2t1_t5_g`) with no first hop off it. All three
+  scenes: 16 of 18 blocked at the retreat's end, 2 with free ends and no route, 0 with a route. A via-pose cannot
+  help a carry that starts in contact: what would is the retreat ending further from the neighbour, a teacher
+  change, and the teacher is closed (section 18).
 - What is left of the no-plan scenes would need the two options not taken: the builder re-checking the start pose
   after the plants settle (4 of the 22 tuning no-plans), and only ripening trusses the teacher has a plan for.

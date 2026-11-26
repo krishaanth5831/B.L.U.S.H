@@ -6,7 +6,8 @@
 
 It builds the robot through lerobot's own factory on a truss scene (SEED), drives it at 30 fps, records a 3 s
 episode with lerobot-record's feature pipeline and the AV1 encoder, reads it back, and sends one frame to rerun.
-Then rig "base" (base + claw cameras, the box on the base camera) and, if the truss YOLO is trained
+Then rig "base" (base + claw cameras, the box on the base camera), rig "trio" (low + high + claw, the box on both
+fixed cameras) and, if the truss YOLO is trained
 (generate_truss.YOLO_TRUSS), overlay=yolo for 15 s. Everything it writes goes to a temp dir ($TMPDIR honoured)
 that is deleted afterwards. Run in the lerobot-mj4 env after `pip install -e plugin`.
 """
@@ -149,6 +150,30 @@ def main():
     report(bpx > 200 and np.all(env[:4] > 0), f"rig base: green box on the base camera ({bpx} px), env_state "
                                               f"{np.round(env, 3).tolist()}")
     brobot.disconnect()
+
+    # rig "trio": low + high + claw, both cart cameras' brackets in the scene and not the base camera's, the box +
+    # cut point on each fixed camera as it sees them, the cue numbers from the first one.
+    trobot = make_robot_from_config(Cfg(seed=SEED, viewer=False, overlay="true_box", rig="trio",
+                                        state_log_dir=f"{tmp}/tstates", snap_to_first_action=False))
+    trobot.connect()
+    tobs = trobot.get_observation()
+    for _ in range(5):
+        trobot.send_action({f"{j}.pos": tobs[f"{j}.pos"] for j in js + ("gripper",)})
+        tobs = trobot.get_observation()
+    report(tuple(trobot.cameras) == ("low", "high", "claw") and "birdseye" not in tobs and "base" not in tobs
+           and all(tobs[c].shape == (480, 640, 3) for c in trobot.cameras),
+           "rig trio: cameras low + high + claw come back as 480x640x3 uint8")
+    names = {trobot.m.geom(g).name for g in range(trobot.m.ngeom)}
+    report({"low_cam_post", "high_cam_post"} <= names and "base_cam_post" not in names,
+           "rig trio: the two cart cameras' brackets are in the scene, the base camera's is not")
+    tpx = {c: int(np.all(tobs[c] == ov.TARGET_COLOUR, axis=-1).sum()) for c in trobot.cameras}
+    tenv = trobot.env_state()
+    low_box = trobot._views["low"][0]
+    report(tpx["low"] > 200 and tpx["high"] > 200 and tpx["claw"] == 0 and np.all(tenv[:4] > 0)
+           and low_box is not None and abs(tenv[0] * 640 - (low_box[0] + low_box[2]) / 2) < 1,
+           f"rig trio: green box on low ({tpx['low']} px) and high ({tpx['high']} px), none on the claw, env_state "
+           f"{np.round(tenv, 3).tolist()} is the low camera's box")
+    trobot.disconnect()
 
     # overlay=yolo: the truss YOLO on both cameras every frame, drawn into the frames (rig birdseye).
     if a.no_yolo or not YOLO_TRUSS.exists():
