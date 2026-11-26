@@ -175,6 +175,9 @@ def main():
                          "which the arm can cut from here and the target. ⚠️ Which truss is ripe depends on the jaw, "
                          "the aim point, the base and the start pose (truss_scene.build), and a seed's layout can "
                          "differ too (redrawn while no truss is reachable; trusses touching the arm are removed)")
+    ap.add_argument("--crate", help="WHAT-IF ONLY: 'sx,sy,cx,cy' (m) = another crate size and centre; the plants stay "
+                                    "as with the standard crate (truss_scene.KEEP_OUT_CRATE). ⚠️ 30 x 28 is the most "
+                                    "that fits the greenhouse (truss_scene.CRATE_SIZE note)")
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--dedup", action="store_true",
                     help="retries skip plans repeating a release pose + retreat that already failed (gt.RETRY_DEDUP)")
@@ -188,7 +191,8 @@ def main():
     if len(b) > 2:
         scene.ARM_YAW_DEG = b[2]
     head = dict(base=list(scene.ARM_BASE), yaw_deg=scene.ARM_YAW_DEG, jaw=a.jaw, old_start=a.old_start,
-                whatif_weld=a.whatif_weld, blush_v6=os.environ.get("BLUSH_V6"))   # the A/B switches of this run
+                whatif_weld=a.whatif_weld, blush_v6=os.environ.get("BLUSH_V6"),   # the A/B switches of this run
+                crate_whatif=a.crate)
     if not a.old_start:
         st = find_start(a.jaw)
         if st is None:
@@ -208,6 +212,10 @@ def main():
     import truss_expert as tx
     import truss_scene as ts
     import truss_teacher as tt
+    if a.crate:
+        sx, sy, cx, cy = (float(v) for v in a.crate.split(","))
+        ts.KEEP_OUT_CRATE = (ts.CRATE_CENTRE, ts.CRATE_SIZE)
+        ts.CRATE_CENTRE, ts.CRATE_SIZE = (cx, cy), (sx, sy, ts.CRATE_SIZE[2])
     from lerobot.utils.import_utils import register_third_party_plugins
     register_third_party_plugins()
     from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig

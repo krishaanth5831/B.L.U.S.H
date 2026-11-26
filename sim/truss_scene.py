@@ -108,8 +108,13 @@ def cut_target(t, rng=None):
 CRATE_KEEP_OUT_M = 0.04
 
 
+KEEP_OUT_CRATE = None            # what-if only (base_grid.py --crate, 2026-11-26): the (centre, size) the plants are
+                                 # kept out of, pinned to the standard crate, so a bigger what-if crate leaves every
+                                 # seed's plants as they are and only the crate differs
+
+
 def _over_crate(t):
-    (cx, cy), (sx, sy, _) = CRATE_CENTRE, CRATE_SIZE
+    (cx, cy), (sx, sy, _) = KEEP_OUT_CRATE or (CRATE_CENTRE, CRATE_SIZE)
     pts = [f["pos"] for f in t["fruit"]] + [t["peduncle_end"], t["rachis_end"]]
     return any(abs(p[0] - cx) < sx / 2 + CRATE_KEEP_OUT_M and abs(p[1] - cy) < sy / 2 + CRATE_KEEP_OUT_M for p in pts)
 
