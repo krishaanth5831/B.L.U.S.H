@@ -173,8 +173,12 @@ both jaws (`--jaw v5` for the old one). Medians over the eight:
 
 `truss_scene.build` draws the vines and trusses from the seed, then makes ripe only trusses the arm can cut from where
 it stands (`cut_ik` at three points of the cut zone and `truss_expert.approach_ok`). Both depend on the jaw, the aim
-point in the jaw, the base and the start pose. So the layout of a seed is the same in every run, but which truss is
-ripe, and so the target, is not:
+point in the jaw, the base and the start pose. So which truss is ripe, and so the target, differs between runs.
+⚠️ The layout can differ too: `build` draws the whole layout again (up to 4 draws) while no truss is reachable, and
+`_build_once` removes trusses that touch the arm at the start pose. So the same name ("s0t1") in two runs is not
+proof of the same truss. Every "same target" count in sections 10, 13, 14 and 16 was matched by name and is being
+checked against a build-only census (`base_grid.py --build-only`: every truss's position, which are reachable, the
+target's position). Targets by name:
 
 | Compared runs | Scenes of 180 with a different target truss |
 |---|---|

@@ -170,6 +170,11 @@ def main():
     ap.add_argument("--retries", type=int, default=0, help="more plans after a failed dry run (as generate_truss)")
     ap.add_argument("--plan-only", action="store_true",
                     help="census: plan each scene, no dry run; log the plan's phase or what blocked it (HIT_LOG)")
+    ap.add_argument("--build-only", action="store_true",
+                    help="census: build each scene, no plan, no dry run; log every truss (name, knuckle in mm, fruit), "
+                         "which the arm can cut from here and the target. ⚠️ Which truss is ripe depends on the jaw, "
+                         "the aim point, the base and the start pose (truss_scene.build), and a seed's layout can "
+                         "differ too (redrawn while no truss is reachable; trusses touching the arm are removed)")
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--dedup", action="store_true",
                     help="retries skip plans repeating a release pose + retreat that already failed (gt.RETRY_DEDUP)")
@@ -226,7 +231,14 @@ def main():
         robot.get_observation()
         if robot._tgt_k is not None:
             rec["target"] = robot.info["trusses"][robot._tgt_k]["name"]
-        if robot._tgt_k is None:
+        if a.build_only:
+            T = robot.info["trusses"]
+            rec.update(layout=[[t["name"], *(round(float(v) * 1000) for v in t["knuckle"]), t["n"]] for t in T],
+                       reachable=[T[k]["name"] for k in robot.info["reachable"]],
+                       ready=[T[k]["name"] for k in robot.info["ready"]])
+            if robot._tgt_k is not None:
+                rec["target_knuckle_mm"] = [round(float(v) * 1000) for v in T[robot._tgt_k]["knuckle"]]
+        elif robot._tgt_k is None:
             rec.update(plan=False, ok=False, why=f"no target ({robot._box_info['reason']})")
         else:
             tt.HIT_LOG.clear()
