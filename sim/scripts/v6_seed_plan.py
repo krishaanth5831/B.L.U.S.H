@@ -18,8 +18,11 @@ instead of leaving a part short. Each cell's episodes are split over the parts a
 lists, per cell, up to OVERSUPPLY seeds per episode of its quota (the teacher fails some), the cells taking turns,
 and the part's nothing-ripe seeds. generate_truss.py --seeds reads it (read_seed_plan): a full cell's seeds are
 skipped without building a scene. No seed is listed twice, in a part or across parts.
-⚠️ A part can still end short when the teacher fails more than the list has room for; --topup LOGS... plans one
-more part for what is missing.
+⚠️ A part can still end short when the teacher fails more than the list has room for; --topup plans one more part
+for what is missing (the recorder's attempt logs say what was kept):
+    python scripts/v6_seed_plan.py --census ... --old ... --topup ~/.cache/blush_sim/truss/<name>_new_p*.jsonl \\
+        --plan ../outputs/v6/seed_plan_v6/plan.json --used "../outputs/v6/seed_plan_v6/p*.jsonl" --first-part 24 \\
+        --out ../outputs/v6/seed_plan_v6        # writes p24.jsonl (+ plan_topup_p24.json), then record part 24
 """
 import argparse
 import collections
@@ -241,12 +244,14 @@ def main():
           f"{', '.join(f'{c} {short[c]:.1f}' for c in worst)}): --topup plans those as one more part")
     if not write:
         return
+    # a top-up never replaces the plan it tops up (--plan reads that one again for a second top-up)
+    plan_name = f"plan_topup_p{a.first_part:02d}.json" if a.topup else "plan.json"
     json.dump(dict(episodes=n_cut + n_hold, cut=n_cut, hold=n_hold, old=dict(old), want={c: int(v) for c, v in
                    want.items()}, pool={c: len(v) for c, v in pool.items()}, oversupply=a.oversupply,
                    min_supply=a.min_supply, held_back=capped, census=sorted(files), parts=summary,
                    expected_cut_kept=round(sum(expect.values()), 1)),
-              open(a.out / "plan.json", "w"), indent=1)
-    print(f"wrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and plan.json")
+              open(a.out / plan_name, "w"), indent=1)
+    print(f"wrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and {plan_name}")
 
 
 def zip_longest_lists(groups):
