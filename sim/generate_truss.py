@@ -33,6 +33,7 @@ Run in the lerobot-mj4 env under the memory cap (README / CLAUDE.md):
       -p MemorySwapMax=0 python generate_truss.py ...
 """
 import argparse
+import collections
 import gc
 import json
 import os
@@ -73,6 +74,11 @@ HOLD_S = (4.0, 6.0)
 # of the row (BALANCE_BINS along truss_scene.STEM_X) already holding more than BALANCE_MAX_SHARE of the kept episodes
 # is skipped before planning (cheap), once BALANCE_AFTER episodes are kept (design choice).
 BALANCE_BINS, BALANCE_MAX_SHARE, BALANCE_AFTER = 4, 0.35, 8
+# A seed plan (--seeds with a "quota" line; K7 2026-11-26 "more varied episodes", post-mortem step 6 "about 50
+# episodes per position and height"): a cut episode's CELL is where its cut point hangs at the start frame, the row
+# part (BALANCE_BINS along STEM_X: edges 0.27 / 0.34 / 0.41) x the height (CELL_Z_EDGES). Dataset v5's 734 scored
+# cut scenes per cell, x0..x3 for z0 | z1 | z2: 87 56 67 45 | 61 48 51 68 | 82 70 35 64 (camera_score rank).
+CELL_Z_EDGES = (0.20, 0.26)      # thirds of the cut points' heights in dataset v5 (0.13-0.31 m)
 START_TOL_NORM = 3.0             # max norm units off the start pose at the end (as the single-fruit generator, guess)
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"
 # The next dataset: v2 (rig "base") is the current one, v1 (birdseye) was deleted 2026-11-08 at K7's request.
@@ -318,6 +324,35 @@ def judge_hold(robot, watch):
     return True, "ok"
 
 
+def cell_of(p):
+    """'x<row part>z<height>' of a cut point (world, m): see CELL_Z_EDGES."""
+    x0, x1 = ts.STEM_X
+    bx = int(np.clip((p[0] - x0) / (x1 - x0) * BALANCE_BINS, 0, BALANCE_BINS - 1))
+    return f"x{bx}z{int(np.searchsorted(CELL_Z_EDGES, p[2], side='right'))}"
+
+
+def read_seed_plan(path):
+    """--seeds FILE -> (rows, quota). A row is {"seed": int} with optionally "cell" (what a census found for this
+    seed, base_grid.py --build-only: lets a full cell be skipped without building the scene) and "hold" (true: a
+    nothing-ripe episode; false: never one; absent: drawn per seed as without a plan). A line {"quota": {cell or
+    "hold": most kept episodes of it in this run}} makes the file a seed plan: cells it does not name get none.
+    Plain lines holding just a seed number work as before."""
+    rows, quota = [], None
+    for x in path.read_text().splitlines():
+        x = x.strip()
+        if not x:
+            continue
+        if not x.startswith("{"):
+            rows.append(dict(seed=int(x)))
+            continue
+        r = json.loads(x)
+        if "quota" in r:
+            quota = {str(k): int(v) for k, v in r["quota"].items()}
+        elif "seed" in r:
+            rows.append(r)
+    return rows, quota
+
+
 def hold_plan(robot, rng):
     """Stay where the scene started (the start pose, jittered or not) for HOLD_S."""
     cur = np.asarray(robot._present_norm(), float)
@@ -378,6 +413,10 @@ def main():
                     help="the world (truss_scene.WORLDS: the crate, and with it every seed's plants). crate23 = "
                          "dataset v5's 23 x 28 cm crate: episodes added to that dataset must be recorded in it "
                          "(⚠️ so dataset v6 is recorded with --world crate23). Default: the code's own, crate30")
+    ap.add_argument("--layout-rig", choices=tuple(cameras.RIG_CAMERAS), default=None,
+                    help="decide every scene with THIS rig's camera brackets standing in it, record with --rig's "
+                         "(SO101MujocoConfig.layout_rig). Dataset v6: --rig trio --layout-rig base, so its 600 new "
+                         "episodes come from the same scene generator as v5's 800 and as heldout_v5*.jsonl")
     ap.add_argument("--start-jitter-deg", type=float, default=0.0, help="start pose jitter per arm joint (SockBot: 3)")
     ap.add_argument("--hold-share", type=float, default=0.0,
                     help=f"share of stay-home episodes, nothing ready (rig base data mix: {HOLD_SHARE})")
@@ -399,11 +438,10 @@ def main():
         ts.set_world(a.world)
     if a.no_yolo:
         a.yolo_weights = None
-    seed_list = None
+    seed_list, seed_rows, quota = None, None, None
     if a.seeds is not None:
-        seed_list = [int(json.loads(x)["seed"]) if x.strip().startswith("{") else int(x)
-                     for x in a.seeds.read_text().splitlines()
-                     if x.strip() and (not x.strip().startswith("{") or "seed" in json.loads(x))]
+        seed_rows, quota = read_seed_plan(a.seeds)
+        seed_list = [int(r["seed"]) for r in seed_rows]
         a.max_attempts = len(seed_list) if a.max_attempts is None else min(a.max_attempts, len(seed_list))
     n_eps = 5 if a.pilot else a.episodes
     repo_id = a.repo_id + ("_pilot" if a.pilot else "")
@@ -415,7 +453,7 @@ def main():
     overlay = "yolo" if a.yolo_weights else "true_box"
     cfg = SO101MujocoConfig(id="sim", seed=a.seed_start, viewer=False, overlay=overlay, realtime=False,
                             fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
-                            rig=a.rig, start_jitter_deg=a.start_jitter_deg,
+                            rig=a.rig, layout_rig=a.layout_rig, start_jitter_deg=a.start_jitter_deg,
                             yolo_weights=str(a.yolo_weights) if a.yolo_weights else None)
     robot = SO101Mujoco(cfg)
 
@@ -466,6 +504,10 @@ def main():
     x0, x1 = ts.STEM_X
     bins = np.zeros(BALANCE_BINS, int)
     bin_of = lambda x: int(np.clip((x - x0) / (x1 - x0) * BALANCE_BINS, 0, BALANCE_BINS - 1))   # noqa: E731
+    cells = collections.Counter()               # kept episodes per cell ("hold" for the nothing-ripe ones)
+    full = lambda c: quota is not None and cells[c] >= quota.get(c, 0)   # noqa: E731
+    if quota is not None:
+        print(f"seed plan {a.seeds}: {len(seed_list)} seeds, most kept per cell {quota}", flush=True)
     seed, attempts, t_start = a.seed_start - 1, 0, time.time()
     try:
         while kept["n"] < n_eps and (a.max_attempts is None or attempts < a.max_attempts):
@@ -473,8 +515,12 @@ def main():
             # and the frozen start frame): free the last seed's before the next (the 2026-11-16 leak's kind)
             gc.collect()
             seed = seed_list[attempts] if seed_list else a.seed_start if a.one_layout else seed + 1
+            row = seed_rows[attempts] if seed_rows else {}
             attempts += 1
             rec = dict(seed=seed)
+            hint = "hold" if row.get("hold") else row.get("cell")
+            if hint is not None and full(hint):     # the plan's own note of this seed: no scene is built for it
+                continue
             noise = None
             # per seed, not per attempt, so a scene's dry run and recording agree (0xA015: its own stream)
             noisy = a.teacher and bool(np.random.default_rng([seed, 0xA015]).random() < a.noise_share)
@@ -490,7 +536,9 @@ def main():
             robot.config.viewer = a.watch and a.dry
             rng = np.random.default_rng([seed, 0x7255])
             left = n_eps - kept["n"]
-            hold = bool(np.random.default_rng([seed, 0x401D]).random() < max(0, n_hold - kept["hold"]) / left)
+            # a seed plan says which seeds are nothing-ripe episodes; without one it is drawn per seed
+            hold = bool(row.get("hold", False)) if "hold" in row or quota is not None else bool(
+                np.random.default_rng([seed, 0x401D]).random() < max(0, n_hold - kept["hold"]) / left)
             robot.new_scene(seed, log=False, hold=hold)
             if not np.all(np.isnan(robot.det.detached_at)):
                 skip("a fruit fell off while the vines settled"); continue
@@ -504,6 +552,7 @@ def main():
                     skip(f"hold dry run: {why}"); continue
                 if a.dry:
                     kept["n"] += 1; kept["hold"] += 1
+                    cells["hold"] += 1
                     rec.update(kept=True, reason="dry ok (hold)", wall_s=round(time.time() - t_try, 1))
                     log.write(json.dumps(rec) + "\n"); log.flush()
                     print(f"  seed {seed}: dry ok ({kept['n']}/{n_eps}) hold {plan.meta['seconds']} s", flush=True)
@@ -517,6 +566,11 @@ def main():
                     if (bins[b] + 1) / (kept["n"] - kept["hold"] + 1) > BALANCE_MAX_SHARE:
                         skip(f"balance: row part {b + 1}/{BALANCE_BINS} has {bins[b]} of "
                              f"{kept['n'] - kept['hold']}"); continue
+                rec["cell"] = cell_of(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0])
+                if full(rec["cell"]):
+                    skip(f"quota: cell {rec['cell']} has its {cells[rec['cell']]}"
+                         + (f" (the plan said {row['cell']})" if row.get("cell") not in (None, rec["cell"]) else ""))
+                    continue
                 miss = not a.teacher and bool(rng.random() < max(0, round(MISS_SHARE * n_eps) - kept["miss"]) / left)
                 rec["cut_x"] = round(float(ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d,
                                                              robot.m)[0][0]), 4)
@@ -592,6 +646,7 @@ def main():
                 if a.dry:
                     kept["n"] += 1; kept["miss"] += miss
                     bins[bin_of(rec["cut_x"])] += 1
+                    cells[rec["cell"]] += 1
                     rec.update(kept=True, reason="dry ok", wall_s=round(time.time() - t_try, 1))
                     log.write(json.dumps(rec) + "\n"); log.flush()
                     print(f"  seed {seed}: dry ok ({kept['n']}/{n_eps}) {plan.meta['seconds']} s"
@@ -643,6 +698,7 @@ def main():
                 pg.keep(ds.root, ds.meta.total_episodes - 1)
             ep = kept["n"]
             kept["n"] += 1; kept["miss"] += miss; kept["hold"] += hold
+            cells["hold" if hold else rec["cell"]] += 1
             if not hold:
                 bins[bin_of(rec["cut_x"])] += 1
             robot.extra = dict(episode_index=ep, dataset=ds.repo_id, scripted=plan.meta, env_state=env.tolist())

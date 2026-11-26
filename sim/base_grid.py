@@ -259,6 +259,10 @@ def main():
         robot.get_observation()
         if robot._tgt_k is not None:
             rec["target"] = robot.info["trusses"][robot._tgt_k]["name"]
+            # where the cut point hangs at the start frame (u 0.5 of the cut zone), mm: the place along the row and
+            # the height a recording is spread over (generate_truss.py cells)
+            rec["cut_mm"] = [round(float(v) * 1000) for v in
+                             ts.cut_target_now(robot.info["trusses"][robot._tgt_k], robot.d, robot.m)[0]]
         if a.build_only:
             T = robot.info["trusses"]
             rec.update(layout=[[t["name"], *(round(float(v) * 1000) for v in t["knuckle"]), t["n"]] for t in T],
