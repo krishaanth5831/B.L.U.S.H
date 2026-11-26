@@ -24,6 +24,8 @@ recorded episode would show that in the re-made pictures. For that question itse
 touch:  replays the episodes the sweeps listed as near misses (--episodes-json files, the seeds under --cams) with
         the rig's real brackets in the model (post cylinder and camera housing, as remake_pictures.py shows them)
         and asks the simulator's own collision check, frame by frame, whether the arm or a plant part is inside one.
+        --rig base --cams base: the same for the OLD bracket, which stood in the recorded physics: an episode it
+        lists is one where something pressed on a bracket the re-made pictures no longer show.
 """
 import argparse
 import json
@@ -190,14 +192,16 @@ def touch(a):
             if cam in names:
                 for sd, dist in eps.items():
                     seeds[int(sd)] = min(dist, seeds.get(int(sd), np.inf))
+    seeds = {sd: v for sd, v in seeds.items() if v < a.under}
     S = {x["seed"]: x for x in rc.v5_scenes()}
     hit = {}
-    print(f"{len(seeds)} episodes listed within {100 * NOTE_M:.0f} cm of {sorted(names)}; replaying them with rig "
+    print(f"{len(seeds)} episodes listed within {100 * a.under:.1f} cm of {sorted(names)}; replaying them with rig "
           f"{a.rig}'s brackets {RIG_FIXED[a.rig]} in the scene (decided with the old bracket)", flush=True)
     for n, (sd, near) in enumerate(sorted(seeds.items(), key=lambda kv: kv[1])):
         x = S[sd]
         z = np.load(x["npz"], allow_pickle=True)
-        m, d, _ = ts.build(sd, hold=bool(x["hold"]), mounts=RIG_FIXED["base"], show_mounts=RIG_FIXED[a.rig], jaw="v5")
+        m, d, _ = ts.build(sd, hold=bool(x["hold"]), mounts=RIG_FIXED["base"],
+                           show_mounts=None if a.rig == "base" else RIG_FIXED[a.rig], jaw="v5")
         if (m.nq, m.neq) != (z["qpos"].shape[1], z["eq_active"].shape[1]):
             print(f"  seed {sd}: rebuilt model differs from the log, skipped", flush=True)
             continue
@@ -246,7 +250,9 @@ if __name__ == "__main__":
     s = sub.add_parser("touch")
     s.add_argument("--from", dest="from_files", nargs="+", required=True, help="--episodes-json files of arm / plants")
     s.add_argument("--cams", required=True, help="comma list: the sweep's camera names whose near misses to replay")
-    s.add_argument("--rig", default="trio", help="the rig whose brackets stand in the replayed scenes")
+    s.add_argument("--rig", default="trio", help="the rig whose brackets stand in the replayed scenes (base: the "
+                                                 "old bracket itself, i.e. what the recorded physics touched)")
+    s.add_argument("--under", type=float, default=NOTE_M, help="only the episodes the sweep has nearer than this, m")
     s.add_argument("--json", help="write {seed: {frames, deepest_mm, target, what}} of the episodes that touch")
     a = ap.parse_args()
     dict(arm=arm, plants=plants, touch=touch)[a.mode](a)
