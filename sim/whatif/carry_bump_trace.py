@@ -34,6 +34,7 @@ LEGS = ("retreat", "to_crate", "settle_above", "lower")
 
 
 def main():
+    global LEGS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", required=True)
     ap.add_argument("--base", default="0.34,0.14")
@@ -43,7 +44,6 @@ def main():
                     help="legs to read (default: the carry). The cut: slide_in,settle_at_stalk,close_cut,squeeze")
     ap.add_argument("--jaw", default="v6", choices=scene.JAWS, help="v5 = the old jaw on the same scenes (control)")
     a = ap.parse_args()
-    global LEGS
     LEGS = tuple(a.legs.split(","))
     b = [float(v) for v in a.base.split(",")]
     scene.ARM_BASE = (b[0], b[1], 0.0)
