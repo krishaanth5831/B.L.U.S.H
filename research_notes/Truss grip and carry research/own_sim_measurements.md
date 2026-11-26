@@ -612,6 +612,12 @@ dataset): 7 of 7 kept after 9 scenes built (the teacher refused 2), one per cell
 full cells skipped without a scene, and the recorder's own cell equal to the census's in all 9 (the census is made
 with rig `base` and no start change, the recording with rig trio and the start change). 4.3 min.
 - ⚠️ One of the two refusals was "start pose not clear": with the 3 deg start change. r39 below counts how often.
+- Run again on 2026-11-27 with the clear-aware start change (below) and the same plan: again 7 of 7 kept from 9
+  scenes, the recorder's cell equal to the plan's in 8 of 8, 4.6 min. The refusal that names the start pose (seed
+  10100005, strict mode only) is not the start change's: a neighbour's fruit hangs 0.9 mm from the wrist at the
+  exact start pose in that scene, no draw in 20 clears it, so the scene starts at the exact pose, and the teacher's
+  strict mode refuses that with or without a start change (dataset v5's recording has the same line in 8 scenes).
+- The recorder's log now carries what each scene drew (`start_drawn_deg`, `start_draws`; all zeros = exact start).
 
 **The teacher with the new post standing in the scene** (same 90 tuning scenes 9730000-9730089, world `crate23`,
 old start, no start change):
