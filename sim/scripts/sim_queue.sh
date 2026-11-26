@@ -3,7 +3,7 @@
 # runs of 2026-11-26/27: camera sweeps, the re-make's dry runs, the scene census). Each line of JOBFILE is
 # "NAME|COMMAND", run from sim/ in env lerobot-mj4 with MUJOCO_GL=egl. Every job is a systemd unit
 # blush-v6-PREFIX_NAME (MemoryMax 7G, no swap: K7's memory rule); a new one starts only while fewer than MAXJ
-# blush-v6 units run and MemAvailable >= 13 GB (so 8 GB stay free once it has grown). A job whose done marker
+# blush-v6 units run and MemAvailable >= GATE_GB (13: so 8 GB stay free once it has grown). A job whose done marker
 # (outputs/v6/.done_PREFIX_NAME, written only on exit 0) exists is skipped, so a stopped queue can be started again.
 #   MAXJ=5 sim/scripts/sim_queue.sh cen6 jobs.txt        # watch: systemctl --user list-units 'blush-v6-*'
 # The census of dataset v6's fresh scenes was 24 lines of (seed starts 10100000, 10100300, ... 10106900):
@@ -11,10 +11,12 @@
 #      --seed-start <S> --scenes 300 --out ../outputs/v6/census_v6/cen_<S>.jsonl > ../outputs/v6/census_v6/cen_<S>.log 2>&1
 R=$(cd "$(dirname "$0")/../.." && pwd)
 PREFIX=${1:?prefix}; JOBS=${2:?job file}
-MAXJ=${MAXJ:-4}          # 4: five teacher jobs took MemAvailable to 7.9 GB (2026-11-26); 5-6 is fine for build-only jobs (1.5 GB each)
+MAXJ=${MAXJ:-4}          # 4: five teacher jobs took MemAvailable to 7.9 GB (2026-11-26); 5-7 is fine for build-only jobs (1.5 GB each)
+GATE_GB=${GATE_GB:-13}   # start a job only at this much MemAvailable. 13 for teacher jobs (they grow to 3-5 GB); 11 is
+#                          enough for build-only census jobs (peak 1.6 GB measured), which still leaves 8 GB free
 active() { systemctl --user list-units 'blush-v6-*' --state=active --no-legend | wc -l; }
 avail_gb() { awk '/MemAvailable/ {printf "%d", $2/1048576}' /proc/meminfo; }
-wait_slot() { while [ "$(active)" -ge "$MAXJ" ] || [ "$(avail_gb)" -lt 13 ]; do sleep 30; done; }
+wait_slot() { while [ "$(active)" -ge "$MAXJ" ] || [ "$(avail_gb)" -lt "$GATE_GB" ]; do sleep 30; done; }
 while IFS='|' read -r NAME CMD; do
   [ -z "$NAME" ] && continue
   [ -e "$R/outputs/v6/.done_${PREFIX}_${NAME}" ] && continue
