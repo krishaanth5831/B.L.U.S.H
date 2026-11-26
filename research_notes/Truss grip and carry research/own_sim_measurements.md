@@ -228,7 +228,7 @@ ripe, and so the target, is not:
 - Without the neighbour-swing rule (second reading only): 87 % against 84 %.
 - Base 0.34/0.14 was picked on the plan rate (plan-only census 91 %) and the claw camera's angle to the row (11 deg),
   with scores that could not be told apart at 30 scenes (21-23 of 30). Going back is the owner's decision.
-- Queued 2026-11-26 12:40: new jaw with the old teacher's logic on the old base and start pose, aim 2 mm (r23) and
+- Queued 2026-11-26 12:27: new jaw with the old teacher's logic on the old base and start pose, aim 2 mm (r23) and
   aim 8 mm (r24). The "slide wide, move over" variant (r20) is paused at 28 of 180 scenes.
 
 ## 15. Where the truss is when the jaw opens over the crate (`whatif/release_trace.py`)
