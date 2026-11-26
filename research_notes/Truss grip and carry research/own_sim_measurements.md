@@ -532,3 +532,48 @@ World `crate30` (these were collected before the two worlds were named), old bas
 - With rig `trio` the high camera sees the cut point at the start in 98 % of the scenes from the old start
   (section 24), which was the searched start's one gain. The 800 old episodes all begin at the old start. So
   dataset v6 keeps the old start; the default is the owner's to switch.
+
+## 26. Checks of the camera pick (2026-11-26 night; nothing recorded, no dataset written)
+
+**The post against every frame of the old episodes** (`camera_sweep_logs.py arm --every 1`, all 800 episodes,
+384,677 frames; distances to the post's centre line and the lens point, so the post's 8 mm radius and the housing
+come off):
+
+| Post | Arm: nearest | Episodes under 4 cm | under 6 cm |
+|---|---|---|---|
+| Chosen upright, lens at 34-50 cm | 4.4 cm (seed 10005040, frame 50) | 0 | 5 |
+| Chosen upright, lens at 5 cm | 10.9 cm | 0 | 0 |
+| Today's base camera bracket | 2.2 cm | 314 | 487 |
+
+No old episode has to be left out of a re-make because of the arm.
+
+**The first three-camera pictures** (`remake_pictures.py dry --episodes 0,23,1,13,799,15,147,233 --shots`, rig trio,
+scenes decided with the old bracket; the episodes are a nothing-ripe one, a far stem, near ones, a high truss, the
+last one, and the three closest calls of the sweeps): 8 of 8 rebuilt as recorded (the logged joint readings equal
+the dataset's on every frame), every 5th frame built as a dataset frame and passed the dataset's own frame check,
+the target's box and cut point inside the picture on both fixed cameras in all 7 cut episodes, an all-zero cue only
+in the nothing-ripe one. 4,063 frames in 186 s with three other jobs running = 0.046 s per frame, so the 383,877
+frames of the old 800 are about 5 hours of rendering in one process (the video writing is not in that figure).
+- Pictures: `outputs/v6/remake_dry/shots/remake_trio_e*.png` (columns high, low, claw; rows start, 15 frames
+  before the cut, the cut, mid-carry).
+- Neither bracket shows in the other fixed camera's picture. The claw camera sees the post when the arm swings past
+  it (episode 147, frames 40-60), as it would on the real cart.
+- ⚠️ For a truss on the nearest stem the high camera has the cut point well inside the picture but the fruit below
+  it run out of the bottom edge, so the box is cut off there; and the low camera, looking along the row, can have
+  a nearer truss in front of a far target, so its box then sits on that nearer truss (it marks where the target
+  is, hidden or not, as on the base camera in dataset v5).
+- ⚠️ The first run of this failed on the check itself: `validate_frame` against the raw feature dict refuses the cue
+  feature's list shape `[6]`; a dataset turns shapes into tuples when it is created, which is what the dry mode now
+  checks against.
+
+**The recorder's seed-plan path** (`generate_truss.py --dry` on a 7-episode toy plan made from a 33-scene sample
+census, `--rig trio --layout-rig base --world crate23 --start-jitter-deg 3 --seeds`; plans and judges, writes no
+dataset): 7 of 7 kept after 9 scenes built (the teacher refused 2), one per cell as the quota says, the seeds of
+full cells skipped without a scene, and the recorder's own cell equal to the census's in all 9 (the census is made
+with rig `base` and no start change, the recording with rig trio and the start change). 4.3 min.
+- ⚠️ One of the two refusals was "start pose not clear": with the 3 deg start change. r39 below counts how often.
+
+**The teacher with the new post standing in the scene** (same 90 tuning scenes 9730000-9730089, world `crate23`,
+old start): baseline r37 with today's bracket: 65 of 89 scenes with a ripe truss = 73 % (16 no plan, 4 moved a
+neighbour, 2 fruit came off, 1 never cut, 1 not all in the crate). r38 (new post) and r39 (new post + 3 deg start
+change): see the table at the end of this section when they are in.
