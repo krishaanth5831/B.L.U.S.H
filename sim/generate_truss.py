@@ -540,6 +540,9 @@ def main():
             hold = bool(row.get("hold", False)) if "hold" in row or quota is not None else bool(
                 np.random.default_rng([seed, 0x401D]).random() < max(0, n_hold - kept["hold"]) / left)
             robot.new_scene(seed, log=False, hold=hold)
+            if "start_jitter_deg" in robot.info:      # --start-jitter-deg: what this scene drew (all 0 = the exact
+                rec.update(start_drawn_deg=robot.info["start_jitter_deg"],     # start, no clear draw was found)
+                           start_draws=robot.info["start_jitter_tries"])
             if not np.all(np.isnan(robot.det.detached_at)):
                 skip("a fruit fell off while the vines settled"); continue
             robot.get_observation()

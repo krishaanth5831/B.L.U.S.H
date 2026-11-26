@@ -257,6 +257,8 @@ def main():
                    start_jitter_deg=a.start_jitter_deg)
         robot.new_scene(seed, log=False)
         robot.get_observation()
+        if "start_jitter_deg" in robot.info:          # --start-jitter-deg: what this scene drew (all 0 = exact start)
+            rec.update(start_drawn_deg=robot.info["start_jitter_deg"], start_draws=robot.info["start_jitter_tries"])
         if robot._tgt_k is not None:
             rec["target"] = robot.info["trusses"][robot._tgt_k]["name"]
             # where the cut point hangs at the start frame (u 0.5 of the cut zone), mm: the place along the row and
