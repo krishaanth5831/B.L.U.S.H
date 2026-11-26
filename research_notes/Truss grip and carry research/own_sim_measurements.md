@@ -430,15 +430,16 @@ poses stay in the code as `VIA_NORM_V5B_FOUND`.
 
 | Piece | Check | Result |
 |---|---|---|
-| Rig `trio` (cameras low, high, claw; `layout_rig`) | rig `base` scenes before and after the change | identical (geoms, state, ripe truss); only the model's camera count 3 -> 5 |
-| | `remake_pictures.py dry --start-only` on 2 old episodes, provisional cameras | both rebuilt as recorded, a box and a cut pixel on both fixed cameras |
+| Rig `trio` (cameras high, low, claw since the pick of section 24; `layout_rig`) | rig `base` scenes before and after the change | identical (geoms, state, ripe truss); only the model's camera count 3 -> 5 |
+| | `remake_pictures.py dry --start-only` on 2 old episodes, provisional cameras | both rebuilt as recorded, a box and a cut pixel on both fixed cameras (all 800 with the picked cameras: section 26) |
 | Picture storage (`picture_store.py`) | `selfcheck`, `gatecheck` | H.264, every frame a key frame, constant qp: a stored frame equals its picture sent through alone; the gate passes that, refuses v5's storage, survives a merge |
 | Notebook's own gate (cell 4 of `colab_train_act_v6.ipynb`) | `scripts/check_colab_gate.py` | passes a three-camera dataset stored by the rule, refuses one stored as v5 and one with a changed fingerprint |
 | Start guard, command clip, "cut with the first closing and still held" | `eval_truss.py` on the old checkpoint (`act_teacher_v5b64` 70k), 2 held-out scenes + 2 nothing-ripe, `--world crate23 --start-guard --clip-actions` | ran; the two held-out seeds give the targets `heldout_v5.jsonl` lists; guard fired in 2 of 2 nothing-ripe scenes (policy not run); 538 commands clipped (444 of them in the scene the policy failed); first-closing measure 1 of 2 |
 | Training recipe (`--policy.dropout=0.0`, both learning rates 3e-5, no scheduler) | LeRobot's config parsed with the notebook's flags | AdamW lr 3e-5, weight decay 1e-4, scheduler None |
 
-Not run: the recorder with the gate (`generate_truss.py`, any rig), `remake_pictures.py part`, `check_plugin.py`'s
-trio block (it writes a 3 s throwaway dataset), the notebook itself, a rollout of a trio policy.
+Not run: the recorder with the gate (`generate_truss.py`, any rig; its `--dry`, which writes no dataset, has: section
+26), `remake_pictures.py part`, `check_plugin.py`'s trio block (it writes a 3 s throwaway dataset), the notebook
+itself, a rollout of a trio policy.
 
 ## 24. Where the two fixed cameras go (rig "trio"), 2026-11-26 night
 
@@ -574,6 +575,30 @@ with rig `base` and no start change, the recording with rig trio and the start c
 - ⚠️ One of the two refusals was "start pose not clear": with the 3 deg start change. r39 below counts how often.
 
 **The teacher with the new post standing in the scene** (same 90 tuning scenes 9730000-9730089, world `crate23`,
-old start): baseline r37 with today's bracket: 65 of 89 scenes with a ripe truss = 73 % (16 no plan, 4 moved a
-neighbour, 2 fruit came off, 1 never cut, 1 not all in the crate). r38 (new post) and r39 (new post + 3 deg start
-change): see the table at the end of this section when they are in.
+old start, no start change):
+
+| Run | Brackets in the scene | Teacher |
+|---|---|---|
+| r37 | today's base camera bracket | 65 of 89 scenes with a ripe truss = 73 % (16 no plan, 4 moved a neighbour, 2 fruit came off, 1 never cut, 1 not all in the crate) |
+| r38 | the new upright with both cameras (scene decided with the old bracket) | 65 of 89 = 73 % |
+
+- The same truss is the target in 90 of 90 scenes and every scene ends the same way (65 work in both, 24 fail in
+  both). The attempt records are the same in 89 of 90; in the last one (9730013) a fruit an early failed attempt
+  knocked off a neighbour rolled 392 mm instead of 249 mm. One no-plan scene (9730061) counts 81 blocked crate
+  routes instead of 88. So the post costs the teacher nothing on these scenes.
+- `scratchpad compare_runs.py` pairs the runs by seed; files `outputs/v6/base_grid_r37_CRATE23_BASE_*.jsonl`,
+  `..._r38_TRIO_*.jsonl`.
+
+**The start change (`--start-jitter-deg 3`): a plain draw does not work, a clear-aware one does.**
+- r39 (new post + each arm joint drawn within 3 deg of the start pose, first 15 tuning scenes): 6 of 15 work, where
+  11 of the same 15 work without the change. All 5 lost scenes are refused before any motion: "start pose not
+  clear". Cause (seeds 9730004/5/7 rebuilt): the folded start has the lower arm 2-3 mm off the shoulder, and a
+  draw that folds the elbow about 1.5 deg further brings them under the teacher's 2 mm self-clearance
+  (`self: shoulder / lower_arm`). Nothing else is near: the table is 16 mm from the arm at the start.
+- Fix (`so101_mujoco.py` `_start_clear`, 2026-11-27): a drawn start pose is kept only when the arm stays 3 mm from
+  itself and 5 mm from everything else that collides in the physics (1 mm over what the teacher asks), else it is
+  drawn again from the same stream, up to 20 times, then the exact pose. The first draw is the old one, so a seed
+  whose first draw was clear starts where it did. 9 scenes rebuilt with it (the three above and six more): 1-4
+  draws each, and the teacher's own start check has no hit in any.
+- ⚠️ So the elbow's change is one-sided: about -3 to +1 deg. The other joints keep the full range.
+- r40 (the fixed change, tuning scenes 9730000-9730044) is in the table at the end of this section.
