@@ -11,12 +11,15 @@ Reads no simulator and writes no dataset. The inputs:
   --census  base_grid.py --build-only records of fresh seeds (seed, target, cut_mm), built in the dataset's world
             with the scene generator the recording will use (--world crate23, layout rig base).
   --old     where the old dataset's cut points are: camera_score.py collect files of its own scenes (p_cut).
-A cut episode's cell = generate_truss.cell_of(cut point): 4 parts along the row x 3 heights. Per cell the plan asks
-for what brings old + new to the same total (cells already above it get none), split over the parts as evenly as it
-goes; each part's file lists, per cell, OVERSUPPLY times the seeds its quota needs (the teacher fails some), the
-cells taking turns, and the part's nothing-ripe seeds. generate_truss.py --seeds reads it (read_seed_plan): a full
-cell's seeds are skipped without building a scene.
-⚠️ A part can end short when a cell's seeds run out; --topup LOGS... plans one more part for what is missing.
+A cut episode's cell = generate_truss.cell_of(cut point): 4 parts along the row x 3 heights. The new episodes go
+one at a time to the cell that has the fewest so far (old + new), as long as the census still has MIN_SUPPLY seeds
+per episode for it: so the cells end level where the census allows it, and a rare cell gets what its seeds reach
+instead of leaving a part short. Each cell's episodes are split over the parts as evenly as it goes; a part's file
+lists, per cell, up to OVERSUPPLY seeds per episode of its quota (the teacher fails some), the cells taking turns,
+and the part's nothing-ripe seeds. generate_truss.py --seeds reads it (read_seed_plan): a full cell's seeds are
+skipped without building a scene. No seed is listed twice, in a part or across parts.
+⚠️ A part can still end short when the teacher fails more than the list has room for; --topup LOGS... plans one
+more part for what is missing.
 """
 import argparse
 import collections
@@ -33,8 +36,11 @@ import numpy as np  # noqa: E402
 import generate_truss as gt  # noqa: E402
 
 CELLS = [f"x{i}z{j}" for j in range(len(gt.CELL_Z_EDGES) + 1) for i in range(gt.BALANCE_BINS)]
-OVERSUPPLY = 2.5        # seeds listed per episode wanted. Dataset v5's log: the teacher kept 736 of 1,044 cut scenes
-#                         it tried = 70 %; per slot 17-83 %, so 2.5 leaves room for a cell at 40 %
+OVERSUPPLY = 2.5        # seeds listed per episode wanted, where the census has them. Dataset v5's log: the teacher
+#                         kept 736 of 1,044 cut scenes it tried = 70 %; per slot 17-83 %, so 2.5 leaves room for a
+#                         cell at 40 %
+MIN_SUPPLY = 1.6        # a cell is planned only as far as the census has this many seeds per episode (1 / 1.6 = 63 %
+#                         kept: just under the teacher's 70 % overall, guess)
 
 
 def census(files):
@@ -66,14 +72,16 @@ def old_cells(files):
     return c
 
 
-def split(total, weights):
-    """Whole numbers summing to total, proportional to weights (largest remainders)."""
-    w = np.asarray(weights, float)
-    raw = total * w / w.sum()
-    out = np.floor(raw).astype(int)
-    for i in np.argsort(-(raw - out))[:total - out.sum()]:
-        out[i] += 1
-    return out
+def level(old, n, cap):
+    """New episodes per cell: one at a time to the cell with the fewest so far (old + new) that is still under its
+    cap. -> {cell: count}; fewer than n in all when every cell is at its cap."""
+    want = dict.fromkeys(CELLS, 0)
+    for _ in range(n):
+        free = [c for c in CELLS if want[c] < cap[c]]
+        if not free:
+            break
+        want[min(free, key=lambda c: (old[c] + want[c], c))] += 1
+    return want
 
 
 def kept_so_far(logs):
@@ -95,10 +103,12 @@ def main():
     ap.add_argument("--part-size", type=int, default=25, help="as dataset v5's parts (record_parts.sh)")
     ap.add_argument("--hold-share", type=float, default=gt.HOLD_SHARE, help="nothing-ripe episodes (v5: 64 of 800)")
     ap.add_argument("--oversupply", type=float, default=OVERSUPPLY)
+    ap.add_argument("--min-supply", type=float, default=MIN_SUPPLY)
     ap.add_argument("--used", nargs="*", default=[], help="seed plans already written (p*.jsonl): their seeds are "
                                                          "left out of this plan")
     ap.add_argument("--topup", nargs="*", default=[], help="attempt logs of recorded parts: plan only what they "
                                                           "left missing of the full plan, as extra parts")
+    ap.add_argument("--plan", help="with --topup: the plan.json those parts were recorded from")
     ap.add_argument("--first-part", type=int, default=0)
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--dry", action="store_true")
@@ -114,21 +124,23 @@ def main():
     old = old_cells([f for pat in a.old for f in glob.glob(pat)])
     n_hold = round(a.hold_share * a.episodes)
     n_cut = a.episodes - n_hold
-    # per cell: what brings old + new to one level (water filling: cells above the level get none)
-    lvl = (sum(old.values()) + n_cut) / len(CELLS)
-    for _ in range(len(CELLS)):
-        low = [c for c in CELLS if old[c] < lvl]
-        new_lvl = (sum(old[c] for c in low) + n_cut) / len(low)
-        if abs(new_lvl - lvl) < 1e-9:
-            break
-        lvl = new_lvl
-    want = dict(zip(CELLS, split(n_cut, [max(0.0, lvl - old[c]) for c in CELLS])))
-    want["hold"] = n_hold
-    if a.topup:
+    # per cell: level old + new, as far as the census seeds reach (level)
+    cap = {c: int(len(pool.get(c, [])) / a.min_supply) for c in CELLS}
+    if a.topup:                    # what the recorded parts left missing of the plan they were recorded from
+        full = json.load(open(a.plan))["want"] if a.plan else level(old, n_cut, dict.fromkeys(CELLS, n_cut)) | {
+            "hold": n_hold}
         got = kept_so_far([f for pat in a.topup for f in glob.glob(pat)])
-        want = {c: max(0, want[c] - got[c]) for c in want}
-        n_cut, n_hold = sum(v for c, v in want.items() if c != "hold"), want["hold"]
-        print(f"top-up: {sum(got.values())} episodes kept so far, {n_cut + n_hold} missing")
+        want = {c: min(max(0, full.get(c, 0) - got[c]), cap[c]) for c in CELLS}
+        n_cut, n_hold = sum(want.values()), max(0, full.get("hold", n_hold) - got["hold"])
+        print(f"top-up: {sum(got.values())} episodes kept so far, {n_cut + n_hold} planned now")
+    else:
+        want = level(old, n_cut, cap)
+        if sum(want.values()) < n_cut:
+            print(f"⚠️ the census has seeds for only {sum(want.values())} of the {n_cut} cut episodes at "
+                  f"{a.min_supply} seeds per episode: more census seeds are needed")
+            n_cut = sum(want.values())
+    capped = [c for c in CELLS if want[c] == cap[c] and not a.topup]
+    want["hold"] = n_hold
     n_parts = math.ceil((n_cut + n_hold) / a.part_size)
     # deal the wanted episodes to the parts: each cell's episodes spread evenly over the parts
     labels = sorted(((k + 0.5) / want[c], c) for c in want for k in range(want[c]))
@@ -137,38 +149,52 @@ def main():
         parts[i % n_parts][c] += 1
     print(f"census: {n_seeds} seeds, {sum(len(v) for v in pool.values())} with a ripe truss, {len(none)} with none"
           f"{f' ({len(used)} seeds already planned are left out)' if used else ''}")
-    print(f"plan: {n_cut} cut + {n_hold} nothing-ripe episodes in {n_parts} parts of up to {a.part_size}; a seed list "
-          f"of {a.oversupply} x the quota per cell")
+    print(f"plan: {n_cut} cut + {n_hold} nothing-ripe episodes in {n_parts} parts of up to {a.part_size}; per cell up "
+          f"to {a.oversupply} seeds listed per episode, and no more episodes than the census has {a.min_supply} "
+          f"seeds for")
     print("\n| Where the cut point hangs | Old 800 | New | Together | Census seeds | Seeds per new episode |\n"
           "|---|---|---|---|---|---|")
     xs = np.linspace(*gt.ts.STEM_X, gt.BALANCE_BINS + 1)
     zs = ("below 0.20 m", "0.20-0.26 m", "above 0.26 m")
-    short = {}
     for c in CELLS:
         i, j = int(c[1]), int(c[3])
         ratio = len(pool.get(c, [])) / want[c] if want[c] else float("inf")
-        if want[c] and ratio < a.oversupply:
-            short[c] = ratio
         print(f"| {c}: row {xs[i]:.2f}-{xs[i + 1]:.2f} m, {zs[j]} | {old[c]} | {want[c]} | {old[c] + want[c]} | "
               f"{len(pool.get(c, []))} | {'-' if not want[c] else f'{ratio:.1f}'} |")
     print(f"| all | {sum(old.values())} | {n_cut} | {sum(old.values()) + n_cut} | "
           f"{sum(len(v) for v in pool.values())} | |")
-    if short:
-        print(f"\n⚠️ fewer than {a.oversupply} census seeds per wanted episode in {short}: those cells may end short "
-              f"(more census seeds, or accept it)")
+    if capped:
+        print(f"\n⚠️ held back by the census ({a.min_supply} seeds per episode): {capped}. Their share went to the "
+              f"other cells; more census seeds would level them further")
     if a.dry or a.out is None:
         return
     a.out.mkdir(parents=True, exist_ok=True)
-    take = {c: iter(v) for c, v in pool.items()}
-    hold_seeds = iter(none + [s for c in CELLS for s in pool.get(c, [])[::-1]])   # holds: any seed; from the far end
+    # the nothing-ripe seeds first, out of the pools (any scene can be one): scenes with no ripe truss, then from the
+    # far end of the cells with the most seeds to spare, so no seed is both a hold and a cut episode
+    pool = {c: list(v) for c, v in pool.items()}
+    n_hold_seeds = sum(q["hold"] + 2 for q in parts if q["hold"])            # two spare per part
+    hold_seeds = list(none[:n_hold_seeds])
+    while len(hold_seeds) < n_hold_seeds:
+        spare = {c: len(pool.get(c, [])) - math.ceil(want[c] * a.oversupply) for c in CELLS if pool.get(c)}
+        c = max(spare, key=lambda c: (spare[c], c)) if spare else None
+        if c is None or spare[c] <= 0:
+            break
+        hold_seeds.append(pool[c].pop())
+    hold_seeds = iter(hold_seeds)
+    # per cell: the seeds a part gets = its share of the cell's list, the list being min(OVERSUPPLY, what the census
+    # has) seeds per episode, dealt in running totals so the last part is not the one left without
+    per_ep = {c: min(a.oversupply, len(pool.get(c, [])) / want[c]) for c in CELLS if want[c]}
+    given, asked = collections.Counter(), collections.Counter()
     taken, summary = set(), []
     for k, q in enumerate(parts):
         rows_by = {}
         for c in CELLS:
             if q[c]:
-                rows_by[c] = [dict(seed=s, cell=c, hold=False) for s in
-                              (next(take[c], None) for _ in range(math.ceil(q[c] * a.oversupply) + 1))
-                              if s is not None]
+                asked[c] += q[c]
+                n = min(len(pool[c]), round(asked[c] * per_ep[c])) - given[c]
+                rows_by[c] = [dict(seed=s, cell=c, hold=False) for s in pool[c][given[c]:given[c] + n]]
+                given[c] += n
+                assert not taken & {r["seed"] for r in rows_by[c]}
                 taken |= {r["seed"] for r in rows_by[c]}
         rows = [r for grp in zip_longest_lists(list(rows_by.values())) for r in grp]
         holds = []
@@ -176,9 +202,9 @@ def main():
             s = next(hold_seeds, None)
             if s is None:
                 break
-            if s not in taken:
-                taken.add(s)
-                holds.append(dict(seed=s, hold=True))
+            assert s not in taken
+            taken.add(s)
+            holds.append(dict(seed=s, hold=True))
         step = max(1, len(rows) // (len(holds) + 1))
         for i, h in enumerate(holds):                      # the holds spread through the list
             rows.insert(min(len(rows), (i + 1) * step + i), h)
@@ -192,7 +218,8 @@ def main():
                             quota={c: int(n) for c, n in q.items() if n}))
     json.dump(dict(episodes=n_cut + n_hold, cut=n_cut, hold=n_hold, old=dict(old), want={c: int(v) for c, v in
                    want.items()}, pool={c: len(v) for c, v in pool.items()}, oversupply=a.oversupply,
-                   census=sorted(files), parts=summary), open(a.out / "plan.json", "w"), indent=1)
+                   min_supply=a.min_supply, held_back=capped, census=sorted(files), parts=summary),
+              open(a.out / "plan.json", "w"), indent=1)
     print(f"\nwrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and plan.json; "
           f"{len(taken)} seeds listed")
 

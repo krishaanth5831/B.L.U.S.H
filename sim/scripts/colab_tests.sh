@@ -9,9 +9,11 @@
 # The testers are the same as train_and_test.sh's (so the tables compare with act_teacher_v5's), from FROM on.
 #   sim/scripts/colab_tests.sh act_teacher_v5b64 krish5831/blush_sim_act_v5b64 [steps] [first tested step]
 # A v6 run (dataset = v5's 800 re-made + 600 new, rig trio; NOT RUN YET):
-#   EXTRA="--world crate23 --start-guard --clip-actions" sim/scripts/colab_tests.sh act_teacher_v6b64 \
+#   EXTRA="--world crate23 --layout-rig base --start-guard --clip-actions" sim/scripts/colab_tests.sh act_teacher_v6b64 \
 #       krish5831/blush_sim_act_v6b64
 #   ⚠️ --world crate23: the dataset's world is v5's 23 x 28 cm crate, not the code default (truss_scene.WORLDS).
+#   ⚠️ --layout-rig base: dataset v6's scenes are decided with the old camera bracket standing in them and shown with
+#   the new ones (own_sim_measurements.md section 21), so the held-out lists (heldout_v5*.jsonl) keep their targets.
 #   --start-guard / --clip-actions: the two guards outside the policy (post-mortem 5.9), opt-in.
 #   The rig, the picture path and the encoder come from the checkpoint and its dataset by themselves.
 # Tables: python3 sim/scripts/checkpoint_table.py <run> [--wait <step>]
