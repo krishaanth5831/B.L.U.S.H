@@ -212,6 +212,10 @@ target's position). Targets by name:
 - No stale copy of the aim: every user reads it at call time through `truss_ik.cut_point_in_gripper` (IK, carry
   check, hanging model, release fit, the scene builder).
 - The default stays 8 mm until the owner decides.
+- "Slide in 8 mm off, move sideways to 2 mm, then close" (r20: `{"V6_AIM_FROM_PAD_M": 0.002, "V6_MEET_FROM_M":
+  0.008}`, today's teacher otherwise): 129/180 = 71.7 %. Against the 8 mm aim: first half 54 -> 62, held-out half
+  66 -> 67 (won 18, lost 9). Against the plain 2 mm aim: won 2, lost 4, and two scenes end on a joint stalled at its
+  force limit, which no other run has. No gain over the plain closer aim; `V6_MEET_FROM_M` stays off.
 
 ## 14. Old jaw on the old base and the old start pose (r22: `--jaw v5 --base 0.37,0.20 --old-start`, crate 30 x 28)
 
