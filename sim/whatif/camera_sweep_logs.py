@@ -16,7 +16,14 @@ plants: per camera, the smallest distance over the logged frames from its post t
         (v5's world), so it runs on --n episodes, spread over every target position and height.
 
 Also why it matters for re-making v5's pictures with new cameras: a post the arm or a truss passed through in a
-recorded episode would show that in the re-made pictures.
+recorded episode would show that in the re-made pictures. For that question itself:
+
+    python whatif/camera_sweep_logs.py touch --from fine_arm_eps_*.json fine_plants_eps_*.json \
+        --cams g_0.02_0.30_0.42,g_0.02_0.30_0.05
+
+touch:  replays the episodes the sweeps listed as near misses (--episodes-json files, the seeds under --cams) with
+        the rig's real brackets in the model (post cylinder and camera housing, as remake_pictures.py shows them)
+        and asks the simulator's own collision check, frame by frame, whether the arm or a plant part is inside one.
 """
 import argparse
 import json
@@ -170,6 +177,57 @@ def plants(a):
     write(a, names, best, per_ep)
 
 
+def touch(a):
+    import mujoco
+
+    import truss_scene as ts
+    from cameras import RIG_FIXED
+    ts.set_world("crate23")
+    names = set(a.cams.split(","))
+    seeds = {}
+    for f in a.from_files:
+        for cam, eps in json.load(open(f)).items():
+            if cam in names:
+                for sd, dist in eps.items():
+                    seeds[int(sd)] = min(dist, seeds.get(int(sd), np.inf))
+    S = {x["seed"]: x for x in rc.v5_scenes()}
+    hit = {}
+    print(f"{len(seeds)} episodes listed within {100 * NOTE_M:.0f} cm of {sorted(names)}; replaying them with rig "
+          f"{a.rig}'s brackets {RIG_FIXED[a.rig]} in the scene (decided with the old bracket)", flush=True)
+    for n, (sd, near) in enumerate(sorted(seeds.items(), key=lambda kv: kv[1])):
+        x = S[sd]
+        z = np.load(x["npz"], allow_pickle=True)
+        m, d, _ = ts.build(sd, hold=bool(x["hold"]), mounts=RIG_FIXED["base"], show_mounts=RIG_FIXED[a.rig], jaw="v5")
+        if (m.nq, m.neq) != (z["qpos"].shape[1], z["eq_active"].shape[1]):
+            print(f"  seed {sd}: rebuilt model differs from the log, skipped", flush=True)
+            continue
+        cam_g = {g for g in range(m.ngeom) if "_cam_" in (m.geom(g).name or "")}
+        worst, frames, who = 0.0, 0, set()
+        for k in range(len(z["qpos"])):
+            d.qpos[:] = z["qpos"][k]
+            d.eq_active[:] = z["eq_active"][k]
+            mujoco.mj_kinematics(m, d)
+            mujoco.mj_collision(m, d)
+            deep = 0.0
+            for c in d.contact[:d.ncon]:
+                if (c.geom1 in cam_g) != (c.geom2 in cam_g) and c.dist < 0:
+                    other = c.geom2 if c.geom1 in cam_g else c.geom1
+                    who.add(f"{m.geom(other).name or m.body(m.geom_bodyid[other]).name} on "
+                            f"{m.geom(c.geom1 if c.geom1 in cam_g else c.geom2).name}")
+                    deep = min(deep, c.dist)
+            frames += deep < 0
+            worst = min(worst, deep)
+        if frames:
+            hit[sd] = dict(frames=frames, deepest_mm=round(-1000 * worst, 1), target=x["target"], what=sorted(who))
+        print(f"  {n + 1}/{len(seeds)} seed {sd} target {x['target']} (sweep: {100 * near:.1f} cm): "
+              + (f"INSIDE a bracket in {frames} frames, deepest {-1000 * worst:.1f} mm: {sorted(who)}" if frames
+                 else "nothing touches a bracket"), flush=True)
+    print(f"\n{len(hit)} of {len(seeds)} replayed episodes have the arm or a plant part inside a bracket: "
+          f"{sorted(hit)}")
+    if a.json:
+        json.dump({str(k): v for k, v in hit.items()}, open(a.json, "w"), indent=1)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -185,5 +243,10 @@ if __name__ == "__main__":
             s.add_argument("--n", type=int, default=60, help="episodes to rebuild (0 = every cut episode)")
         else:
             s.add_argument("--limit", type=int, default=0, help="only the first N episodes (a quick try)")
+    s = sub.add_parser("touch")
+    s.add_argument("--from", dest="from_files", nargs="+", required=True, help="--episodes-json files of arm / plants")
+    s.add_argument("--cams", required=True, help="comma list: the sweep's camera names whose near misses to replay")
+    s.add_argument("--rig", default="trio", help="the rig whose brackets stand in the replayed scenes")
+    s.add_argument("--json", help="write {seed: {frames, deepest_mm, target, what}} of the episodes that touch")
     a = ap.parse_args()
-    dict(arm=arm, plants=plants)[a.mode](a)
+    dict(arm=arm, plants=plants, touch=touch)[a.mode](a)
