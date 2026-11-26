@@ -287,3 +287,77 @@ All on the 180 tuning scenes, up to 6 retries, crate 30 x 28. "Old logic" = `{"V
 - **The `V6_*` teacher changes as a package:** nothing measurable at 0.34/0.14 (aim 8 mm: won 12, lost 14; aim 2 mm:
   won 13, lost 10). Not run on the old base.
 - Without the neighbour-swing rule (second reading only), old base: old jaw 87 %, new jaw 83 % at either aim.
+
+## 17. What each setup is given: the build-only census (`base_grid.py --build-only`, 2026-11-26)
+
+`outputs/v6/base_grid_cen_*`: per seed every truss (name, knuckle position, fruit), which are reachable, the target.
+⚠️ Load with `_[0-9]*.jsonl` (tag `cen_v6a8_nb` is a prefix of `cen_v6a8_nb_oldstart`).
+
+| Setup | Trusses per scene | Fruit per scene | Reachable per scene |
+|---|---|---|---|
+| Base 0.34/0.14, searched start pose (either jaw) | 3.9 | 26 | 2.0 |
+| Old base 0.37/0.20, old start pose (either jaw) | 2.2 | 14 | 1.3 |
+| Old base, searched start pose (from the run's log, 76 scenes) | 3.3 | 23 | |
+| Base 0.34/0.14, old start pose (from the run's log, 43 scenes) | 4.5 | 30 | |
+
+- **The old setup's scenes are about half as full.** The builder removes every truss that touches the arm at its start
+  pose, and at the old base the old start pose stands in the plants. Between the two setups only 9 to 11 of the 180
+  layouts are identical (114 are the same draw with trusses removed, 55 a different draw). On those identical layouts
+  both setups solve the same number (7 against 7 with the old jaw, n = 9; 7 against 7 with the new jaw, n = 11).
+- **Base apart from start pose (new jaw, old logic, aim 8 mm; both runs stopped early when the owner changed
+  direction):** old base with the searched start pose 44 of 75 against 45 for base 0.34/0.14 on the same seeds; base
+  0.34/0.14 with the old start pose 21 of 41 against 27, with no plan in 10 against 3. So the old base is no better
+  in itself; the old setup's higher score is its emptier scenes.
+- **The jaw's gap on the identical layout and the same target truss** (replaces the name-matched "same target" counts
+  of sections 10, 13, 14 and 16): base 0.34/0.14, 139 scenes: old jaw 113 (81 %), new jaw with the old logic and the
+  8 mm aim 96 (69 %), won 6, lost 23. Old base, 157 scenes: 138 (88 %) against 130 (83 %), won 0, lost 8.
+- Left unfinished at the direction change: r26 (75 of 180), r27 (41), r29 (`V6_FIT` rigid, 0), r30 (`V6_CARRY`
+  rigid, plan-only, partial), the census of the 2 mm arms.
+
+## 18. Back to the old setup (owner, 2026-11-26: "we will not be changing the gripper or the teacher")
+
+Old jaw (v5), old teacher, old base 0.37/0.20, old start pose, crate 30 x 28: these are the code's defaults.
+
+| Scenes | Solved | On the first plan | Has a plan | No plan | No ripe truss | Damage |
+|---|---|---|---|---|---|---|
+| Tuning, 9730000-179 (r22) | 155 = 86.1 % | 139 | 157 | 22 | 1 | 2 |
+| Fresh, 9730180-359 (r31) | 143 = 79.4 % | 121 | 148 | 29 | 3 | 5 |
+| Both | 298 of 360 = 82.8 % | 260 | 305 | 51 | 4 | 7 |
+
+- Once it has a plan it hardly ever fails: 298 of 305. Getting above 90 % means finding plans.
+- What blocks the 22 no-plan tuning scenes (`blocked_by`): the way in from the start pose 9 (in 4 the plants already
+  touch the arm after they settle: "start pose not clear"), the way in and the slide-in 4, the slide-in 5 (neighbour
+  fruit or stalks, the target's own fruit, the arm itself), the carry to the crate 4. In about 6 the blocker is the
+  target's own fruit.
+- By the target's knuckle height: 130-180 mm 43 of 49, 180-230 mm 35 of 37, 230-270 mm 24 of 28, 270-300 mm 22 of
+  31 (9 with no plan), 300-330 mm 31 of 34.
+- The teacher's margins at the start are 4 mm (neighbours) and 2 mm (own fruit), under the builder's 10 mm: the 4
+  "start pose not clear" scenes come from the builder checking before the plants settle and the teacher after.
+
+## 19. A bigger crate at the old setup (what-if, `base_grid.py --crate 0.40,0.34,0.6325,0.20`)
+
+40 x 34 cm in place of 30 x 28 (10 cm past the end frame in +x, 6 cm toward the row in +y), the plants pinned to the
+standard crate (`truss_scene.KEEP_OUT_CRATE`): the same 180 scenes, the same target in all 180. ⚠️ 30 x 28 is the
+most that fits the greenhouse; this only asks whether size matters.
+
+| Crate | Solved | On the first plan | No plan | Plans that miss the crate | Plans that lose own fruit |
+|---|---|---|---|---|---|
+| 30 x 28 | 155 | 139 | 22 | 9 | 25 |
+| 40 x 34 | 156 | 120 | 22 | 3 | 62 |
+
+Won 1 (9730176), lost 0. The crate is not what holds the old setup back. With more room the release fit takes poses
+that lose fruit more often on the first plan (28 first plans lost, 25 of them on fruit off; 9 gained).
+
+## 20. More fixed via-poses for the scenes with no plan (changes "3 and 4", search seeds 9740000-299)
+
+Old setup, `outputs/v6/via_old/`. The teacher side is in place and off: `truss_teacher.VIA_NORM_V5B` (empty), used only
+in a last pass after phase C found nothing more, so a scene that had a plan keeps it (30 tuning scenes reproduce
+record for record with the list empty, r33).
+
+- Pass 1 (`whatif/via_search_crate.py collect --base 0.37,0.20 --old-start --jaw v5`): 294 scenes with a target, 33
+  with no plan (11 %). A blocked way in is among the reasons in 30 of them, a blocked carry in 3.
+- **The carry (change 4): nothing to find.** 18 blocked carries in those 3 scenes, and the offline RRT (8000
+  iterations, 2 tries, the carried-truss checker at its loosest clearance) finds a route for none of them.
+- The way in (change 3, `VIA_EXTRA=1 whatif/via_search.py collect`): 329 blocked candidates in 29 scenes, an RRT
+  route for 116 of them in 18 scenes, none in 11 scenes. 464 way-points, 247 candidate poses (12 norm units apart).
+  Scoring and the pick: running.
