@@ -508,3 +508,26 @@ aimed at (0.34, 0.37, 0.26). High is first in the rig, so the six cue numbers ar
   both lenses; and high's post runs through low's housing (one post).
 - Files: `outputs/v6/cams/v5_*.npz` (the scores), `rank_v5_sweep.txt` / `rank_v5_sweep_z50.txt` (lens up to 0.34 /
   0.50 m), `sweep_arm_v5.*`, `sweep_plants_v5.*`, `sheet_candidates.png` (pictures).
+
+## 25. Start position: old (folded) against the searched one, what the cameras see and what the teacher does
+
+World `crate30` (these were collected before the two worlds were named), old base, v5 jaw, 356 / 357 scenes
+(`outputs/v6/cams/rank_v6world_old.json`, `rank_v6world_new.json`); teacher runs r22 and r36 on tuning seeds
+9730000-9730044.
+
+| | Old start (-90, -40, 90, -40, 0, 50) | Searched start (-25, -75, -15, 75, 0, 50) |
+|---|---|---|
+| Claw camera sees the cut point at the start | 0 % | 34 % |
+| Claw camera sees it just before the cut | 98 % | 89 % |
+| Base camera sees the cut point at the start | 81 % | 63 % |
+| Base camera: stalk and blade before the cut / at the cut | 71 % / 68 % | 46 % / 50 % |
+| Base camera: cut point inside the picture | 92 % | 84 % |
+| Teacher, 45 scenes | 38 of 44 (r22) | 39 of 45 (r36, the first 45 of 90) |
+
+- The searched start points the claw camera at the row, so it sees the target from the start in a third of the
+  scenes, but the unfolded arm then stands in the base camera's view, which loses more than the claw gains.
+- ⚠️ The two teacher runs are not the same scenes: the start pose is part of what decides which truss is ripe
+  (section 21), and only 14 of the 45 seeds give the same target. The two rates say "no difference seen", no more.
+- With rig `trio` the high camera sees the cut point at the start in 98 % of the scenes from the old start
+  (section 24), which was the searched start's one gain. The 800 old episodes all begin at the old start. So
+  dataset v6 keeps the old start; the default is the owner's to switch.
