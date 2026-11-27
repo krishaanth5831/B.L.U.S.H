@@ -1112,12 +1112,13 @@ since v6 store H.264 through `sim/picture_store.py`.
     target hangs on the leftmost stem). The finray box geoms are 1.2 to 4 mm thick.
   - **The plants and the cut truss** (`plants --n 0 --every 3`, 16 lines, old in two halves 21:27-22:25, new with
     `--sessions v6new` 22:06-22:43; no scene skipped). Control: 1.7 cm for the old (seed 10023057, frame 207), as in
-    section 26. Row B, nine lines together: within 4 cm in 207 of 736 old and 158 of 540 new cut episodes, within
+    section 26. Row B, nine lines together: within 4 cm in 207 of 735 old and 158 of 540 new cut episodes, within
     2 cm in 67 / 58, a ball on a line in 34 / 37, nearest -1.3 / -1.4 cm (a fruit's ball has a 10-15 mm radius).
     Row A: within 4 cm in 8 / 11, on a line in 4 / 2.
   - ⚠️ What that is: NOT mostly trusses hanging there. One-off lookup of the nearest part at the named frame in
     eight episodes (row B: 10022070, 10004032, 10102048; row A: 10102852, 10021000, 10000046; the dataset's camera
-    post: 10100475, 10100422): each time a fruit of the TARGET truss, which at the first frame was 19 to 41 cm from that line.
+    post: 10100475, 10100422): each time a fruit of the TARGET truss, which at the first frame was 19 to 41 cm from
+    that line.
     Frame by frame in 10100475, 10102852, 10021000: after the cut the hand does not go right. It pulls the truss to
     the arm's left (tip to x 0.08, 29 cm left of the base, z 0.28-0.30), then lifts to z 0.45-0.49 and passes over
     the arm's own base to the crate. The truss dangles below and outward on the way (a fruit at x 0.02-0.07).
@@ -1125,13 +1126,33 @@ since v6 store H.264 through `sim/picture_store.py`.
     1,400 episodes with the arm's parts as bounding boxes: the highest top under the row-B rail is z 0.478 (seed
     10023024, frame 447), under the row-A rail 0.451: at least 42 and 69 mm of air. The highest anywhere is 0.527,
     over the arm's own base (seed 10100172), where the rig has nothing.
-  - ⚠️ Still running when this was written: `plants` at frame 0 only (how many of the 207 / 158 are a truss
-    hanging there before anything moves), `arm` against the row post of the longer house (inside face at
-    x -0.005), and a `touch` replay of the new episodes that came near the dataset's own camera post (next bullet).
+  - **How much of that is a truss hanging there before anything moves:** `plants --n 0 --every 100000` (the first
+    frame only, the same 16 lines; old 22:27-23:05, new 23:05-23:29). Within 4 cm of a row-B line at the first
+    frame in 94 old / 65 new episodes (nearest 2.3 / 2.5 cm, no ball on a line); none at row A (nearest 12.0 /
+    13.3 cm) and none at the dataset's camera post (8.9 / 8.2 cm). So a part gets within 4 cm only during the
+    episode in 113 old / 93 new, and every ball on a line (34 / 37) comes from motion.
+  - The old `plants` runs measure 735 scenes, not 736: seed 10014003 (v5 episode 353) does not rebuild as recorded
+    and is skipped, the same episode v6 lacks (section 26). In the arm sweep it is 4.2 cm from the corner line, so
+    the arm's 50 / 123 / 169 / 380 also hold for v6's 799 re-made episodes (492 within 6 cm becomes 491).
+  - **The longer house** (way 2, inside face of the row post 375 mm from the arm): `arm --every 1
+    --cams=g_0.02_0.30_0.42,-0.005:0.378:0.52,...` with nine lines at x -0.005 to -0.049, y 0.378-0.422 (old
+    22:42-23:02, new 23:02-23:16). Nearest 10.0 cm old (seed 10005040, frame 59) and 9.4 cm new (seed 10100680,
+    frame 407); no episode within 6 cm of any line; the control gives 4.4 / 4.7 cm again. That post stands wholly
+    behind the simulator's end-frame plate `ef0_post0` (x -0.006 to 0, y 0.37-0.43, to z 0.59), a solid in every
+    recording, so no carried truss can have passed through its place either.
 - **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
   camera post than in the old ones.** The post is drawn in the new episodes' pictures but was not a solid when they
   were recorded (the scenes were decided with the old bracket, `--layout-rig base`), and section 26 checked the 800
   old episodes only. Arm: never nearer than 4.7 cm. Plants: within 4 cm in 15 of the 540 new cut episodes (old:
-  10 of 736), within 2 cm in 4, and in one a fruit's ball lies on the post line (seed 10100475, frame 315: fruit
-  s2t1_t4 at (0.025, 0.299, 0.122), carried by the left). `camera_sweep_logs.py touch --sessions v6new` over the 36
-  listed episodes was queued 2026-11-27 22:50; its result is not in yet.
+  10 of 735), within 2 cm in 4, and in one a fruit's ball lies on the post line (seed 10100475, frame 315: fruit
+  s2t1_t4 at (0.025, 0.299, 0.122), carried by the left).
+  - `camera_sweep_logs.py touch --sessions v6new --from new_arm_eps.json new_plants_eps_0.json
+    new_plants_eps_1.json --cams g_0.02_0.30_0.42` (23:00-23:06): the 36 new episodes within 6 cm of the post line,
+    replayed with rig trio's real brackets as solids. 35 touch nothing. **One does: seed 10100475**: the fruit
+    s2t1_t4 and s2t1_t5 are inside the high camera's post in 4 frames, 6.0 mm deep at most.
+  - That is part `v6_new_p06` episode 4 = **episode 953 of the merged dataset** (found by its joint readings, equal
+    bit for bit; 505 frames). Its pictures around frames 300-331, looked at once: the truss swings past the low
+    camera at close range and leaves its view, and the claw camera sees the post beside the truss. Nothing in them
+    looks wrong at a glance, but on the real cart the truss would have knocked the rod.
+  - One episode of 1,399 (4 frames of 665,314). Left in the dataset; taking it out is the owner's call. Written
+    into `sim/README.md` ("Dataset v6", state) and the rig README's camera-post section.

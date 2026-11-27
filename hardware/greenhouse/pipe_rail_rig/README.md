@@ -27,6 +27,9 @@ These are design choices, not yet checked for sim2real:
 - The stems sit 30 mm off the row line.
 - ⚠️ With the end frames 225 mm from the arm, dataset v6's camera post stands outside them and looks in through
   them (see "Camera post for dataset v6").
+- ⚠️ With the end frames 225 mm from the arm, the row post stands in the way of the arm's recorded motions: the
+  hand's swing and the cut truss pass through its place (see "Checked 2026-11-27" below). The simulator's 370 mm
+  leaves that room.
 - ⚠️ No crate is drawn on the cart. In the dataset the crate lies 13 to 36 cm to the arm's right, which here is
   between the two arms: placed like that, the two arms' crates overlap by 185 mm along the cart, and each reaches
   51 mm past the deck's edge (`cart_camera_post.py` prints the numbers).
@@ -53,6 +56,11 @@ The simulator's post is a 16 mm rod standing 18 mm behind the lenses. In dataset
 came no nearer than 44 mm to the line under the lens and a carried truss no nearer than 17 mm; with that rod and the
 camera housings in the model, nothing touched them in the 32 episodes that came within 6 cm
 (`own_sim_measurements.md` section 26). So the real upright must not be thicker than 16 mm or stand nearer the arm.
+⚠️ In the 600 new episodes the arm stays 47 mm away, but the cut truss comes nearer than in the old ones: within
+40 mm of the line in 15 of the 540 cut episodes (old: 10 of 735), and in one (dataset episode 953) two fruit pass
+through the rod for 4 frames. Those episodes were recorded with only the old bracket as a solid, so nothing stopped
+it (section 29). On the real cart a carried truss will brush the rod now and then: about 1 pick in 50 comes that
+near.
 
 **On this rig** that puts the rod at x −143, y 296 for arm 1 (the lenses at x −125, y 300, z 184 and 554): 143 mm
 outside the closed end frame's inside face. Arm 2 is arm 1 turned half a turn, so its post is the same assembly
@@ -130,16 +138,21 @@ post:
   numbers. The simulator's fingers are boxes, simpler than the printed fingers.
 - **The cut truss passes there too.** The same lines against the plants (`plants --n 0 --every 3`: stems, every
   truss and its fruit, the cut truss while it is carried, each part as balls): a plant part comes within 40 mm of a
-  row-B line in 207 of the 736 old cut episodes and 158 of the 540 new ones, and a fruit lies on a line in 34 and
-  37. In the six episodes looked up (three at each post) it was each time a fruit of the CUT truss, which at the
-  first frame was 20 to 37 cm away from that line. In these episodes the carry first pulls the truss to the arm's left (the
-  hand 290 mm left of the base in the three printed frame by frame), then lifts it over the arm's own base to the
-  crate, and the truss dangles out to the left on the way. Row A: within 40 mm in 8 old and 11 new episodes, the
-  truss hanging behind the arm during that lift.
+  row-B line in 207 of the 735 old cut episodes and 158 of the 540 new ones. In 94 and 65 of those a truss already
+  hangs that close at the first frame, before anything moves (the same sweep with `--every 100000`; 23 mm from a
+  line at the nearest): that is where plants hang in those scenes, not motion. In the other 113 and 93 a part gets
+  that close only during the episode, and only then does a fruit lie on a line (34 and 37 episodes). In the six episodes looked up (three at
+  each post) it was each time a fruit of the CUT truss, which at the first frame was 20 to 37 cm away from that
+  line. In these episodes the carry first pulls the truss to the arm's left (the hand 290 mm left of the base in
+  the three printed frame by frame), then lifts it over the arm's own base to the crate, and the truss dangles out
+  to the left on the way. Row A: within 40 mm in 8 old and 11 new episodes, none at the first frame: the truss
+  hanging behind the arm during that lift.
 - **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
-  hand against the row post in a share of its picks and passes within 40 mm of it in nearly half. Re-made pictures
-  (3) keep the same motions, so they do not change this. The longer house (2) puts the row post where the simulator
-  has its end frame, which stood there as a solid in every recording.
+  hand against the row post in a share of its picks, passes within 40 mm of it in nearly half, and swings the cut
+  truss past it as well. Re-made pictures (3) keep the same motions, so they do not change this. The longer house
+  (2) puts the row post where the simulator has its end frame: the post then stands wholly behind the simulator's
+  end-frame plate, which was a solid in every recording, and the arm comes no nearer to it than 100 mm in the old
+  episodes and 94 mm in the new ones (the same sweep on nine lines of that post, inside face 375 mm from the arm).
 - Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
 - Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
   leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.
@@ -154,6 +167,12 @@ O=../outputs/v6/endpost
 python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/arm_eps.json                 # old 800
 python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/new_arm_eps.json --sessions v6new
 python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png   # the picture
+# plants, and the cut truss: "--shard 0/2" and "1/2" ran side by side; "--every 100000" = the first frame only
+python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams $L                    # + --sessions v6new
+python whatif/camera_sweep_logs.py plants --n 0 --every 100000 --cams $L               # + --sessions v6new
+# the row post of a house 300 mm longer: the arm command again with these lines. ⚠️ --cams=$W, with the "="
+W=g_0.02_0.30_0.42,-0.005:0.378:0.52,-0.005:0.389:0.52,-0.005:0.400:0.52,-0.005:0.411:0.52,-0.005:0.422:0.52
+W=$W,-0.016:0.378:0.52,-0.027:0.378:0.52,-0.038:0.378:0.52,-0.049:0.378:0.52
 ```
 
 **Looked at once, not a repo command:** the string rails (underside 520 mm above the arm base, along both row

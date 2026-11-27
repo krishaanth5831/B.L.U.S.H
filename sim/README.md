@@ -239,6 +239,13 @@ Measurements and choices: `research_notes/Truss grip and carry research/own_sim_
 `~/.cache/huggingface/lerobot` only: not on the Hub, nothing trained on it (both are K7's call), and its 57
 parts are still on disk beside it.
 
+⚠️ One known flaw, found the same evening: **episode 953** (new part 06, episode 4, seed 10100475). Two fruit of the
+cut truss pass through the camera post's rod for 4 frames, 6 mm deep at most. The post is drawn in the new
+episodes' pictures but was not a solid when they were recorded (`--layout-rig base`, below). Found by
+`whatif/camera_sweep_logs.py touch --sessions v6new` over the 36 new episodes whose arm or plants came within 6 cm of
+the post; in the other 35 nothing touches it. The 800 old episodes were checked the same way before the re-make
+(notes section 26: nothing touches). The episode is still in the dataset: taking it out is K7's call.
+
 - **Rig `trio`** = cameras `high`, `low`, `claw` (`scene.CART_CAMS`): both fixed cameras on one upright 35 cm to the
   left of the arm base and 10 cm toward the row, lenses 42 cm and 5 cm above the deck. `high` gives the cue numbers.
 - **World** `crate23` (v5's 23 x 28 crate), scenes decided with the old camera bracket standing in them and shown
