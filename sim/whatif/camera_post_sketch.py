@@ -79,7 +79,8 @@ ax.text(FRAME_X + 0.012, -0.105, "end frame of the plank rig as designed (22.5 c
 # ---------------- seen from the side ----------------
 az.set_title("Seen from the side (heights)", color=INK, fontsize=15, loc="left", pad=12, fontweight="bold")
 az.set_xlim(-0.17, 0.62); az.set_ylim(-0.06, 0.52)
-az.set_xlabel("along the row, m", color=INK2, fontsize=10); az.set_ylabel("height above the deck, m", color=INK2, fontsize=10)
+az.set_xlabel("along the row, m", color=INK2, fontsize=10)
+az.set_ylabel("height above the deck, m", color=INK2, fontsize=10)
 az.add_patch(Rectangle((ROW_X[0], BAND_Z[0]), ROW_X[1] - ROW_X[0], BAND_Z[1] - BAND_Z[0], facecolor=AQUA,
                        alpha=0.22, edgecolor=AQUA, lw=1.2))
 az.text((ROW_X[0] + ROW_X[1]) / 2, BAND_Z[1] + 0.012, "where the trusses are cut\n(13 to 31 cm up)", color=INK,
