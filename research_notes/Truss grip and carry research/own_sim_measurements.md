@@ -790,6 +790,16 @@ side with a third teacher job: `python generate_truss.py --teacher --no-dr --no-
   gate's fingerprints taken) comes on top and has still never run; the trial part is its first run. Peak memory
   with a dataset open was 4.4 GB a part for v5.
 
+**The policy-test scenes with the new post** (2026-11-27, 02:25-03:25; 8 queue jobs of 25 scenes,
+`outputs/v6/heldout_trio/`): `python -u base_grid.py --base 0.37,0.20 --jaw v5 --old-start --world crate23 --rig
+trio --layout-rig base --retries 6 --seeds <25 seeds of the list>`, no start change, as in a policy test.
+- All 200 scenes of `heldout_v5.jsonl` and `heldout_v5b.jsonl` rebuild with the truss their list names (200 of
+  200), and the teacher completes all 200 (its first plan in 83 and 79 of the 100, the others on a retry), the
+  25 scenes a checkpoint test uses included.
+- ⚠️ No teacher rate: the lists hold scenes a teacher dry run with `--retries 6` solved when they were made (on
+  MuJoCo 3.8.1, old bracket). What it says: the test sets stand as listed on MuJoCo 4.0.1 with the new post in the
+  scene, so a policy trained on dataset v6 can be tested on the same 100 scenes as the v5 policies.
+
 **Time.** v5's 800 episodes took 1,548 worker-minutes by the parts' own logs = 1.93 minutes per kept episode
 (parts of 25: median 45 minutes, 17 to 81; `record_parts.sh`'s header says 7.4 h by the clock). 600 episodes at
 that rate are about 19 worker-hours, so 6 to 7 hours on three workers; the third camera adds rendering and
