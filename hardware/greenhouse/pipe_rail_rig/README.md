@@ -131,8 +131,8 @@ post:
 - **The cut truss passes there too.** The same lines against the plants (`plants --n 0 --every 3`: stems, every
   truss and its fruit, the cut truss while it is carried, each part as balls): a plant part comes within 40 mm of a
   row-B line in 207 of the 736 old cut episodes and 158 of the 540 new ones, and a fruit lies on a line in 34 and
-  37. In the six episodes looked up (three at each post) it was each time a fruit of the CUT truss, 20 to 37 cm
-  from where it hung at the first frame. In these episodes the carry first pulls the truss to the arm's left (the
+  37. In the six episodes looked up (three at each post) it was each time a fruit of the CUT truss, which at the
+  first frame was 20 to 37 cm away from that line. In these episodes the carry first pulls the truss to the arm's left (the
   hand 290 mm left of the base in the three printed frame by frame), then lifts it over the arm's own base to the
   crate, and the truss dangles out to the left on the way. Row A: within 40 mm in 8 old and 11 new episodes, the
   truss hanging behind the arm during that lift.

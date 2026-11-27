@@ -1117,7 +1117,7 @@ since v6 store H.264 through `sim/picture_store.py`.
     Row A: within 4 cm in 8 / 11, on a line in 4 / 2.
   - ⚠️ What that is: NOT mostly trusses hanging there. One-off lookup of the nearest part at the named frame in
     eight episodes (row B: 10022070, 10004032, 10102048; row A: 10102852, 10021000, 10000046; the dataset's camera
-    post: 10100475, 10100422): each time a fruit of the TARGET truss, 19 to 42 cm from its place at the first frame.
+    post: 10100475, 10100422): each time a fruit of the TARGET truss, which at the first frame was 19 to 41 cm from that line.
     Frame by frame in 10100475, 10102852, 10021000: after the cut the hand does not go right. It pulls the truss to
     the arm's left (tip to x 0.08, 29 cm left of the base, z 0.28-0.30), then lifts to z 0.45-0.49 and passes over
     the arm's own base to the crate. The truss dangles below and outward on the way (a fruit at x 0.02-0.07).
@@ -1134,4 +1134,4 @@ since v6 store H.264 through `sim/picture_store.py`.
   old episodes only. Arm: never nearer than 4.7 cm. Plants: within 4 cm in 15 of the 540 new cut episodes (old:
   10 of 736), within 2 cm in 4, and in one a fruit's ball lies on the post line (seed 10100475, frame 315: fruit
   s2t1_t4 at (0.025, 0.299, 0.122), carried by the left). `camera_sweep_logs.py touch --sessions v6new` over the 36
-  listed episodes was started 2026-11-27 23:00; its result is not in yet.
+  listed episodes was queued 2026-11-27 22:50; its result is not in yet.
