@@ -21,6 +21,7 @@ Read `README.md` for the pipeline and the data layout.
   the wrist_roll runaway. Never mix in data recorded with `use_degrees=true`
   (e.g. the tissues dataset).
 - ⚠️ Video codec `libsvtav1`. `h264_nvenc` dies on frame 1 on this laptop.
+  That is for the real arm's recordings: simulator datasets since v6 store H.264 through `sim/picture_store.py`.
 - ⚠️ Calibration ids `follower_white` / `leader_black`. Omitting `--*.id` writes
   `None.json` and silently uses the wrong calibration.
 - ⚠️ `lerobot-record` stamps `_YYYYMMDD_HHMMSS` onto `repo_id` unless

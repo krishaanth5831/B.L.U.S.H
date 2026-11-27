@@ -229,7 +229,7 @@ makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of th
 dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
 lists the settings that do) and pass live pictures through the same step at test time.
 
-### Dataset v6: three cameras, the old 800 re-made + 600 new (the trial ran 2026-11-27, ⚠️ the rest needs K7's go)
+### Dataset v6: three cameras, the old 800 re-made + 600 new (trial 2026-11-27; the full run is in flight)
 
 K7 2026-11-26: the teacher, the gripper and the base stay; "more varied episodes", "3 cameras instead of 2 but also
 placed in a more calculated location", the post-mortem's fixes, "another 600 episodes on top of the previous 800".
@@ -242,7 +242,9 @@ Measurements and choices: `research_notes/Truss grip and carry research/own_sim_
   re-make, `base_grid.py`, `view_scene.py`); `eval_truss.py` takes the rig from the checkpoint and needs
   `--world crate23 --layout-rig base`.
 - **The old 800 get the new cameras** from the logged simulator states (`remake_pictures.py`; 799 of them: v5
-  episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ `~/.cache/blush_sim/states` is the only copy of those states.
+  episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ The states live in `~/.cache/blush_sim/states`, a cache folder.
+  A second copy is in `~/datasets/blush_sim_states` (K7 2026-11-27; every file checked against
+  `MANIFEST.sha256` in that folder). ⚠️ It is on the same disk: it covers a wiped cache, not a dead drive.
 - **The 600 new** come from seed plans (`sim/seed_plan_v6`: one list of scenes per part of 25 episodes, made by
   `scripts/v6_seed_plan.py` from a census of the fresh seeds 10100000-10104499): old + new together level over
   where the truss hangs (4 row parts x 3 heights, 106-107 episodes each instead of 35-87), 60 of them nothing-ripe.
@@ -275,8 +277,9 @@ sim/scripts/remake_parts.sh ${V6}_old 0 1 1
 GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh ${V6}_new 10100000 0 1 1
 python sim/merge_parts.py ${V6}_trial ${V6}_old ${V6}_new          # merges + runs the gate
 (cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new && python scripts/v6_check.py merged ${V6}_trial ${V6}_old ${V6}_new)
-# ⚠️ NOT RUN, needs K7's go: the rest. Three workers of one kind, then the other kind (a worker peaks at 3.3-3.6 GB;
-# both kinds at once would break the memory rule). About 2 h for the re-make and 4.5 h for the recording.
+# the rest (K7's go 2026-11-27: IN FLIGHT since 09:52, the same six workers as six jobs of scripts/sim_queue.sh,
+# three at a time; notes section 28). Three workers of one kind, then the other kind (a worker peaks at 3.3-3.6 GB;
+# both kinds at once would break the memory rule). About 2.5 h for the re-make and 4.5 h for the recording.
 for w in 0 1 2; do nohup sim/scripts/remake_parts.sh ${V6}_old $w 3 32 & done
 for w in 0 1 2; do GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 nohup sim/scripts/record_parts.sh ${V6}_new 10100000 $w 3 24 & done
 (cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new)   # every part; a short recorded part shows here
@@ -288,7 +291,12 @@ python sim/merge_parts.py $V6 ${V6}_old ${V6}_new
 ```
 
 Training: `sim/colab_train_act_v6.ipynb` (batch 64, learning rate 3e-5 constant, dropout 0; its cell 4 runs the
-gate). Tests: `EXTRA="--world crate23 --layout-rig base --start-guard --clip-actions" sim/scripts/colab_tests.sh ...`.
+gate). Tests: `EXTRA="--world crate23 --layout-rig base" sim/scripts/colab_tests.sh ...`. The two guards outside the
+policy (`--start-guard`: the policy is not started when the cue has no target box; `--clip-actions`: its commands
+stay inside the range of its training data) are the standard for policy tests since 2026-11-27 (K7): the three test
+scripts (`colab_tests.sh`, `test_all_checkpoints.sh`, `train_and_test.sh`) pass both, `GUARDS=""` switches them
+off, and `checkpoint_table.py` names the guards of every row. `eval_truss.py` by itself still runs without them, so
+an old checkpoint re-run by hand compares with the earlier tables. ⚠️ Not run yet through the scripts.
 
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
