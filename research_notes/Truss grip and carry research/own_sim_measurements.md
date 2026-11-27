@@ -1071,7 +1071,36 @@ since v6 store H.264 through `sim/picture_store.py`.
   reaches 51 mm past the deck's edge (deck y 81-319). Not solved here: it is a layout question for the rig.
 - ⚠️ Not done: the Onshape model and the cut plan (no CAD was changed), the camera clamps, a sweep of the recorded
   episodes against the boom (it is below the deck top, where the simulator has its table).
-- ⚠️ Not run yet, waits for the dataset run to end (no fourth simulator job): the recorded motions against this
-  rig's END POSTS, which stand 145 mm nearer the arm than the simulator's end frame (nearest corner of the row
-  post at simulator x 0.145, y 0.378, up to 0.52 m): `whatif/camera_sweep_logs.py arm --cams 0.145:0.378:0.52`
-  and `plants`. If the arm or a carried truss passes through there, the longer house is needed anyway.
+- **⚠️ Run 2026-11-27 21:27-22:15, after the dataset run: the recorded motions do NOT stay clear of this rig's END
+  POSTS**, which stand 145 mm nearer the arm than the simulator's end frame. `whatif/camera_sweep_logs.py arm
+  --every 1` over the 800 old logged episodes (384,677 frames, 28 min) and, with the new `--sessions v6new`, over
+  the 600 new ones (282,625 frames, 20 min; that is the dataset's 282,025 plus one per episode). 16 upright lines
+  from the deck to 0.52 m: 2 for a control (the dataset's own camera post in both spellings), 9 on the row-B end
+  post's two faces that look at the arm (x 0.101-0.145, y 0.378-0.422), 5 on the row-A post (x 0.101-0.145,
+  y -0.022 to 0.022). The cart stands as drawn: centred, each arm 225 mm from its end frame.
+
+  | | old 800 | new 600 |
+  |---|---|---|
+  | control: nearest to the dataset's camera post | 4.4 cm (seed 10005040, frame 50), as in section 26 | 4.7 cm (seed 10100680, frame 416) |
+  | row B, nine lines together: a line through one of the arm's boxes | at least 50 episodes | at least 53 |
+  | row B: within 1 / 2 / 4 / 6 cm | 123 / 169 / 380 / 492 | 115 / 155 / 264 / 332 |
+  | row B, the corner line 0.145:0.378 alone: within 4 cm | 380 episodes, 8,259 frames | 264 episodes, 6,408 frames |
+  | row A: nearest | 7.9 cm (seed 10007066, frame 18) | 8.2 cm (seed 10100680, frame 530) |
+
+  - Where things are in simulator coordinates: the arm base at (0.37, 0.20), the row it faces at y 0.38-0.40, its
+    left is -x. The simulator's end frame is three 6 mm plates at x -0.006 to 0 (`ef0_post0..2`, y 0.4, 0 and -0.4
+    +/- 0.03, with collision), 370 mm left of the base; this rig's posts' inside faces are at x 0.145.
+  - Cause, from four of the nearest old episodes frame by frame (seeds 10012041, 10024034, 10019045, 10002053): the
+    start pose has the fixed finger's tip at (0.140, 0.196, 0.102): the hand points left, 230 mm from the base, and
+    is already 5 mm past the plane of the rig's end frame, in the opening between the two row posts (per
+    `pipe_rail_rig.fs` the end frame has only the posts between the floor tie and the string rails). The swing out
+    to the row and the swing home from the crate both pass the corner (0.145, 0.378): the tip goes through e.g.
+    (0.133, 0.337), (0.172, 0.398) on the way out and (0.151, 0.389), (0.154, 0.422) on the way home. The parts
+    nearest the line are the finray plates and the fixed pad, all box geoms.
+  - "At least": lines 11 mm apart, sampled every 10 mm of height, against plates a few mm thick; the -0.2 cm the
+    sweep prints is half a plate's thickness (`box_dist` is negative inside a box), not a depth into the post.
+  - So the longer house is needed for the motions, not only for the pictures: built as drawn the hand meets the row
+    post, and re-made pictures keep the same motions. Arm 2 is the half-turn image, so the same holds at the open
+    end. Written into the rig README ("Checked 2026-11-27"); the owner was told.
+  - ⚠️ Still running when this was written: `plants` for the new episodes, `plants` at frame 0 only (to split "a
+    truss hangs there" from motion), and `arm` against the row post of the longer house (inside face at x -0.005).

@@ -100,12 +100,48 @@ The place where the trusses hang is not hidden. Three ways to deal with it, K7's
 3. **Put this rig's end frame in the simulator** and re-make the dataset's pictures from the saved states
    (`sim/remake_pictures.py`), then train on those. The rig's layout is not in the simulator yet.
 
+**⚠️ Checked 2026-11-27: as drawn, the arm's recorded motions do not clear the end frame's row post.**
+This rig's end frames stand 145 mm nearer the arm than the simulator's, so every logged episode of dataset v6 (the
+800 old ones and the 600 new ones, every frame) was run against the place of the end posts, with the cart where it
+is drawn (centred, each arm 225 mm from its end frame). Nine upright lines stand in for the row-B post, on its two
+faces that look at arm 1 (simulator x 0.101-0.145, y 0.378-0.422, deck top to 520 mm up), and five for the row-A
+post:
+
+| | old 800 | new 600 |
+|---|---|---|
+| a row-B line runs through a collision box of the gripper (a finger or the pad) | at least 50 | at least 53 |
+| arm within 10 mm of a row-B line | 123 | 115 |
+| arm within 40 mm of a row-B line | 380 | 264 |
+| nearest the arm comes to a row-A line | 79 mm | 82 mm |
+
+- **Why.** At its start pose the hand points to the arm's left: the fixed finger's tip is 230 mm left of the base,
+  5 mm past the end frame's inside face, in the opening between the two row posts (between the floor tie and the
+  string rails the end frame is only those two posts). From there the hand swings forward to the row, and after the
+  crate it swings home the same way round. Both swings pass the place of the row-B post: frames 19-51 and 357-408
+  in the four nearest old episodes, looked at frame by frame.
+- **"At least".** The lines are 11 mm apart and are sampled every 10 mm of height, and the finger plates are a few
+  mm thick, so a finger can pass between the samples uncounted. The -2 mm the sweep prints as its nearest value is
+  half a plate's thickness, not how far the hand goes into the post. The 10 mm and 40 mm rows are the sturdier
+  numbers. The simulator's fingers are boxes, simpler than the printed fingers.
+- **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
+  hand against the row post in a share of its picks and passes within 40 mm of it in nearly half. Re-made pictures
+  (3) keep the same motions, so they do not change this. The longer house (2) puts the row post where the simulator
+  has its end frame, which stood there as a solid in every recording.
+- Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
+- Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
+  leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.
+
+```bash
+# from sim/, env lerobot-mj4; these HAVE run (2026-11-27, 28 and 20 min). The first two lines are a control: the
+# dataset's own camera post, which gives the 44 mm it gave before (47 mm for the new episodes).
+L=g_0.02_0.30_0.42,0.02:0.30:0.42,0.145:0.378:0.52,0.145:0.389:0.52,0.145:0.400:0.52,0.145:0.411:0.52,0.145:0.422:0.52
+L=$L,0.134:0.378:0.52,0.123:0.378:0.52,0.112:0.378:0.52,0.101:0.378:0.52
+L=$L,0.145:0.022:0.52,0.145:0.000:0.52,0.145:-0.022:0.52,0.123:0.022:0.52,0.101:0.022:0.52
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L                      # the 800 old episodes
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L --sessions v6new     # the 600 new ones
+```
+
 **Not checked:**
-- ⚠️ Whether the arm's recorded motions stay clear of this rig's end posts at all. They stand 145 mm nearer the
-  arm than the simulator's end frame: the nearest corner of the row post is 75 mm to the arm's left of where the
-  leftmost stem hangs. `sim/whatif/camera_sweep_logs.py arm --cams 0.145:0.378:0.52` (and `plants`) measures it
-  against all recorded episodes; not run yet, it waits for the dataset run to end. If the arm or a carried truss
-  passes through there, the longer house (way 2) is needed whatever the pictures show.
 - How much the cameras shake. A beam-formula estimate gives a first sway near 22 Hz for the M12 rod on this boom; an
   M16 rod barely changes it, because the boom's twist then sets the limit. Tap the post and watch the picture.
 - The lens model is the simulator's guess for this camera module, not a calibration.
