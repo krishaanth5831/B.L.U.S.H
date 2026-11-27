@@ -30,6 +30,7 @@ import glob
 import json
 import math
 import pathlib
+import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -100,12 +101,17 @@ def expected_kept(q, n, p):
 
 
 def kept_so_far(logs):
-    """generate_truss.py attempt logs of the parts already recorded: kept episodes per cell ('hold' for holds)."""
+    """generate_truss.py attempt logs of the parts already recorded: kept episodes per cell ('hold' for holds).
+    ⚠️ Only what is in a dataset counts: a part that was killed and recorded again has two logs (the newest per part
+    counts, record_parts.sh deleted the first one's folder), and a --dry log has kept lines but no episodes."""
+    newest = {}
+    for f in sorted(logs):                              # <part>_<date>_<time>.jsonl: the time stamp sorts
+        newest[re.sub(r"_\d{8}_\d{6}\.jsonl$", "", pathlib.Path(f).name)] = f
     c = collections.Counter()
-    for f in logs:
+    for f in newest.values():
         for line in open(f):
             r = json.loads(line) if line.strip() else {}
-            if r.get("kept") and "seed" in r:           # the log's last line is a summary with its own "kept"
+            if r.get("kept") and "episode_index" in r:  # a recorded episode (not a dry one, not the summary line)
                 c["hold" if r.get("hold") else r.get("cell", "?")] += 1
     return c
 
@@ -242,6 +248,17 @@ def main():
           f"{max(KEEP_RATE.values()):.0%} per cell) the lists should give about {sum(expect.values()):.0f} of the "
           f"{n_cut} cut episodes, so about {sum(short.values()):.0f} short (most in "
           f"{', '.join(f'{c} {short[c]:.1f}' for c in worst)}): --topup plans those as one more part")
+    # a top-up can only use seeds no list has taken, at min_supply per episode: are there enough left per cell for
+    # twice the expected shortfall? (A long list costs nothing while recording, but it is what the top-up lacks.)
+    left = {c: len(pool.get(c, [])) - given[c] for c in CELLS}
+    thin = [c for c in short if left[c] < 2 * a.min_supply * short[c]]
+    print("\n| Cell | New episodes | Seeds listed | Seeds left for a top-up | Expected short |\n|---|---|---|---|---|")
+    for c in CELLS:
+        if want[c]:
+            print(f"| {c} | {want[c]} | {given[c]} | {left[c]} | {short[c]:.1f} |")
+    print("every cell keeps enough seeds for a top-up of twice its expected shortfall" if not thin else
+          f"⚠️ too few seeds left for a top-up of twice the expected shortfall in {thin}: list fewer per episode "
+          f"(--oversupply) or add census seeds")
     if not write:
         return
     # a top-up never replaces the plan it tops up (--plan reads that one again for a second top-up)
