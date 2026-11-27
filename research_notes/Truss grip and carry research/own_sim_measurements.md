@@ -763,6 +763,31 @@ this costs nothing but one seed's place in the plan.
   (10100005, 10100237) are never clear in 20 draws and start at the exact pose. The elbow's change runs from -3.0
   to +0.8 deg (mean -1.0), the other four joints use the full 3 deg both ways.
 
+**The rehearsal on the real lists** (2026-11-27, 02:21-02:47). The recorder's own command with `--dry` (the
+teacher plans and plays every scene, no dataset is written) on the first two lists, as two queue jobs side by
+side with a third teacher job: `python generate_truss.py --teacher --no-dr --no-yolo --rig trio --layout-rig base
+--world crate23 --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds seed_plan_v6/p00.jsonl --seed-start
+10100000 --episodes 25 --dry --repo-id krish5831/v6_dry` (and `p01.jsonl`; logs `outputs/v6/rehearsal_p0*.log`,
+`~/.cache/blush_sim/truss/v6_dry*_dry_20261127_0221*.jsonl`):
+
+| Part | Kept | Cells at their quota | Scenes built | Refused | Rows of the list reached | Time | Peak memory |
+|---|---|---|---|---|---|---|---|
+| p00 | 25 of 25 (4 nothing-ripe) | all 10 | 31 | 6: 4 no plan, 2 with every dry run failed | 49 of 69 | 25 min | 1.9 GB |
+| p01 | 25 of 25 (3 nothing-ripe) | all 11 | 32 | 7: 5 no plan, 2 with the noisy run failed | 47 of 71 | 20 min | 2.1 GB |
+
+- The teacher kept 43 of the 56 cut scenes it tried = 77 % (v5's recording: 70 %), so both parts filled every
+  cell with a third of their lists unused. 18 and 15 rows were passed over without a scene being built (their
+  cell was full by then), which is the step that replaces v5's balance.
+- A kept episode's cell is the list's in 42 of 43; the one that differs (10100032: listed as x3z2, is x2z2) was
+  counted where it really hangs.
+- Start change: the first draw was clear in 39 of the 63 scenes, the others took up to 12; one scene started at
+  the exact pose (10100005 again, refused: "start pose not clear", as without the change).
+- Half of the kept cut episodes are noisy ones (12 of 21 and 12 of 22; `--noise-share 0.5`).
+- ⚠️ What this does not show: a dry part plans and plays only (0.8-1.0 minutes per kept episode here). The
+  recording pass (the kept plan played once more with the three cameras rendered, the pictures stored and the
+  gate's fingerprints taken) comes on top and has still never run; the trial part is its first run. Peak memory
+  with a dataset open was 4.4 GB a part for v5.
+
 **Time.** v5's 800 episodes took 1,548 worker-minutes by the parts' own logs = 1.93 minutes per kept episode
 (parts of 25: median 45 minutes, 17 to 81; `record_parts.sh`'s header says 7.4 h by the clock). 600 episodes at
 that rate are about 19 worker-hours, so 6 to 7 hours on three workers; the third camera adds rendering and

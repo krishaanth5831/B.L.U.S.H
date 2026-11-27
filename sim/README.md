@@ -243,15 +243,20 @@ Measurements and choices: `research_notes/Truss grip and carry research/own_sim_
   `--world crate23 --layout-rig base`.
 - **The old 800 get the new cameras** from the logged simulator states (`remake_pictures.py`; 799 of them: v5
   episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ `~/.cache/blush_sim/states` is the only copy of those states.
-- **The 600 new** come from seed plans (`scripts/v6_seed_plan.py` on a census of fresh seeds 10100000-10104499):
-  old + new together level over where the truss hangs (4 row parts x 3 heights), 60 of them nothing-ripe.
+- **The 600 new** come from seed plans (`sim/seed_plan_v6`: one list of scenes per part of 25 episodes, made by
+  `scripts/v6_seed_plan.py` from a census of the fresh seeds 10100000-10104499): old + new together level over
+  where the truss hangs (4 row parts x 3 heights, 106-107 episodes each instead of 35-87), 60 of them nothing-ripe.
+  Three scenes are listed per wanted episode; at the teacher's keep rates of v5's recording that gives about 536
+  of the 540 cut episodes, and `v6_seed_plan.py --topup` (its header has the command) plans the missing ones as
+  part 24 from scenes not yet listed.
   Each scene starts up to 3 deg off the start pose, drawn again until the arm is clear (`--start-jitter-deg 3`).
 - Pictures are stored so that a frame depends on its own picture only (`picture_store.py`), and every dataset
   carries a gate file that `merge_parts.py` checks.
 
 ```bash
 python view_scene.py --cams --rig trio --world crate23 --layout-rig base --seed 10023030   # look at it (window)
-# read-only rehearsals (these HAVE run): the re-make's path on old episodes, the recorder's on a seed plan
+# read-only rehearsals (these HAVE run): the re-make's path on old episodes, the recorder's on the real lists
+# p00 and p01 (2026-11-27: 25 of 25 kept in both, every cell at its quota, 20-25 minutes; notes section 27)
 python remake_pictures.py dry --shots ../outputs/v6/remake_dry/shots
 python generate_truss.py --teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
     --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds seed_plan_v6/p00.jsonl \
@@ -266,6 +271,8 @@ python sim/merge_parts.py krish5831/<name>_trial krish5831/<name>_old krish5831/
 for w in 0 1 2; do nohup sim/scripts/remake_parts.sh krish5831/<name>_old $w 3 32 & done
 for w in 0 1 2; do GEN_ARGS="..." SEEDS_DIR=sim/seed_plan_v6 \
     nohup sim/scripts/record_parts.sh krish5831/<name>_new 10100000 $w 3 24 & done
+# parts that ended short of 25: plan the missing episodes as part 24 (v6_seed_plan.py --topup), record it
+GEN_ARGS="..." SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh krish5831/<name>_new 10100000 24 1 25
 python sim/merge_parts.py krish5831/<name> krish5831/<name>_old krish5831/<name>_new
 ```
 
