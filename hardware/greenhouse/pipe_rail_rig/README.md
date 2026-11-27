@@ -59,8 +59,8 @@ camera housings in the model, nothing touched them in the 32 episodes that came 
 ⚠️ In the 600 new episodes the arm stays 47 mm away, but the cut truss comes nearer than in the old ones: within
 40 mm of the line in 15 of the 540 cut episodes (old: 10 of 735), and in one (dataset episode 953) two fruit pass
 through the rod for 4 frames. Those episodes were recorded with only the old bracket as a solid, so nothing stopped
-it (section 29). On the real cart a carried truss will brush the rod now and then: about 1 pick in 50 comes that
-near.
+it (section 29). So on the real cart a carried truss can knock the rod: over old and new together it passes within
+40 mm in 25 of 1,275 cuts (1 in 50), and in that one it would have hit.
 
 **On this rig** that puts the rod at x −143, y 296 for arm 1 (the lenses at x −125, y 300, z 184 and 554): 143 mm
 outside the closed end frame's inside face. Arm 2 is arm 1 turned half a turn, so its post is the same assembly
@@ -150,9 +150,10 @@ post:
 - **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
   hand against the row post in a share of its picks, passes within 40 mm of it in nearly half, and swings the cut
   truss past it as well. Re-made pictures (3) keep the same motions, so they do not change this. The longer house
-  (2) puts the row post where the simulator has its end frame: the post then stands wholly behind the simulator's
-  end-frame plate, which was a solid in every recording, and the arm comes no nearer to it than 100 mm in the old
-  episodes and 94 mm in the new ones (the same sweep on nine lines of that post, inside face 375 mm from the arm).
+  (2) puts the row post where the simulator has its end frame: the post's inside face is then 5 mm behind the front
+  of the simulator's end-frame plate (60 mm wide, the post 44), which was a solid in every recording, and the arm
+  comes no nearer to the post than 100 mm in the old episodes and 94 mm in the new ones (the same sweep on nine
+  lines of that post, inside face 375 mm from the arm).
 - Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
 - Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
   leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.

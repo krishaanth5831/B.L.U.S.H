@@ -1137,9 +1137,9 @@ since v6 store H.264 through `sim/picture_store.py`.
   - **The longer house** (way 2, inside face of the row post 375 mm from the arm): `arm --every 1
     --cams=g_0.02_0.30_0.42,-0.005:0.378:0.52,...` with nine lines at x -0.005 to -0.049, y 0.378-0.422 (old
     22:42-23:02, new 23:02-23:16). Nearest 10.0 cm old (seed 10005040, frame 59) and 9.4 cm new (seed 10100680,
-    frame 407); no episode within 6 cm of any line; the control gives 4.4 / 4.7 cm again. That post stands wholly
-    behind the simulator's end-frame plate `ef0_post0` (x -0.006 to 0, y 0.37-0.43, to z 0.59), a solid in every
-    recording, so no carried truss can have passed through its place either.
+    frame 407); no episode within 6 cm of any line; the control gives 4.4 / 4.7 cm again. That post's inside face
+    lies 5 mm behind the front of the simulator's end-frame plate `ef0_post0` (`scene.greenhouse_xml`: x -0.006 to
+    0, y 0.37-0.43, to z 0.59, a solid in every recording), which is 60 mm wide against the post's 44.
 - **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
   camera post than in the old ones.** The post is drawn in the new episodes' pictures but was not a solid when they
   were recorded (the scenes were decided with the old bracket, `--layout-rig base`), and section 26 checked the 800
