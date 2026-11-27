@@ -43,9 +43,10 @@ import numpy as np  # noqa: E402
 import generate_truss as gt  # noqa: E402
 
 CELLS = [f"x{i}z{j}" for j in range(len(gt.CELL_Z_EDGES) + 1) for i in range(gt.BALANCE_BINS)]
-OVERSUPPLY = 2.5        # seeds listed per episode wanted, where the census has them. Dataset v5's log: the teacher
-#                         kept 736 of 1,044 cut scenes it tried = 70 %; per slot 17-83 %, so 2.5 leaves room for a
-#                         cell at 40 %
+OVERSUPPLY = 3.0        # seeds listed per episode wanted, where the census has them. On the 4,500-seed census
+#                         (2026-11-27), at the keep rates below: 2.5 should give 529 of the 540 cut episodes, 3.0
+#                         gives 536 and still leaves every cell seeds for a top-up of twice its expected shortfall,
+#                         4.0 gives 538 but lists every seed of x3z0 and x2z2 (nothing left to top up from)
 MIN_SUPPLY = 1.8        # a cell is planned only as far as the census has this many seeds per episode (1 / 1.8 = 56 %
 #                         kept). Dataset v5's recording kept 60-83 % per cell, the lowest x2z2 60 % and x3z0 61 %
 #                         (its attempt logs; the refused scenes' cells from the logged cut_x and the cue pixel
