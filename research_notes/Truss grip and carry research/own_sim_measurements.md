@@ -1013,5 +1013,11 @@ since v6 store H.264 through `sim/picture_store.py`.
   scene and re-make the pictures from the saved states.
 - Sway of the cameras: a beam-formula estimate, not a measurement: about 22 Hz for the M12 rod on this boom, 25 Hz
   for M16 (the boom's twist sets the limit, so a thicker rod hardly helps).
+- ⚠️ Weak point: only 75 mm of the boom lies under the deck, because the cleat under the arm is in the way. Its three
+  screws sit close together and a knock on the rod levers on them. Notching the boom over the cleat gives more hold.
+- **⚠️ Noticed on the way: the crates.** No crate is drawn on the cart. The dataset's crate (world `crate23`) lies
+  133 to 363 mm to the arm's right, which on this cart is between the two arms. Placed like that, arm 1's crate is
+  at rig x 358-588, y 30-310 and arm 2's at x 312-542, y 90-370: they overlap by 185 mm along the cart, and each
+  reaches 51 mm past the deck's edge (deck y 81-319). Not solved here: it is a layout question for the rig.
 - ⚠️ Not done: the Onshape model and the cut plan (no CAD was changed), the camera clamps, a sweep of the recorded
   episodes against the boom (it is below the deck top, where the simulator has its table).
