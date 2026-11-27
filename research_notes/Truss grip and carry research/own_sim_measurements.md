@@ -1102,5 +1102,36 @@ since v6 store H.264 through `sim/picture_store.py`.
   - So the longer house is needed for the motions, not only for the pictures: built as drawn the hand meets the row
     post, and re-made pictures keep the same motions. Arm 2 is the half-turn image, so the same holds at the open
     end. Written into the rig README ("Checked 2026-11-27"); the owner was told.
-  - ⚠️ Still running when this was written: `plants` for the new episodes, `plants` at frame 0 only (to split "a
-    truss hangs there" from motion), and `arm` against the row post of the longer house (inside face at x -0.005).
+  - Over all 1,400 episodes (`whatif/end_post_sketch.py`, which also draws
+    `hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png`): the fixed finger's tip at the first frame is at
+    x 0.133-0.146, y 0.183-0.209, z 0.081-0.133 (the start pose with its 3 degree change); it is past the frame's
+    inside face at some frame in every episode, the 124 nothing-ripe ones included, and reaches x 0.066 at most
+    (79 mm past the face, at y 0.248, z 0.262: through the opening). When, from six of the nearest episodes (old
+    10012041, 10024034, 10019045, 10002053; new 10102678, 10100955; one-off, the corner line, every frame): within
+    4 cm in frames 17-70 (the swing out) and 349-406 (the swing home), in 10012041 also 106-121 (at the cut: its
+    target hangs on the leftmost stem). The finray box geoms are 1.2 to 4 mm thick.
+  - **The plants and the cut truss** (`plants --n 0 --every 3`, 16 lines, old in two halves 21:27-22:25, new with
+    `--sessions v6new` 22:06-22:43; no scene skipped). Control: 1.7 cm for the old (seed 10023057, frame 207), as in
+    section 26. Row B, nine lines together: within 4 cm in 207 of 736 old and 158 of 540 new cut episodes, within
+    2 cm in 67 / 58, a ball on a line in 34 / 37, nearest -1.3 / -1.4 cm (a fruit's ball has a 10-15 mm radius).
+    Row A: within 4 cm in 8 / 11, on a line in 4 / 2.
+  - ⚠️ What that is: NOT mostly trusses hanging there. One-off lookup of the nearest part at the named frame in
+    eight episodes (row B: 10022070, 10004032, 10102048; row A: 10102852, 10021000, 10000046; the dataset's camera
+    post: 10100475, 10100422): each time a fruit of the TARGET truss, 19 to 42 cm from its place at the first frame.
+    Frame by frame in 10100475, 10102852, 10021000: after the cut the hand does not go right. It pulls the truss to
+    the arm's left (tip to x 0.08, 29 cm left of the base, z 0.28-0.30), then lifts to z 0.45-0.49 and passes over
+    the arm's own base to the crate. The truss dangles below and outward on the way (a fruit at x 0.02-0.07).
+  - The string rails of the rig (underside 0.52 m above the arm base, along both row lines): one-off look over all
+    1,400 episodes with the arm's parts as bounding boxes: the highest top under the row-B rail is z 0.478 (seed
+    10023024, frame 447), under the row-A rail 0.451: at least 42 and 69 mm of air. The highest anywhere is 0.527,
+    over the arm's own base (seed 10100172), where the rig has nothing.
+  - ⚠️ Still running when this was written: `plants` at frame 0 only (how many of the 207 / 158 are a truss
+    hanging there before anything moves), `arm` against the row post of the longer house (inside face at
+    x -0.005), and a `touch` replay of the new episodes that came near the dataset's own camera post (next bullet).
+- **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
+  camera post than in the old ones.** The post is drawn in the new episodes' pictures but was not a solid when they
+  were recorded (the scenes were decided with the old bracket, `--layout-rig base`), and section 26 checked the 800
+  old episodes only. Arm: never nearer than 4.7 cm. Plants: within 4 cm in 15 of the 540 new cut episodes (old:
+  10 of 736), within 2 cm in 4, and in one a fruit's ball lies on the post line (seed 10100475, frame 315: fruit
+  s2t1_t4 at (0.025, 0.299, 0.122), carried by the left). `camera_sweep_logs.py touch --sessions v6new` over the 36
+  listed episodes was started 2026-11-27 23:00; its result is not in yet.

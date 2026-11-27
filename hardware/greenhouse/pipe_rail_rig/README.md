@@ -128,6 +128,14 @@ post:
   4 mm thick, so a finger can pass between the samples uncounted. The -2 mm the sweep prints as its nearest value is
   half a plate's thickness, not how far the hand goes into the post. The 10 mm and 40 mm rows are the sturdier
   numbers. The simulator's fingers are boxes, simpler than the printed fingers.
+- **The cut truss passes there too.** The same lines against the plants (`plants --n 0 --every 3`: stems, every
+  truss and its fruit, the cut truss while it is carried, each part as balls): a plant part comes within 40 mm of a
+  row-B line in 207 of the 736 old cut episodes and 158 of the 540 new ones, and a fruit lies on a line in 34 and
+  37. In the six episodes looked up (three at each post) it was each time a fruit of the CUT truss, 20 to 37 cm
+  from where it hung at the first frame. In these episodes the carry first pulls the truss to the arm's left (the
+  hand 290 mm left of the base in the three printed frame by frame), then lifts it over the arm's own base to the
+  crate, and the truss dangles out to the left on the way. Row A: within 40 mm in 8 old and 11 new episodes, the
+  truss hanging behind the arm during that lift.
 - **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
   hand against the row post in a share of its picks and passes within 40 mm of it in nearly half. Re-made pictures
   (3) keep the same motions, so they do not change this. The longer house (2) puts the row post where the simulator
@@ -147,6 +155,10 @@ python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/ar
 python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/new_arm_eps.json --sessions v6new
 python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png   # the picture
 ```
+
+**Looked at once, not a repo command:** the string rails (underside 520 mm above the arm base, along both row
+lines). Over all 1,400 episodes, with the arm's parts as bounding boxes, the highest top under the row-B rail is
+478 mm and under the row-A rail 451 mm: at least 42 and 69 mm of air. The cut truss hangs below the hand.
 
 **Not checked:**
 - How much the cameras shake. A beam-formula estimate gives a first sway near 22 Hz for the M12 rod on this boom; an
