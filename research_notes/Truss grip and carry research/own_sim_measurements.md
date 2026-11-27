@@ -814,6 +814,8 @@ on start pictures, more with the arm in view. About 1,400 episodes x 3 cameras x
 the merged dataset is about 36 GB (v5: 6.6 GB for two cameras), 29 GB at qp 26. The parts and the merged copy
 exist side by side until the parts are deleted: 70 to 95 GB at the peak. Free on the laptop tonight: 136 GB.
 ⚠️ The qp must be chosen before the first part is written (one dataset, one setting).
+⚠️ This estimate was low: the trial (section 28) measured 25.8 kB a picture on real frames, so about 52 GB at
+qp 23 and 104 GB at the peak.
 
 **Order after the go** (the commands are in `sim/README.md`, "Dataset v6"). Neither `remake_pictures.py part`, the
 real recorder with three cameras, nor a merge of the two kinds has ever run, so:
@@ -827,9 +829,14 @@ real recorder with three cameras, nor a merge of the two kinds has ever run, so:
 ⚠️ Owed before the owner's five-video review of the new dataset: `scripts/review_videos.py` is built for v5 (two
 cameras side by side, merged index = 25 x part + local index). Dataset v6 has three cameras, the re-made part 14
 has 24 episodes and a new part can end short, so its episode numbers must come from the merged dataset, not from
-25 x part. Not changed tonight.
+25 x part. Not changed tonight. Done 2026-11-27: `scripts/v6_check.py videos` cuts the five videos with the three
+cameras side by side and takes the episode numbers from the parts' logs and sizes (section 28).
 
-**Decisions that are the owner's** (asked in the morning summary of 2026-11-27; nothing below is switched by me):
+**Decisions that are the owner's** (asked in the morning summary of 2026-11-27; nothing below is switched by me).
+Owner, 2026-11-27 morning: "yea go for the trail and the data set name whatever you gave is good and go with the
+36gb version". So of the list below: 1 is given for the trial only (the rest of the run waits for the trial's
+report), 2 is `krish5831/blush_sim_teacher_v6`, 3 is qp 23 (which measures 52 GB, not 36: section 28). 4 to 10 are
+open; 5 is in the trial's recorded part because it is in the documented command.
 1. The go: first the trial of one part of each (steps 1-3), then the rest. The re-make and the recording run one
    after the other, not side by side (three workers each fill the memory rule).
 2. The dataset's name. "The same dataset as before" cannot be the old repo itself: the pictures of the old 800
@@ -848,3 +855,81 @@ has 24 episodes and a new part can end short, so its episode numbers must come f
    store H.264 by the picture rule. One line there would say so.
 10. The real cart: the camera upright stands 12.5 cm outside the plank rig's end frame, and arm B needs the mirror
     image (section 24). Nothing is built or drawn.
+
+## 28. The trial: one re-made part, one recorded part, one merge (2026-11-27 morning, after the owner's go)
+
+The go was for the trial only (section 27, decisions). Names: parts `krish5831/blush_sim_teacher_v6_old_p00` and
+`..._new_p00`, merge `krish5831/blush_sim_teacher_v6_trial`, all local (`~/.cache/huggingface/lerobot`); nothing
+went to the Hub. Commands as in `sim/README.md`, one after the other, one worker each:
+
+| | Re-made part (v5 episodes 0-24) | Recorded part (seed plan `p00`) | Merge of the two |
+|---|---|---|---|
+| Ran | 08:26-08:38 | 08:39-09:13 | 09:14 |
+| Episodes | 25 of 25 (2 nothing-ripe) | 25 of 25 (4 nothing-ripe) | 50 |
+| Frames | 12,254 | 11,413 | 23,667 |
+| By the clock | 11 min 17 s | 34 min 31 s | 9 s |
+| Processor time | 22 min 4 s | 47 min 6 s | 15 s |
+| Peak memory (the job's cgroup, from the journal) | 3.3 GB | 3.6 GB | 2.6 GB |
+| Video on disk | 953 MB = 38.1 MB an episode | 881 MB = 35.3 MB an episode | 1.83 GB |
+| Picture gate (stored frames read back) | 150 of 150 the same | 150 of 150 | 300 of 300 |
+
+**Checked with `scripts/v6_check.py`** (new; "the worker ended with exit 0" says nothing, both worker scripts
+exit 0 whatever the part did, and a short part still finalizes):
+- Both parts and the merge: cameras `high`, `low`, `claw`; stored as H.264, every frame a key frame, qp 23, no crf
+  (`picture_store.encoder_of(features) == encoder()`, what `eval_truss.py` will ask of the training dataset); the
+  gate file is there and every fingerprinted frame reads back the same (2 frames x 3 cameras an episode).
+- Re-made part: the joint readings and commands of all 12,254 frames equal v5's bit for bit; no cut episode has an
+  all-zero box in its cue numbers.
+- Recorded part: every zone at the plan's quota; the cue numbers in the dataset equal the log's. The recorder
+  built the same 31 scenes in the same order as the rehearsal of the night (section 27) and kept the same 25. It
+  refused 6: 4 with no plan (one is 10100005, whose start pose is never clear) and 2 whose seven dry runs all
+  failed. ⚠️ The two refusals only a recording pass can make ("recording differs from the dry run", "recording
+  picked another truss") did not occur: 0 of 25. Noisy: 10 of the 21 cut episodes. Start pose: first draw clear in
+  25 of 31 scenes, second in 5, one at the exact pose.
+- Merge: episodes and frames are the parts' sums, and every part's joint readings, commands and cue numbers stand
+  at their place in the merge bit for bit.
+- Pictures read back through `LeRobotDataset` (`v6_check.py sheet`, `outputs/v6/trial/`: a re-made cut, a
+  recorded cut, a recorded noisy cut, a nothing-ripe scene of each kind; start frame and mid-episode, three
+  cameras): the cue box and cross are on `high` and `low`, none on a nothing-ripe scene, the claw camera shows the
+  stalk between the jaws mid-episode. Five review videos (`v6_check.py videos`,
+  `outputs/videos/review_blush_sim_teacher_v6_trial/`, one look only); two videos and one sheet went to the owner.
+
+**Size: the estimate of section 27 was low by a factor 1.43.** It came from six start pictures (18.1 kB a
+picture at qp 23). Real frames, with the row in view of the two post cameras and the arm moving, take 25.8 kB:
+
+| MB for a part's frames | high | low | claw | per picture, mean |
+|---|---|---|---|---|
+| Re-made part (12,254 frames) | 422 | 359 | 172 | 25.9 kB |
+| Recorded part (11,413 frames) | 393 | 336 | 152 | 25.7 kB |
+
+At these sizes the whole dataset is 30.4 GB (799 old) + 21.2 GB (600 new) = **51.6 GB of video at qp 23**, not
+36. Other settings, measured by decoding the re-made part's own videos and encoding them again (the same method
+at qp 23 gives 0.954 of the stored size, so the ratios are taken against that), and the loss on the six raw start
+pictures (mean difference to the raw picture in grey levels of 255; about 1.6 of it is the colour format, which
+every setting shares; `picture_store.py selfcheck`'s method):
+
+| qp | Size against qp 23 | Whole dataset | Loss |
+|---|---|---|---|
+| 18 | not measured on real frames | | 1.61 |
+| 23 (the owner's choice) | 1 | 52 GB | 1.70 |
+| 26 | 0.83 | 43 GB | 1.78 |
+| 28 | 0.68 | 35 GB | 1.87 |
+| 30 | 0.58 | 30 GB | 1.96 |
+| v5's storage (AV1, 2 cameras) | | 6.6 GB | 1.94 |
+
+Every constant qp keeps the picture rule (a stored frame = its picture sent through alone). Peak on disk at
+qp 23: the parts and the merged copy side by side, 104 GB, against 134 GB free. A free Hugging Face account has
+100 GB of private storage (huggingface.co/docs/hub/storage-limits, read 2026-11-27).
+
+**Time for the rest, from these two parts.** Re-make: 31 parts x 11.3 min = 5.8 hours of one worker, about 2 hours
+on three. Recording: 23 parts x 34.5 min = 13.2 hours of one worker, about 4.5 hours on three (a part's time
+varies with its scenes: the rehearsal's dry passes took 25 and 20 minutes), then the top-up part and the merge.
+Together about 7 to 8 hours, against the 10 to 12 guessed in section 27. Three workers of one kind peak at 10 to
+11 GB together against 21 GB available, so 10 GB stay free (the rule asks 8): three workers, one kind after the
+other, as planned. ⚠️ Not measured: three workers side by side (the trial ran one at a time; v5's recording ran
+three without slowing down), the top-up, the 52 GB merge.
+
+**What is now in the parts.** If nothing changes, the two `p00` parts are part 0 of the real run: qp 23 and the
+start change of up to 3 deg (`--start-jitter-deg 3`) are then in the dataset. Changing either means deleting both
+part folders and redoing them (46 minutes). The `_trial` merge is a throwaway and does not get in the way of the
+real merge (`krish5831/blush_sim_teacher_v6`).

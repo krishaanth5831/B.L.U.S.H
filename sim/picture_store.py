@@ -58,10 +58,13 @@ import numpy as np
 #     H.264 g 1 qp 26                                   yes | 1.78 | 14.6
 # (about 1.6 of the loss is the colour format, yuv420p, which every row shares.) pyav and torchcodec decode it to the
 # same grey levels (largest difference 0).
-# qp 23: any constant qp keeps the rule, so the choice is size against detail. 1,400 episodes x 3 cameras x ~480
-# frames is ~2.0 M frames: ~36 GB at qp 23 on these start pictures (frames with the arm in view ran ~1.3x bigger in
-# the post-mortem's test), ~50 GB at qp 18, ~29 GB at qp 26; v5 was 6.6 GB for 2 cameras. ⚠️ Change it BEFORE a
-# recording starts, never between the parts of one dataset (the gate would still pass; the pictures would differ).
+# qp 23 (K7's choice, 2026-11-27): any constant qp keeps the rule, so the choice is size against detail. 1,400
+# episodes x 3 cameras x ~480 frames is ~2.0 M frames. ⚠️ The start pictures above underestimate the size: real
+# frames of rig trio took 25.8 kB at qp 23 (dataset v6's trial parts, 2026-11-27: high 34, low 29, claw 14 kB), so
+# the whole dataset is ~52 GB, not the ~36 GB that 18.1 kB gave. The same frames encoded again at other settings:
+# qp 26 ~43 GB (loss 1.78), qp 28 ~35 GB (loss 1.87), qp 30 ~30 GB (loss 1.96); v5 was 6.6 GB for 2 cameras.
+# ⚠️ Change it BEFORE a recording starts, never between the parts of one dataset (the gate would still pass; the
+# pictures would differ).
 STORE = dict(vcodec="h264", g=1, crf=None, preset="medium", extra_options={"qp": 23})
 GATE_FRAMES = (0, 30)     # per episode and camera: the start frame (where v5 broke) and one in motion (1 s in)
 GATE_FILE = "meta/picture_gate.jsonl"

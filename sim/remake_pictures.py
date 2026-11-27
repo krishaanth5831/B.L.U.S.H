@@ -17,8 +17,9 @@ picture_store.py, while every joint reading and every command stays exactly the 
     python remake_pictures.py part --part 0 --repo-id krish5831/blush_sim_teacher_v6r
                                                            # ⚠️ WRITES a dataset part: only with K7's go
 
-⚠️ `part` has not been run (2026-11-26): no re-recording without K7's go. First step of that go: one part, then
-`picture_store.py gate` on it and a look at its pictures, before the other 31.
+`part` has run for part 0 only (the trial, K7's go of 2026-11-27: 25 of 25 episodes in 11 minutes, 3.3 GB at the
+peak, 953 MB of video; `scripts/v6_check.py parts` found the joint readings and commands equal to v5's bit for bit
+and the gate's 150 frames the same). ⚠️ The other 31 parts need K7's go.
 
 How an episode is re-made (frames()):
   1. The scene is rebuilt from its seed in v5's world (truss_scene.set_world("crate23")) and decided with the bracket

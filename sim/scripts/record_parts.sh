@@ -10,7 +10,9 @@
 # Extra generate_truss.py flags: GEN_ARGS (default: dataset v5's recipe).
 # SEEDS_DIR: a folder of seed plans, one per part (p00.jsonl ..., sim/scripts/v6_seed_plan.py): part N then tries
 # the seeds of its plan in order, up to the plan's quota per cell, instead of SEED_BASE + 1000 N upward.
-# Dataset v6's 600 new episodes (K7 2026-11-26; NOT RUN YET, needs K7's go):
+# Dataset v6's 600 new episodes (K7 2026-11-26). Part 0 has run (the trial, K7's go of 2026-11-27: 25 kept in
+# 34 min 31 s, peak 3.6 GB with three cameras; scripts/v6_check.py checks a part). ⚠️ Parts 1-23 have NOT run:
+# they need K7's go.
 #   for w in 0 1 2; do GEN_ARGS="--teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
 #       --start-jitter-deg 3 --noise-share 0.5 --retries 6" SEEDS_DIR=sim/seed_plan_v6 \
 #       nohup sim/scripts/record_parts.sh krish5831/<name>_new 10100000 $w 3 24 & done
