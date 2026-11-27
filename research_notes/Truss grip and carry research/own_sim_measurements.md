@@ -1140,6 +1140,24 @@ since v6 store H.264 through `sim/picture_store.py`.
     frame 407); no episode within 6 cm of any line; the control gives 4.4 / 4.7 cm again. That post's inside face
     lies 5 mm behind the front of the simulator's end-frame plate `ef0_post0` (`scene.greenhouse_xml`: x -0.006 to
     0, y 0.37-0.43, to z 0.59, a solid in every recording), which is 60 mm wide against the post's 44.
+  - **The longer house, the rest** (queue `endpostw2p`, 2026-11-27 23:36 to 2026-11-28 00:27, job file
+    `outputs/v6/jobs_endpostw2p.txt`): `plants --n 0 --every 3` on those nine row-B lines plus five on that
+    house's row-A post (x -0.005 to -0.049, y -0.022 to 0.022), and `arm --every 1` on the five row-A lines.
+    Controls as before: plants 10 episodes / 1.7 cm old and 15 / -0.9 cm new, arm 4.4 / 4.7 cm; seed 10014003
+    skipped again. Arm to the row-A post: 16.8 cm old (seed 10003042, frame 21), 16.7 cm new (seed 10101695,
+    frame 32). Plants at the sampled frames: row B 7.6 cm old / 5.4 cm new, row A 4.8 / 7.3 cm; no episode within
+    4 cm of any line.
+  - ⚠️ `--every 3` does not see the nearest frame: a carried truss moves up to 3.9 cm in a frame (seed 10100475,
+    1.16 m/s). So the 36 episodes that came within 10 cm of a longer-house line at the sampled frames (19 old, 17
+    new) were run again at every frame (one-off driver around `plants`, log
+    `outputs/v6/endpost/w2_every_frame.log`): row B 7.3 cm old (seed 10019023, frame 281) / 4.6 cm new (seed
+    10100475, frame 311: the swing that ends on the camera post), row A 4.8 cm old (seed 10021002, frame 296) /
+    7.2 cm new (seed 10101033, frame 340). None within 4 cm. The largest change against a sampled value is
+    1.0 cm. On both posts the lines along the side face (x -0.016 to -0.049) come out farther than the corner
+    line, so no part went round behind the plate. The other 1,239 cut episodes are beyond 10 cm at the sampled
+    frames.
+  - ⚠️ For the same reason the as-drawn `plants` counts above (207 / 158 within 4 cm, 34 / 37 on a line) are
+    floors: they are from every third frame.
 - **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
   camera post than in the old ones.** Section 26 checked the 800 old episodes only. Arm: never nearer than 4.7 cm.
   Plants: within 4 cm of the line under the lenses in 15 of the 540 new cut episodes (old: 10 of 735), within 2 cm

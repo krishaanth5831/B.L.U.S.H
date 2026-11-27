@@ -138,23 +138,37 @@ post:
   half a plate's thickness, not how far the hand goes into the post. The 10 mm and 40 mm rows are the sturdier
   numbers. The simulator's fingers are boxes, simpler than the printed fingers.
 - **The cut truss passes there too.** The same lines against the plants (`plants --n 0 --every 3`: stems, every
-  truss and its fruit, the cut truss while it is carried, each part as balls): a plant part comes within 40 mm of a
-  row-B line in 207 of the 735 old cut episodes and 158 of the 540 new ones. In 94 and 65 of those a truss already
-  hangs that close at the first frame, before anything moves (the same sweep with `--every 100000`; 23 mm from a
-  line at the nearest): that is where plants hang in those scenes, not motion. In the other 113 and 93 a part gets
-  that close only during the episode, and only then does a fruit lie on a line (34 and 37 episodes). In the six episodes looked up (three at
-  each post) it was each time a fruit of the CUT truss, which at the first frame was 20 to 37 cm away from that
-  line. In these episodes the carry first pulls the truss to the arm's left (the hand 290 mm left of the base in
-  the three printed frame by frame), then lifts it over the arm's own base to the crate, and the truss dangles out
-  to the left on the way. Row A: within 40 mm in 8 old and 11 new episodes, none at the first frame: the truss
-  hanging behind the arm during that lift.
+  truss and its fruit, the cut truss while it is carried, each part as balls; every third frame, so the counts
+  are floors): a plant part comes within 40 mm of a row-B line in 207 of the 735 old cut episodes and 158 of the
+  540 new ones. In 94 and 65 of those a truss already hangs that close at the first frame, before anything moves
+  (the same sweep with `--every 100000`; 23 mm from a line at the nearest): that is where plants hang in those
+  scenes, not motion. In the other 113 and 93 a part gets that close only during the episode, and only then does
+  a fruit lie on a line (34 and 37 episodes). In the six episodes looked up (three at each post) it was each time
+  a fruit of the CUT truss, which at the first frame was 20 to 37 cm away from that line. In these episodes the
+  carry first pulls the truss to the arm's left (the hand 290 mm left of the base in the three printed frame by
+  frame), then lifts it over the arm's own base to the crate, and the truss dangles out to the left on the way.
+  Row A: within 40 mm in 8 old and 11 new episodes, none at the first frame: the truss hanging behind the arm
+  during that lift.
 - **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
   hand against the row post in a share of its picks, passes within 40 mm of it in nearly half, and swings the cut
   truss past it as well. Re-made pictures (3) keep the same motions, so they do not change this. The longer house
-  (2) puts the row post where the simulator has its end frame: the post's inside face is then 5 mm behind the front
-  of the simulator's end-frame plate (60 mm wide, the post 44), which was a solid in every recording, and the arm
-  comes no nearer to the post than 100 mm in the old episodes and 94 mm in the new ones (the same sweep on nine
-  lines of that post, inside face 375 mm from the arm).
+  (2) puts the row posts where the simulator has its end frame: each post's inside face is then 5 mm behind the
+  front of the simulator's end-frame plate (60 mm wide, the post 44), which was a solid in every recording.
+- **The longer house, measured.** The same sweeps on that house's two posts (inside face 375 mm from the arm; nine
+  lines on the row-B post, five on the row-A post). Nearest, in mm:
+
+  | | old | new |
+  |---|---|---|
+  | arm to the row-B post | 100 | 94 |
+  | arm to the row-A post | 168 | 167 |
+  | a plant part, the cut truss included, to the row-B post | 73 | 46 |
+  | a plant part to the row-A post | 48 | 72 |
+
+  Nothing comes within 40 mm of either post in any episode. The lines along each post's side come out farther than
+  the line on its corner, so nothing went round behind the simulator's plate. The arm was measured at every frame.
+  The plants were measured at every third frame, and the 36 episodes that came within 100 mm then at every frame
+  (the table's numbers). The others stay beyond 100 mm at the sampled frames: to get within 40 mm between two
+  samples a fruit would have to move 60 mm in a frame, and the fastest seen (episode 953) is 39 mm.
 - Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
 - Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
   leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.
@@ -172,9 +186,15 @@ python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/en
 # plants, and the cut truss: "--shard 0/2" and "1/2" ran side by side; "--every 100000" = the first frame only
 python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams $L                    # + --sessions v6new
 python whatif/camera_sweep_logs.py plants --n 0 --every 100000 --cams $L               # + --sessions v6new
-# the row post of a house 300 mm longer: the arm command again with these lines. ⚠️ --cams=$W, with the "="
-W=g_0.02_0.30_0.42,-0.005:0.378:0.52,-0.005:0.389:0.52,-0.005:0.400:0.52,-0.005:0.411:0.52,-0.005:0.422:0.52
+# the end posts of a house 300 mm longer (ran 2026-11-27 22:42 to 2026-11-28 00:27): nine lines on its row-B post
+# (W), five on its row-A post (A), and the control line again (C)
+W=-0.005:0.378:0.52,-0.005:0.389:0.52,-0.005:0.400:0.52,-0.005:0.411:0.52,-0.005:0.422:0.52
 W=$W,-0.016:0.378:0.52,-0.027:0.378:0.52,-0.038:0.378:0.52,-0.049:0.378:0.52
+A=-0.005:0.022:0.52,-0.005:0.000:0.52,-0.005:-0.022:0.52,-0.027:0.022:0.52,-0.049:0.022:0.52
+C=g_0.02_0.30_0.42
+python whatif/camera_sweep_logs.py arm --every 1 --cams=$C,$W                          # + --sessions v6new
+python whatif/camera_sweep_logs.py arm --every 1 --cams=$C,$A                          # + --sessions v6new
+python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams=$C,$W,$A              # + --sessions v6new
 ```
 
 **Looked at once, not a repo command:** the string rails (underside 520 mm above the arm base, along both row
