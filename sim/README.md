@@ -239,12 +239,15 @@ Measurements and choices: `research_notes/Truss grip and carry research/own_sim_
 `~/.cache/huggingface/lerobot` only: not on the Hub, nothing trained on it (both are K7's call), and its 57
 parts are still on disk beside it.
 
-⚠️ One known flaw, found the same evening: **episode 953** (new part 06, episode 4, seed 10100475). Two fruit of the
-cut truss pass through the camera post's rod for 4 frames, 6 mm deep at most. The post is drawn in the new
-episodes' pictures but was not a solid when they were recorded (`--layout-rig base`, below). Found by
+One rough episode, found the same evening: **episode 953** (new part 06, episode 4, seed 10100475). During the
+carry, 4 s after the cut, the hanging truss is swept against the camera post: two fruit meet the rod at about
+1 m/s, are held up on it for four frames and slip past. The post is a solid in the new recordings (below), so the
+pictures show what happened; it is a rough carry, not an error in the data. Found by
 `whatif/camera_sweep_logs.py touch --sessions v6new` over the 36 new episodes whose arm or plants came within 6 cm of
-the post; in the other 35 nothing touches it. The 800 old episodes were checked the same way before the re-make
-(notes section 26: nothing touches). The episode is still in the dataset: taking it out is K7's call.
+the line under the lenses; in the other 35 nothing touches the post or the housings. The 800 old episodes were
+checked the same way before the re-make (notes section 26: nothing touches). It is still in the dataset: K7's call.
+(⚠️ This paragraph first said the post was not a solid in the new recordings and the fruit passed through it. Wrong,
+corrected 2026-11-27 late; notes section 29.)
 
 - **Rig `trio`** = cameras `high`, `low`, `claw` (`scene.CART_CAMS`): both fixed cameras on one upright 35 cm to the
   left of the arm base and 10 cm toward the row, lenses 42 cm and 5 cm above the deck. `high` gives the cue numbers.
@@ -252,6 +255,10 @@ the post; in the other 35 nothing touches it. The 800 old episodes were checked 
   with the new ones: every v6 command takes `--world crate23 --rig trio --layout-rig base` (the recorder, the
   re-make, `base_grid.py`, `view_scene.py`); `eval_truss.py` takes the rig from the checkpoint and needs
   `--world crate23 --layout-rig base`.
+  ⚠️ "Shown" does not mean drawn only. The old bracket decides which plants stand there and which truss is ripe;
+  then the model is composed again with rig trio's post and housings as ordinary solids and without the old
+  bracket (`truss_scene._build_once`). So in the 600 new episodes and in every policy test the new brackets are
+  solid. Only the 799 re-made episodes were recorded with the old bracket and have the new ones drawn afterwards.
 - **The old 800 get the new cameras** from the logged simulator states (`remake_pictures.py`; 799 of them: v5
   episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ The states live in `~/.cache/blush_sim/states`, a cache folder.
   A second copy is in `~/datasets/blush_sim_states` (K7 2026-11-27; every file checked against

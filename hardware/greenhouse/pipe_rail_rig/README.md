@@ -57,10 +57,11 @@ came no nearer than 44 mm to the line under the lens and a carried truss no near
 camera housings in the model, nothing touched them in the 32 episodes that came within 6 cm
 (`own_sim_measurements.md` section 26). So the real upright must not be thicker than 16 mm or stand nearer the arm.
 ⚠️ In the 600 new episodes the arm stays 47 mm away, but the cut truss comes nearer than in the old ones: within
-40 mm of the line in 15 of the 540 cut episodes (old: 10 of 735), and in one (dataset episode 953) two fruit pass
-through the rod for 4 frames. Those episodes were recorded with only the old bracket as a solid, so nothing stopped
-it (section 29). So on the real cart a carried truss can knock the rod: over old and new together it passes within
-40 mm in 25 of 1,275 cuts (1 in 50), and in that one it would have hit.
+40 mm of the line in 15 of the 540 cut episodes (old: 10 of 735), and in one (dataset episode 953) the carried
+truss is swept against the rod: two fruit meet it at about 1 m/s, are held up on it for four frames and slip past.
+In the new recordings the rod stood as a solid (in the old ones the old bracket did), so that is a real knock
+(section 29). On the real cart a carried truss can therefore knock the rod: over old and new together it passes
+within 40 mm of the line in 25 of 1,275 cuts (1 in 50), and in one of the 1,275 it hit.
 
 **On this rig** that puts the rod at x −143, y 296 for arm 1 (the lenses at x −125, y 300, z 184 and 554): 143 mm
 outside the closed end frame's inside face. Arm 2 is arm 1 turned half a turn, so its post is the same assembly

@@ -1141,18 +1141,30 @@ since v6 store H.264 through `sim/picture_store.py`.
     lies 5 mm behind the front of the simulator's end-frame plate `ef0_post0` (`scene.greenhouse_xml`: x -0.006 to
     0, y 0.37-0.43, to z 0.59, a solid in every recording), which is 60 mm wide against the post's 44.
 - **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
-  camera post than in the old ones.** The post is drawn in the new episodes' pictures but was not a solid when they
-  were recorded (the scenes were decided with the old bracket, `--layout-rig base`), and section 26 checked the 800
-  old episodes only. Arm: never nearer than 4.7 cm. Plants: within 4 cm in 15 of the 540 new cut episodes (old:
-  10 of 735), within 2 cm in 4, and in one a fruit's ball lies on the post line (seed 10100475, frame 315: fruit
-  s2t1_t4 at (0.025, 0.299, 0.122), carried by the left).
+  camera post than in the old ones.** Section 26 checked the 800 old episodes only. Arm: never nearer than 4.7 cm.
+  Plants: within 4 cm of the line under the lenses in 15 of the 540 new cut episodes (old: 10 of 735), within 2 cm
+  in 4, and in one a fruit's ball lies on that line (seed 10100475, frame 315: fruit s2t1_t4 at (0.025, 0.299,
+  0.122), carried by the left).
   - `camera_sweep_logs.py touch --sessions v6new --from new_arm_eps.json new_plants_eps_0.json
-    new_plants_eps_1.json --cams g_0.02_0.30_0.42` (23:00-23:06): the 36 new episodes within 6 cm of the post line,
-    replayed with rig trio's real brackets as solids. 35 touch nothing. **One does: seed 10100475**: the fruit
-    s2t1_t4 and s2t1_t5 are inside the high camera's post in 4 frames, 6.0 mm deep at most.
+    new_plants_eps_1.json --cams g_0.02_0.30_0.42` (23:00-23:06): the 36 new episodes within 6 cm of that line,
+    replayed in the recorder's own model. 35 touch nothing. **One does: seed 10100475**: the fruit s2t1_t4 and
+    s2t1_t5 are in contact with the high camera's post in 4 frames (313, 314, 315, 317), 6.0 mm deep at most.
+  - ⚠️ **Corrected 2026-11-27 23:47: that is a real knock, not a pass through something that was not there.** This
+    bullet (and both READMEs) first said the post was drawn in the new episodes but was not a solid when they
+    were recorded. Wrong. With `--rig trio --layout-rig base` the scene is DECIDED with the old bracket (which
+    plants, which truss is ripe); then `truss_scene._build_once` composes the model again with rig trio's
+    brackets, as ordinary solids, and without the old one. Checked on that seed's model built as the recorder
+    builds it (`ts.build(seed, mounts=RIG_FIXED["base"], show_mounts=RIG_FIXED["trio"], jaw="v5")`, the call in
+    `so101_mujoco._build`): `high_cam_post`, `low_cam_post` and both housings have contype 1 and conaffinity 1,
+    and no `base_cam_*` geom is in it. The logged motion says the same: the two fruit come at the post at
+    1.1 m/s (frames 310-311), are down to 0.1-0.3 m/s at its surface in frame 313 (6.0 mm into it in that one
+    frame, which is what a contact with solref 0.02 gives at that speed), stay against it to frame 317 and slip
+    past. The cut was at frame 181; this is the carry, 4.4 s later. (One-off script, not in the repo.)
+  - So: the 799 re-made episodes were recorded with the old bracket and have the new ones drawn afterwards
+    (nothing touches the new ones in the 32 nearest, and 3 graze the old one that is no longer drawn: section
+    26). The 600 new ones were recorded with the new ones, solid, and without the old one.
   - That is part `v6_new_p06` episode 4 = **episode 953 of the merged dataset** (found by its joint readings, equal
     bit for bit; 505 frames). Its pictures around frames 300-331, looked at once: the truss swings past the low
-    camera at close range and leaves its view, and the claw camera sees the post beside the truss. Nothing in them
-    looks wrong at a glance, but on the real cart the truss would have knocked the rod.
-  - One episode of 1,399 (4 frames of 665,314). Left in the dataset; taking it out is the owner's call. Written
-    into `sim/README.md` ("Dataset v6", state) and the rig README's camera-post section.
+    camera at close range and leaves its view, and the claw camera sees the post beside the truss.
+  - One rough carry in 1,399 episodes, and its pictures and physics agree. Left in the dataset; taking it out is
+    the owner's call. Written into `sim/README.md` ("Dataset v6", state) and the rig README's camera-post section.
