@@ -114,13 +114,18 @@ post:
 | arm within 40 mm of a row-B line | 380 | 264 |
 | nearest the arm comes to a row-A line | 79 mm | 82 mm |
 
-- **Why.** At its start pose the hand points to the arm's left: the fixed finger's tip is 230 mm left of the base,
-  5 mm past the end frame's inside face, in the opening between the two row posts (between the floor tie and the
-  string rails the end frame is only those two posts). From there the hand swings forward to the row, and after the
-  crate it swings home the same way round. Both swings pass the place of the row-B post: frames 19-51 and 357-408
-  in the four nearest old episodes, looked at frame by frame.
-- **"At least".** The lines are 11 mm apart and are sampled every 10 mm of height, and the finger plates are a few
-  mm thick, so a finger can pass between the samples uncounted. The -2 mm the sweep prints as its nearest value is
+![the hand's paths and the end post, seen from above](renders/end_post_check.png)
+
+- **Why.** At its start pose the hand points to the arm's left: the fixed finger's tip is about 230 mm left of the
+  base, which is right at the end frame's inside face (from 1 mm short of it to 12 mm past it over the 1,400
+  episodes), in the opening between the two row posts (between the floor tie and the string rails the end frame is
+  only those two posts). From there the hand swings forward to the row, and after the crate it swings home the same
+  way round. Both swings pass the place of the row-B post: in six of the nearest episodes, looked at frame by frame,
+  the arm is within 40 mm of the post's corner line in frames 17-70 (the swing out) and 349-406 (the swing home).
+  In every one of the 1,400 episodes the tip is past the inside face at some frame, at most 79 mm past it
+  (`sim/whatif/end_post_sketch.py` draws the picture and prints these numbers).
+- **"At least".** The lines are 11 mm apart and are sampled every 10 mm of height, and the finger plates are 1 to
+  4 mm thick, so a finger can pass between the samples uncounted. The -2 mm the sweep prints as its nearest value is
   half a plate's thickness, not how far the hand goes into the post. The 10 mm and 40 mm rows are the sturdier
   numbers. The simulator's fingers are boxes, simpler than the printed fingers.
 - **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
@@ -137,8 +142,10 @@ post:
 L=g_0.02_0.30_0.42,0.02:0.30:0.42,0.145:0.378:0.52,0.145:0.389:0.52,0.145:0.400:0.52,0.145:0.411:0.52,0.145:0.422:0.52
 L=$L,0.134:0.378:0.52,0.123:0.378:0.52,0.112:0.378:0.52,0.101:0.378:0.52
 L=$L,0.145:0.022:0.52,0.145:0.000:0.52,0.145:-0.022:0.52,0.123:0.022:0.52,0.101:0.022:0.52
-python whatif/camera_sweep_logs.py arm --every 1 --cams $L                      # the 800 old episodes
-python whatif/camera_sweep_logs.py arm --every 1 --cams $L --sessions v6new     # the 600 new ones
+O=../outputs/v6/endpost
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/arm_eps.json                 # old 800
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/new_arm_eps.json --sessions v6new
+python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png   # the picture
 ```
 
 **Not checked:**
