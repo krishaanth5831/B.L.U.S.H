@@ -11,8 +11,11 @@
 # SEEDS_DIR: a folder of seed plans, one per part (p00.jsonl ..., sim/scripts/v6_seed_plan.py): part N then tries
 # the seeds of its plan in order, up to the plan's quota per cell, instead of SEED_BASE + 1000 N upward.
 # Dataset v6's 600 new episodes (K7 2026-11-26). Part 0 has run (the trial, K7's go of 2026-11-27: 25 kept in
-# 34 min 31 s, peak 3.6 GB with three cameras; scripts/v6_check.py checks a part). ⚠️ Parts 1-23 have NOT run:
-# they need K7's go.
+# 34 min 31 s, peak 3.6 GB with three cameras; scripts/v6_check.py checks a part). Parts 1-23 ran on 2026-11-27,
+# 12:04-21:23 (K7: "go", "lets do 52gb"): three workers, 23-111 min a part (median 44: a part's time goes with how
+# many of its scenes the teacher refuses), peaks 3.3-3.9 GB, 20.0 h of worker time for 570 episodes. Five parts
+# ended one episode short; the top-up part 24 (`... 10100000 24 1 25` with v6_seed_plan.py --topup's p24.jsonl)
+# recorded those 5 in 18 min.
 #   for w in 0 1 2; do GEN_ARGS="--teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
 #       --start-jitter-deg 3 --noise-share 0.5 --retries 6" SEEDS_DIR=sim/seed_plan_v6 \
 #       nohup sim/scripts/record_parts.sh krish5831/<name>_new 10100000 $w 3 24 & done

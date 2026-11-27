@@ -3,15 +3,16 @@
 # (sim/remake_pictures.py part: the logged simulator state of every frame is set, the new cameras rendered, the joint
 # readings and commands copied from the old dataset). Parts are v5's own 32 parts of 25 episodes.
 # Part 0 has run (the trial, K7's go of 2026-11-27: `... krish5831/blush_sim_teacher_v6_old 0 1 1`, 25 of 25 in
-# 11 min 17 s; checked with scripts/v6_check.py). ⚠️ Parts 1-31 have NOT run: they need K7's go.
+# 11 min 17 s; checked with scripts/v6_check.py). Parts 1-31 ran on 2026-11-27, 09:52-12:15 (K7: "go", "lets do
+# 52gb"): three workers, 11-15 min a part, 799 episodes, every part passes v6_check.py.
 # Run W workers as parts w, w+W, w+2W, ... (as record_parts.sh):
 #   for w in 0 1 2; do nohup sim/scripts/remake_parts.sh krish5831/<name>_old $w 3 32 & done
 #   python sim/merge_parts.py krish5831/<name> krish5831/<name>_old krish5831/<name>_new   # old + new, then the Hub
 # A finished part is kept, one killed before its finalize (no parquet footer) is removed and redone, as
 # record_parts.sh does. Needs ~/.cache/blush_sim/states (the only copy of the old episodes' states) and the old
 # dataset's joint data (one 30 MB file, in the Hugging Face cache since the dry runs of 2026-11-26).
-# RAM: part 0 peaked at 3.3 GB (the job's cgroup, 2026-11-27; `journalctl --user | grep "scope: Consumed"` prints
-# a finished part's peak); the cap is the recorder's (7 GB a part). ⚠️ At most 3 workers, and not beside the
+# RAM: the 32 parts peaked at 2.8-3.4 GB (the job's cgroup, 2026-11-27; `journalctl --user | grep "scope: Consumed"`
+# prints a finished part's peak); the cap is the recorder's (7 GB a part). ⚠️ At most 3 workers, and not beside the
 # recorder's workers: keep 8 GB free (`free -g`).
 # ⚠️ v5 episode 353 (seed 10014003) does not rebuild as recorded and is left out (remake_pictures.py logs it), so
 # its part has 24 episodes and the whole re-make 799. Check the count when all parts are done:

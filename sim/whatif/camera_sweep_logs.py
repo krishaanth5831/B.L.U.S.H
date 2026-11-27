@@ -26,6 +26,15 @@ touch:  replays the episodes the sweeps listed as near misses (--episodes-json f
         and asks the simulator's own collision check, frame by frame, whether the arm or a plant part is inside one.
         --rig base --cams base: the same for the OLD bracket, which stood in the recorded physics: an episode it
         lists is one where something pressed on a bracket the re-made pictures no longer show.
+
+--sessions v6new (all three modes): the same over dataset v6's 600 NEW episodes (recorded 2026-11-27) instead of
+v5's 800. They rebuild with the same call: their scenes were decided with the old bracket standing in them
+(--layout-rig base), and a bracket changes no joint. `plants` leaves out a scene whose logged target is not one of
+the rebuilt scene's ready trusses (a rebuilt layout that is not the recorded one).
+
+A post can also be a plain vertical line `x:y:z` (world metres, from the deck up to z): e.g. the corner of the
+plank rig's end post, which stands 145 mm nearer the arm than the simulator's end frame (several lines along the
+post's two faces that look at the arm; hardware/greenhouse/pipe_rail_rig/README.md).
 """
 import argparse
 import json
@@ -42,8 +51,20 @@ import camera_score as cs  # noqa: E402
 import rebuild_v5_check as rc  # noqa: E402
 
 CLEAR_M = cs.CLEAR_MIN_M
+V6NEW_SESSIONS = ("20261127_08", "20261127_22")            # the 25 state sessions of dataset v6's 600 new episodes
+#                             (parts 0-24, recorded 2026-11-27 08:39-21:45; ls ~/.cache/blush_sim/states)
+V6NEW_DATASET = "krish5831/blush_sim_teacher_v6_new_p"     # those parts' repo ids (session.json's "dataset")
 NOTE_M = 0.06               # --episodes-json lists every episode that came nearer than this to a post (guess: the
 #                             4 cm rule plus room to see how close the near misses are)
+
+
+def logged(a):
+    """The logged scenes to sweep: dataset v5's 800 (rebuild_v5_check.V5_SESSIONS) or, --sessions v6new, dataset
+    v6's 600 new episodes."""
+    if a.sessions == "v6new":
+        rc.V5_SESSIONS = V6NEW_SESSIONS
+        return [x for x in rc.v5_scenes() if (x["dataset"] or "").startswith(V6NEW_DATASET)]
+    return rc.v5_scenes()
 
 
 def shard_of(S, spec):
@@ -88,7 +109,7 @@ def arm(a):
     names, pos = cam_positions(a.cams)
     P, own = cs.post_points(pos)
     ts.set_world("crate23")
-    S = rc.v5_scenes()
+    S = logged(a)
     m, d, _ = ts.build(S[1]["seed"], base_mount=True, jaw="v5")     # any scene: only the arm is posed
     S = shard_of(S[:a.limit] if a.limit else S, a.shard)
     qidx, _ = scene.arm_ids(m)
@@ -130,7 +151,7 @@ def plants(a):
     import truss_scene as ts
     names, pos = cam_positions(a.cams)
     ts.set_world("crate23")
-    S = [x for x in rc.v5_scenes() if not x["hold"]]
+    S = [x for x in logged(a) if not x["hold"]]
     # spread over every position and height: the k-th recorded episode of each target slot in turn (s0t0, s0t1, ...,
     # s4t1; s0 is the stem nearest the robot's left). ⚠️ Until 2026-11-26 the first half was "sorted by target
     # name", which is 30 times s0t0. Every scene tests all its plants; the slot only decides the carried truss's way.
@@ -153,6 +174,10 @@ def plants(a):
         m, d, info = ts.build(x["seed"], base_mount=True, jaw="v5")
         if (m.nq, m.neq) != (z["qpos"].shape[1], z["eq_active"].shape[1]):
             print(f"  seed {x['seed']}: rebuilt model differs from the log, skipped", flush=True)
+            continue
+        if x["target"] not in {info["trusses"][k]["name"] for k in info["ready"]}:
+            print(f"  seed {x['seed']}: logged target {x['target']} is not ready in the rebuilt scene, skipped",
+                  flush=True)
             continue
         pg = sorted({m.geom(g).id for t in info["trusses"] for g in t["geoms"]}
                     | {m.geom(f["geom"]).id for t in info["trusses"] for f in t["fruit"]}
@@ -193,7 +218,7 @@ def touch(a):
                 for sd, dist in eps.items():
                     seeds[int(sd)] = min(dist, seeds.get(int(sd), np.inf))
     seeds = {sd: v for sd, v in seeds.items() if v < a.under}
-    S = {x["seed"]: x for x in rc.v5_scenes()}
+    S = {x["seed"]: x for x in logged(a)}
     hit = {}
     print(f"{len(seeds)} episodes listed within {100 * a.under:.1f} cm of {sorted(names)}; replaying them with rig "
           f"{a.rig}'s brackets {RIG_FIXED[a.rig]} in the scene (decided with the old bracket)", flush=True)
@@ -243,6 +268,8 @@ if __name__ == "__main__":
         s.add_argument("--episodes-json", help="write {camera: {seed: nearest distance}} for every episode that "
                                                "came within NOTE_M of that camera's post")
         s.add_argument("--shard", default="0/1", help="i/n: every n-th episode from the i-th (parallel runs)")
+        s.add_argument("--sessions", choices=("v5", "v6new"), default="v5",
+                       help="v5: dataset v5's 800 episodes; v6new: dataset v6's 600 new ones")
         if name == "plants":
             s.add_argument("--n", type=int, default=60, help="episodes to rebuild (0 = every cut episode)")
         else:
@@ -254,5 +281,6 @@ if __name__ == "__main__":
                                                  "old bracket itself, i.e. what the recorded physics touched)")
     s.add_argument("--under", type=float, default=NOTE_M, help="only the episodes the sweep has nearer than this, m")
     s.add_argument("--json", help="write {seed: {frames, deepest_mm, target, what}} of the episodes that touch")
+    s.add_argument("--sessions", choices=("v5", "v6new"), default="v5", help="as for arm / plants")
     a = ap.parse_args()
     dict(arm=arm, plants=plants, touch=touch)[a.mode](a)

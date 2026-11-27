@@ -860,7 +860,7 @@ open; 5 is in the trial's recorded part because it is in the documented command.
 Owner, 2026-11-27 midday, shown 7 to 10 as "four smaller things": "finish the four smaller things also". What
 was done for each: section 29. 4 to 6 stay as they are in the run (old start, 3 deg start change, the cue's form).
 
-## 28. The trial: one re-made part, one recorded part, one merge (2026-11-27 morning, after the owner's go)
+## 28. The trial (one re-made part, one recorded part, one merge), then the full run (2026-11-27, after the owner's go)
 
 The go was for the trial only (section 27, decisions). Names: parts `krish5831/blush_sim_teacher_v6_old_p00` and
 `..._new_p00`, merge `krish5831/blush_sim_teacher_v6_trial`, all local (`~/.cache/huggingface/lerobot`); nothing
@@ -943,23 +943,70 @@ start change of up to 3 deg (`--start-jitter-deg 3`) are then in the dataset. Ch
 part folders and redoing them (46 minutes). The `_trial` merge is a throwaway and does not get in the way of the
 real merge (`krish5831/blush_sim_teacher_v6`).
 
-**The full run, IN FLIGHT since 2026-11-27 09:52** (owner, after the trial's report: "go" and "lets do 52gb" = the
-rest at qp 23, the start change kept, the trial's two parts as part 0). It runs as the queue unit
-`blush-queue-v6run` (`MAXJ=3 sim/scripts/sim_queue.sh v6run outputs/v6/jobs_v6run.txt`, log
-`outputs/v6/queue_v6run.log`), a unit of its own, so it does not need the session that started it. Three workers
-at a time: first the three re-make workers (units `blush-v6-v6run_r0`, `_r1`, `_r2`: parts 1-31), then, as each
-ends, a recording worker (`_n0`, `_n1`, `_n2`: parts 1-23). Worker logs:
-`outputs/remake_blush_sim_teacher_v6_old/workers.log`, `outputs/record_blush_sim_teacher_v6_new/workers.log`.
-- ⚠️ Every part runs in a scope of its own, outside its worker's unit (tested): stopping a worker unit ends the
-  script, the part in flight carries on and finalizes. That is the clean way down to two workers. A real stop is
-  the queue first, then the workers, then the part processes.
-- ⚠️ Before a worker is started again, no part process of its kind may be alive: the new worker deletes a part
-  folder without a parquet footer, and a part still being written has none.
-- ⚠️ No edits to `remake_parts.sh`, `record_parts.sh`, `sim_queue.sh` or the job file until every worker has ended.
-- After the queue: `v6_check.py parts` (a short recorded part is input for the top-up, any other failed check a
-  redo), the top-up part 24, the merge into `krish5831/blush_sim_teacher_v6` under the memory cap,
-  `v6_check.py merged` (the gate should read 8,394 frames for 1,399 episodes) and `videos`, the report.
-- Not covered by the go: any upload, any training, deleting the parts or the trial merge.
+**The full run: done 2026-11-27, 09:52-21:51** (owner, after the trial's report: "go" and "lets do 52gb" = the
+rest at qp 23, the start change kept, the trial's two parts as part 0). The dataset is
+`krish5831/blush_sim_teacher_v6`, on this laptop only (`~/.cache/huggingface/lerobot/krish5831/blush_sim_teacher_v6`):
+nothing went to the Hub.
+
+| | Re-made (v5's episodes, new cameras) | Recorded (new) | Merged |
+|---|---|---|---|
+| Episodes | 799 (64 nothing-ripe) | 600 (60 nothing-ripe) | 1,399 |
+| Frames | 383,289 | 282,025 | 665,314 |
+| Video on disk | 29.61 GB | 21.75 GB | 51.36 GB |
+| Parts | 32 | 25 (24 and the top-up) | 57 |
+| Ran | 09:52-12:15 | 12:04-21:23, top-up 21:27-21:45 | 21:47-21:50 |
+| One part by the clock | 11-15 min | 23-111 min, median 44 | 2 min 54 s |
+| Peak memory of one part (journal) | 2.8-3.4 GB | 3.3-3.9 GB | 7 GB = the cap |
+
+It ran as the queue unit `blush-queue-v6run` (`MAXJ=3 sim/scripts/sim_queue.sh v6run outputs/v6/jobs_v6run.txt`), three
+workers at a time: the three re-make workers, then, as each ended, a recording worker. At the five looks during the
+recording, 15 to 17 GB of memory were available with three workers running (the rule asks 8). The journal gives the
+merge a peak of 7 GB, which is its cap; it ended with exit 0. Probably the files it copies count as its memory until
+the cap makes the kernel drop them (a guess, not measured; the trial's merge of two parts peaked at 2.6 GB).
+
+**Checked** (`scripts/v6_check.py parts` on all 57 parts, `merged` on the merge; `outputs/v6/check_parts_final.log`,
+`check_merged.log`; every line "ok"):
+- Every part and the merge: cameras `high`, `low`, `claw`; H.264, every frame a key frame, qp 23; the gate file is
+  there and every fingerprinted frame reads back the same (8,394 of 8,394 on the merge = 1,399 episodes x 2 frames
+  x 3 cameras).
+- Re-made: the joint readings and commands of all 383,289 frames equal v5's bit for bit; no cut episode has an
+  all-zero box in its cue numbers. Part 14 has 24 episodes (v5 episode 353 does not rebuild), the other 31 have 25.
+- Recorded: 849 scenes built, 600 kept (71 %). Refused 249: no plan 144, every dry run failed 62, the noisy run of
+  the chosen plan failed 35, the scene's cell was already full 8. The two refusals only a recording pass can make
+  ("recording differs from the dry run", "recording picked another truss"): 0 in all 25 parts. Noisy: 244 of the 540
+  cut episodes. Start pose: the first draw was clear in 502 of the 849 scenes; 10 scenes fell back to the exact
+  pose. The cue numbers in the dataset equal the log's in every part.
+- Five parts ended one episode short (06, 11, 13, 14, 16: a cell's listed scenes ran out before its quota).
+  `v6_seed_plan.py --topup` planned exactly those five (cells x1z1, x2z1, x1z2, x2z2, x3z2; 30 scenes not listed
+  before: `sim/seed_plan_v6/p24.jsonl`), and part 24 kept 5 of the 9 scenes it built, in 18 minutes. With it, every
+  cell holds exactly the number of new episodes the plan asked for, and 60 are nothing-ripe. (The plan had
+  expected 536 of the 540 cut episodes from its lists; they gave 535.)
+- Where the cut point hangs, old + new together (4 parts along the row x 3 heights): 106 or 107 episodes in each
+  of the 12 cells, against 35 to 87 in v5 alone (by the plan's count of v5's cut points, 734 of the 735 re-made cut
+  episodes). The new 540 cut episodes: 20, 50, 39, 61 (low), 46, 58, 55, 38 (middle), 24, 36, 71, 42 (high), each
+  row from the arm's left to its right.
+- Merge: 1,399 episodes and 665,314 frames, the parts' sums; every part's joint readings, commands and cue numbers
+  stand at their place in the merge bit for bit.
+- Five review videos (`v6_check.py videos`, `outputs/videos/review_blush_sim_teacher_v6/`, one look only: a re-made
+  cut, a short and the longest new clean cut, a new noisy cut, a new nothing-ripe scene). Four frames of each
+  looked at: the box and the cross are on `high` and `low`, the claw camera shows the stalk between the jaws, the
+  cut truss ends in the crate, the nothing-ripe scene has no box and the arm stays home.
+
+**Time: the estimate was too low.** 7 to 8 hours were estimated; it took 12 (09:52-21:51).
+- The re-make went as estimated (2 h 23 min). The recording took 20.0 hours of worker time against 13.2
+  estimated from the trial's one part: a part took 23 to 111 minutes, with how many of its scenes the teacher
+  refuses and how long the refused ones' dry runs last (part 19 built 33 scenes in 23 minutes, part 20 built 42 in
+  111).
+- ⚠️ The three workers each had a fixed list (every third part). One was done at 16:45, the second at 18:14, the
+  third at 21:23: the last four and a half hours ran on two workers, then one. A helper could not take over a
+  waiting part safely, because a worker deletes a part folder that has no parquet footer yet. A next recording
+  should let a free worker take the next part nobody has started (not changed in `record_parts.sh` now).
+
+**Left as it is, the owner's call:** nothing is uploaded and nothing trained. On disk: the merged dataset (51.4 GB),
+its 57 parts (51.4 GB again), the trial merge (1.8 GB) and the two review-video folders; 34 GB are free. The
+second copy of the simulator states was brought up to date after the run (3,169 files, 3.6 GB, every file's
+SHA-256 the original's). Deleting the parts, the trial merge or the review videos needs the owner's word, as does
+the upload (`sim/colab_train_act_v6.ipynb` reads the dataset from the Hub).
 
 
 ## 29. The four smaller decisions, done (owner, 2026-11-27 midday: "finish the four smaller things also")
@@ -984,8 +1031,8 @@ with `rsync -a` from `~/.cache/blush_sim/states`; every file's SHA-256 equals th
 the folder: `cd ~/datasets/blush_sim_states && sha256sum -c --quiet MANIFEST.sha256`).
 - ⚠️ Same disk: it covers a wiped cache folder, not a dead drive. Nothing was uploaded; a copy off the laptop needs
   the owner's word.
-- ⚠️ It holds the states up to the trial's recorded part. The run's 23 further recorded parts write new state
-  folders, so the copy is brought up to date after the queue has ended.
+- Brought up to date after the run (2026-11-27 21:53, the same `rsync -a`): 3,169 files, 3.6 GB, with the states
+  of all 600 new episodes; the manifest is made from the original and every file of the copy checks against it.
 
 **9. `CLAUDE.md`**: one line under the codec rule: `libsvtav1` is for the real arm's recordings; simulator datasets
 since v6 store H.264 through `sim/picture_store.py`.

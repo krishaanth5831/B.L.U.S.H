@@ -229,11 +229,15 @@ makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of th
 dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
 lists the settings that do) and pass live pictures through the same step at test time.
 
-### Dataset v6: three cameras, the old 800 re-made + 600 new (trial 2026-11-27; the full run is in flight)
+### Dataset v6: three cameras, the old 800 re-made + 600 new (recorded 2026-11-27, on this laptop only)
 
 K7 2026-11-26: the teacher, the gripper and the base stay; "more varied episodes", "3 cameras instead of 2 but also
 placed in a more calculated location", the post-mortem's fixes, "another 600 episodes on top of the previous 800".
-Measurements and choices: `research_notes/Truss grip and carry research/own_sim_measurements.md` sections 21-27.
+Measurements and choices: `research_notes/Truss grip and carry research/own_sim_measurements.md` sections 21-28.
+**State (2026-11-27 evening):** `krish5831/blush_sim_teacher_v6` is merged and checked: 1,399 episodes (799 re-made
++ 600 new, 124 of them nothing-ripe), 665,314 frames, 51.4 GB of video, picture gate 8,394 of 8,394. ⚠️ It is in
+`~/.cache/huggingface/lerobot` only: not on the Hub, nothing trained on it (both are K7's call), and its 57
+parts are still on disk beside it.
 
 - **Rig `trio`** = cameras `high`, `low`, `claw` (`scene.CART_CAMS`): both fixed cameras on one upright 35 cm to the
   left of the arm base and 10 cm toward the row, lenses 42 cm and 5 cm above the deck. `high` gives the cue numbers.
@@ -250,11 +254,12 @@ Measurements and choices: `research_notes/Truss grip and carry research/own_sim_
   where the truss hangs (4 row parts x 3 heights, 106-107 episodes each instead of 35-87), 60 of them nothing-ripe.
   Three scenes are listed per wanted episode; at the teacher's keep rates of v5's recording that gives about 536
   of the 540 cut episodes, and `v6_seed_plan.py --topup` (its header has the command) plans the missing ones as
-  part 24 from scenes not yet listed.
+  part 24 from scenes not yet listed. (The run: the lists gave 535, part 24 the other 5; the teacher kept 600 of
+  the 849 scenes it built.)
   Each scene starts up to 3 deg off the start pose, drawn again until the arm is clear (`--start-jitter-deg 3`).
 - Pictures are stored so that a frame depends on its own picture only (`picture_store.py`), and every dataset
   carries a gate file that `merge_parts.py` checks. At the chosen quality (qp 23, K7 2026-11-27) the whole dataset
-  is about 52 GB of video (measured on the trial's parts; 104 GB while the parts and the merged copy both exist).
+  is 51.4 GB of video (103 GB while the parts and the merged copy both exist).
 - **Is a part right?** `scripts/v6_check.py`: both worker scripts exit 0 whatever the part did, and a short part
   still finalizes. It checks the cameras and the storage setting, reads the gate's frames back, compares a re-made
   part's joint readings and commands with v5's bit for bit and a recorded part's episodes per zone with its plan,
@@ -277,15 +282,20 @@ sim/scripts/remake_parts.sh ${V6}_old 0 1 1
 GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh ${V6}_new 10100000 0 1 1
 python sim/merge_parts.py ${V6}_trial ${V6}_old ${V6}_new          # merges + runs the gate
 (cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new && python scripts/v6_check.py merged ${V6}_trial ${V6}_old ${V6}_new)
-# the rest (K7's go 2026-11-27: IN FLIGHT since 09:52, the same six workers as six jobs of scripts/sim_queue.sh,
-# three at a time; notes section 28). Three workers of one kind, then the other kind (a worker peaks at 3.3-3.6 GB;
-# both kinds at once would break the memory rule). About 2.5 h for the re-make and 4.5 h for the recording.
+# the rest (these HAVE run, K7's go 2026-11-27, 09:52-21:51: the same six workers as six jobs of
+# scripts/sim_queue.sh, three at a time; notes section 28). Three workers of one kind, then the other kind (a part
+# peaks at 2.8-3.9 GB; both kinds at once would break the memory rule). 2 h 23 min for the re-make, 9 h 19 min for
+# the recording (a part took 23-111 min). ⚠️ Each worker has a fixed list of parts, so the last 4.5 hours ran on
+# two workers, then one.
 for w in 0 1 2; do nohup sim/scripts/remake_parts.sh ${V6}_old $w 3 32 & done
 for w in 0 1 2; do GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 nohup sim/scripts/record_parts.sh ${V6}_new 10100000 $w 3 24 & done
 (cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new)   # every part; a short recorded part shows here
-# parts that ended short of 25: plan the missing episodes as part 24 (v6_seed_plan.py --topup), record it
+# parts that ended short of 25 (five did, by one episode each): plan the missing episodes as part 24, record it
+(cd sim && python scripts/v6_seed_plan.py --census seed_plan_v6/census.jsonl --plan seed_plan_v6/plan.json \
+    --used "seed_plan_v6/p*.jsonl" --topup ~/.cache/blush_sim/truss/blush_sim_teacher_v6_new_p*.jsonl \
+    --first-part 24 --oversupply 6 --out seed_plan_v6)
 GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh ${V6}_new 10100000 24 1 25
-python sim/merge_parts.py $V6 ${V6}_old ${V6}_new
+python sim/merge_parts.py $V6 ${V6}_old ${V6}_new                  # 3 min; run it under a memory cap (it fills 7 GB)
 (cd sim && python scripts/v6_check.py merged $V6 ${V6}_old ${V6}_new \
     && python scripts/v6_check.py videos $V6 ${V6}_old ${V6}_new --out ../outputs/videos/review_blush_sim_teacher_v6)
 ```
