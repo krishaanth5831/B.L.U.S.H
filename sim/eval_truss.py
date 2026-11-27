@@ -97,6 +97,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import expert  # noqa: E402
 import generate_truss as gt  # noqa: E402
+from cameras import CAM_IN_MODEL, RIG_FIXED  # noqa: E402
+import picture_store  # noqa: E402
 import rescue  # noqa: E402
 import truss_ik  # noqa: E402
 import truss_expert as tx  # noqa: E402
@@ -113,6 +115,9 @@ HOLD_MOVE_NORM = 3.0      # --holds: the arm "stayed home" within this on every 
 HOLD_SEED_START = 9_950_000   # --holds: outside every recorded range (step 2 ended at 9722070)
 
 
+ALL_CAMS = tuple(CAM_IN_MODEL)     # every camera a rig can hand the policy, in a fixed order (for the videos)
+
+
 def cameras(path):
     """The camera features a checkpoint takes, from its config.json input_features (e.g. observation.images.base)."""
     cfg = path / "config.json"
@@ -121,9 +126,10 @@ def cameras(path):
 
 
 def trained_on(path):
-    """(dataset repo id, rig) a checkpoint was trained on: the rig is "base" when the base camera is among its inputs
-    (rig "base", 2026-11-06), else "birdseye"; the dataset from its train_config.json."""
-    rig = "base" if "observation.images.base" in cameras(path) else "birdseye"
+    """(dataset repo id, rig) a checkpoint was trained on: the rig whose fixed cameras (cameras.RIG_FIXED) are all
+    among its inputs ("trio": high + low, "base": base), else "birdseye"; the dataset from its train_config.json."""
+    have = {c.split(".")[-1] for c in cameras(path)}
+    rig = next((r for r in ("trio", "base") if set(RIG_FIXED[r]) <= have), "birdseye")
     cfg = path / "train_config.json"
     return (json.loads(cfg.read_text())["dataset"]["repo_id"] if cfg.exists() else TRAIN_DATASET), rig
 
@@ -231,6 +237,57 @@ def recorded_start_frames(repo_id, cams):
     return frames
 
 
+def clip_cmd(cmd, lim):
+    """(the command with every joint inside lim = (lowest, highest) command per joint, how many joints were changed).
+    lim None = off. --clip-actions: lim is the range of the commands in the policy's own training dataset
+    (meta/stats.json), so the policy can never command a joint further than a demonstration did.
+    Why not "a few units inside each joint's range" (post-mortem 5.9's wording): the teacher itself commands right
+    up to the ends. Dataset v5's commands span pan -92.6..99.6, lift -101.7..36.9, elbow -98.8..91.0, wrist flex
+    -98.5..102.6, wrist roll -99.5..99.5 (its stats.json, read 2026-11-26), so a fixed margin of 2 would have cut
+    into moves the policy is trained on. The data range still stops what 5.9 is about: the start pose holds the
+    elbow at 90 and the data never commands past 91.0, so a stretched answer cannot press the arm into itself."""
+    if lim is None:
+        return cmd, 0
+    out, n = dict(cmd), 0
+    for k, j in enumerate(expert.arm_map.JOINTS):
+        v = float(out[f"{j}.pos"])
+        c = min(max(v, float(lim[0][k])), float(lim[1][k]))
+        n += c != v
+        out[f"{j}.pos"] = c
+    return out, n
+
+
+class CleanCut:
+    """The measure that decided success in v5 (post-mortem fix 6; scripts/postmortem_v5/funnel.py's rule, here
+    without a trace): was the target cut by the FIRST closing of the jaw, and is its stalk still in the jaw 0.5 s
+    later. Teacher 100 %, v5 as tested 17 % of runs on new scenes.
+    Checked against funnel.fate on every traced run of the post-mortem: scripts/check_clean_cut.py."""
+    OPEN, SHUT, HELD_MM = 20.0, 10.0, 25.0     # analyse_after_cut.py's values (HELD_MM a guess, unverified)
+
+    def __init__(self):
+        self.cmds, self.grip, self.how, self.t_cut, self.held = [], [], None, None, None
+
+    def step(self, t, cmd_gripper, gripper, cut, stalk_mm):
+        """Once per frame, after the step: t (s, rounded to 0.01 as the trace's), the gripper command sent and the
+        reading after it, whether the target is cut, and stalk_mm() = rescue.truss_where(...)['stalk_to_jaw_mm']
+        (only called in the half second after the cut)."""
+        if self.how is None:
+            self.cmds.append(cmd_gripper)
+            self.grip.append(gripper)
+            if cut:
+                closings = sum(1 for u, v in zip(self.cmds, self.cmds[1:]) if u >= self.OPEN and v < self.OPEN)
+                shut_before = self.grip[max(0, len(self.grip) - 31)] < self.SHUT
+                self.how = "jaw already shut" if shut_before else "first closing" if closings <= 1 else "later closing"
+                self.t_cut, self.held = t, True
+        if self.how is not None and t - self.t_cut <= 0.5:
+            d = stalk_mm()
+            self.held = self.held and d is not None and d <= self.HELD_MM
+
+    @property
+    def clean(self):
+        return self.how == "first closing" and bool(self.held)
+
+
 class SceneVideo:
     """--video: one .mp4 per scene, the viewer's third-person view next to the policy's cameras, at sim speed.
     For when a live window can't keep up (K7 2026-11-15: the CPU held at 1 GHz froze the viewer)."""
@@ -246,7 +303,7 @@ class SceneVideo:
 
     def add(self, obs, label, n=1):
         self.r.update_scene(self.robot.d, self.cam)
-        imgs = [self.r.render()] + [obs[c] for c in ("birdseye", "base", "claw") if c in obs]
+        imgs = [self.r.render()] + [obs[c] for c in ALL_CAMS if c in obs]
         h = min(i.shape[0] for i in imgs) // 2 * 2
         img = np.hstack([i[:h] for i in imgs])
         img = np.ascontiguousarray(img[:, :img.shape[1] // 2 * 2])
@@ -268,7 +325,7 @@ class SceneVideo:
 
 
 def show(obs, label):
-    for c in [c for c in ("birdseye", "base", "claw") if c in obs]:   # whichever rig the policy uses
+    for c in [c for c in ALL_CAMS if c in obs]:   # whichever rig the policy uses
         img = cv2.cvtColor(obs[c], cv2.COLOR_RGB2BGR)
         cv2.putText(img, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.imshow(f"{c} camera (what the policy sees)", img)
@@ -315,6 +372,22 @@ def main():
     ap.add_argument("--start-claw", type=pathlib.Path, default=None,
                     help="a picture file that replaces the claw camera's picture for the plan made at the start frame "
                          "(at the start pose the claw camera sees the same wall in every scene)")
+    ap.add_argument("--start-guard", action="store_true",
+                    help="post-mortem 5.9: a check OUTSIDE the policy that never starts it when nothing is ripe. In a "
+                         "--holds scene whose cue has no target box (what the policy itself is given) the policy is "
+                         "not run and the arm keeps its start pose; those scenes are counted as 'guard fired', not "
+                         "as the policy's holds. Off by default so that a re-run of an old checkpoint still "
+                         "compares with the earlier tables; the test scripts (scripts/colab_tests.sh, "
+                         "test_all_checkpoints.sh, train_and_test.sh) pass it and --clip-actions since 2026-11-27 "
+                         "(K7: the standard for policy tests; GUARDS=\"\" there switches both off).")
+    ap.add_argument("--clip-actions", action="store_true",
+                    help="post-mortem 5.9: clip every command of the policy, per joint, to the range of the commands "
+                         "in its own training dataset (see clip_cmd). Off by default, for the same reason.")
+    ap.add_argument("--raw-pictures", action="store_true",
+                    help="a diagnostic: feed raw renders even when the training dataset was recorded with "
+                         "picture_store.py (its meta/picture_gate.jsonl exists). Without this, every picture the "
+                         "policy plans from then goes through picture_store.through_encoder, the dataset's own "
+                         "encoding: that is the standing test condition, not a patch.")
     ap.add_argument("--codec-still", type=int, default=0, metavar="N",
                     help="every live picture the policy plans from first goes through the dataset's video encoder, "
                          "as a clip of N copies of itself (0 = off)")
@@ -380,8 +453,20 @@ def main():
                     help="one jsonl row per frame: the gripper's command and position, and where the "
                          "target truss is (rescue.truss_where). For finding when and why a carried truss drops")
     ap.add_argument("--holds", type=int, default=0, help="also this many nothing-ready scenes (the arm must stay home)")
+    ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
+                    help="the world of the policy's dataset (truss_scene.WORLDS: the crate, and with it every seed's "
+                         "plants). ⚠️ A policy trained on dataset v5, or on v6 = v5's 800 + 600 more (K7 "
+                         "2026-11-26), is tested with --world crate23. Default: the code's own, crate30, which "
+                         "matches no dataset yet (the default crate grew to 30 x 28 on 2026-11-24).")
+    ap.add_argument("--layout-rig", choices=tuple(RIG_FIXED), default=None,
+                    help="decide every scene with THIS rig's camera brackets standing in it, show the policy's own "
+                         "(SO101MujocoConfig.layout_rig). For seeds recorded with another rig: dataset v5's 800 "
+                         "training scenes were decided with rig base, so a trio policy's test on them needs "
+                         "--layout-rig base, or a seed can ripen another truss than the recorded one.")
     ap.add_argument("--hold-seed-start", type=int, default=HOLD_SEED_START)
     a = ap.parse_args()
+    if a.world:
+        ts.set_world(a.world)
     if a.record and not (a.hybrid and a.rejoin):
         sys.exit("--record needs --hybrid --rejoin (it records the teacher's finish)")
     if a.trigger == "failing" and not (a.hybrid and a.rejoin) or a.teacher_drives and a.trigger != "failing":
@@ -430,6 +515,20 @@ def main():
         "first plan from the recorded frame" if a.start_frame == "recorded" else "",
         f"first plan with claw picture {a.start_claw.stem}" if a.start_claw is not None else "",
         f"planning pictures through the video encoder (x{a.codec_still})" if a.codec_still else "") if x)
+    # a dataset recorded with picture_store.py: live pictures take the same path as its stored frames (fix 1)
+    # ⚠️ stored_with_gate raises for an H.264 dataset whose gate file is missing: never a silent fall back to raw
+    gated = picture_store.stored_with_gate(meta.root, meta.features)
+    store_cfg = picture_store.encoder_of(meta.features) if gated else None    # the DATASET's setting, not STORE
+    store_same = gated and not a.raw_pictures
+    print("pictures: " + (f"every planning picture goes through the dataset's own encoding ({store_cfg.vcodec}, "
+                          f"g {store_cfg.g}, {store_cfg.extra_options})" if store_same else "raw renders"
+                          + (" (--raw-pictures)" if a.raw_pictures else
+                             " (the dataset has no picture gate file: stored before picture_store.py)")), flush=True)
+    clip_lim = None
+    if a.clip_actions:
+        clip_lim = (np.asarray(meta.stats["action"]["min"], float), np.asarray(meta.stats["action"]["max"], float))
+        print(f"commands clipped to the training data's range: {np.round(clip_lim[0], 1).tolist()} .. "
+              f"{np.round(clip_lim[1], 1).tolist()}", flush=True)
     infer = ", ".join(x for x in (infer, pics_label) if x) or None    # one label: the tables give each its own row
     if infer:
         print(f"⚠️ inference changed: {infer}", flush=True)
@@ -515,7 +614,7 @@ def main():
     def plan_pictures(pol, obs, seed, first):
         """--start-frame / --start-claw / --codec-still: the observation the policy plans from. Only when this call
         makes a new plan (ACT's queue of commands is empty); otherwise, and without those options, obs itself."""
-        if not pics_label or len(getattr(pol, "_action_queue", ())) > 0:
+        if not (pics_label or store_same) or len(getattr(pol, "_action_queue", ())) > 0:
             return obs
         o, given = dict(obs), set()
         if first and rec0 is not None:
@@ -528,6 +627,10 @@ def main():
             for c in plan_cams:
                 if c not in given:                     # a recorded picture has been through the encoder already
                     o[c] = through_codec(np.asarray(o[c]), a.codec_still)
+        elif store_same:
+            for c in plan_cams:
+                if c not in given:
+                    o[c] = picture_store.through_encoder(np.asarray(o[c]), cfg=store_cfg)
         return o
 
     yolo = None if a.no_yolo or not gt.YOLO_TRUSS.exists() else str(gt.YOLO_TRUSS)
@@ -535,9 +638,9 @@ def main():
     robot = SO101Mujoco(SO101MujocoConfig(
         id="sim", seed=a.seed_start, viewer=not a.headless, overlay="yolo" if yolo else "true_box", realtime=False,
         fps=expert.FPS, domain_rand=not a.no_dr, settle_s=1.0, snap_to_first_action=False,
-        yolo_weights=yolo, state_log_dir=None, rig=rig))
+        yolo_weights=yolo, state_log_dir=None, rig=rig, layout_rig=a.layout_rig))
     robot.connect()
-    ds, kept = None, 0
+    ds, kept, rec_gate = None, 0, None
     if a.record:
         from lerobot.configs.video import RGBEncoderConfig
         from lerobot.datasets import LeRobotDataset, aggregate_pipeline_dataset_features, create_initial_features
@@ -559,9 +662,12 @@ def main():
         if diff:
             robot.disconnect()
             sys.exit(f"⚠️ --record: features {diff} differ from {train_ds}'s (nothing was written)")
+        # stored as the checkpoint's dataset is (the two get merged): its frame-independent setting with a picture
+        # gate, or AV1 as before for a dataset from before picture_store.py
         ds = LeRobotDataset.create(a.record, expert.FPS, root=HF_LEROBOT_HOME / a.record, robot_type=robot.name,
-                                   features=rfeat, use_videos=True, rgb_encoder=RGBEncoderConfig(vcodec="libsvtav1"),
-                                   image_writer_threads=4)
+                                   features=rfeat, use_videos=True, image_writer_threads=4,
+                                   rgb_encoder=store_cfg if gated else RGBEncoderConfig(vcodec="libsvtav1"))
+        rec_gate = picture_store.Gate(plan_cams, cfg=store_cfg) if gated else None
         rec_obs_feats = {k: v for k, v in ds.features.items() if k != OBS_ENV_STATE}
         print(f"recording the teacher's finish into {HF_LEROBOT_HOME / a.record}", flush=True)
     out_dir = a.log_dir if a.log_dir is not None else HERE.parent / "outputs" / "eval"
@@ -571,7 +677,7 @@ def main():
     log_path = out_dir / f"{run}_{name}_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.jsonl"   # pid: two tests
     # started in the same second wrote one file (S.H.E.A.R, 2026-11-15)
     log = log_path.open("w")
-    results, holds, seed, quit_, n_tried = [], [], a.seed_start - 1, False, 0
+    results, holds, guards, seed, quit_, n_tried = [], [], [], a.seed_start - 1, False, 0
     try:
         while len(results) < a.scenes and not quit_ and (a.episodes is None or ds is None or kept < a.episodes):
             if seeds is not None:
@@ -613,6 +719,7 @@ def main():
                 cut1 = None if cut0 is None else (cut0[0] + du, cut0[1] + dv)
                 if a.cue_shift_what in ("both", "overlay"):
                     robot._view = ([int(round(v)) for v in box1], cut1)
+                    robot._views[robot.cam_names[0]] = robot._view     # what the plugin draws (its first camera)
                     obs = robot.get_observation()      # the start frame again (no physics step since), cue redrawn
                 if a.cue_shift_what in ("both", "numbers"):
                     env = ttg.env_vector(box1, cut1)
@@ -629,7 +736,7 @@ def main():
             # closing of the jaw (gripper below 10 after it was above 20) and at the last frame before the cut
             aim_prev = aim_close = aim_cut = aim_closest = None
             aim_best_d, grip_open = np.inf, False
-            frames = 0
+            frames, cc, n_clip = 0, CleanCut(), 0
             watch = gt.Watch(robot)
             gate = rescue.Gate(robot, k, T, watch) if a.trigger == "failing" else None
             why_fail, t_fail, false_alarm, where_hand = None, None, None, None
@@ -701,6 +808,8 @@ def main():
                 else:
                     cmd = act_of(policy, pre, post, wants_env, plan_pictures(policy, shifted(obs), seed, frames == 0),
                                  env)
+                    cmd, n_c = clip_cmd(cmd, clip_lim)
+                    n_clip += n_c
                 dist = float(np.linalg.norm(jaw_pt - p_cut))
                 closest = min(closest, dist) if robot.cutters[k].cut_t is None else closest
                 # ⚠️ p_cut above is where the stalk hung BEFORE the rollout; the truss sways once the arm touches it,
@@ -717,10 +826,16 @@ def main():
                           **build_dataset_frame(ds.features, tap((sent, obs)), prefix=ACTION), "task": gt.TASK}
                     fr[OBS_ENV_STATE] = env
                     ds.add_frame(fr)
+                    if rec_gate is not None:
+                        rec_gate.note(obs)
                     n_rec += 1
                 frames += 1
                 obs = robot.get_observation()
                 watch.step()
+                cc.step(round(robot.d.time - t0, 2), round(float(cmd["gripper.pos"]), 1),
+                        round(float(obs["gripper.pos"]), 1), robot.cutters[k].cut_t is not None,
+                        lambda k=k, gid=gid, grip=grip: rescue.truss_where(     # bound now (B023); called at once
+                            robot, k, robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip)["stalk_to_jaw_mm"])
                 if trace is not None:
                     j_now = robot.d.xpos[gid] + robot.d.xmat[gid].reshape(3, 3) @ grip
                     w_now = rescue.truss_where(robot, k, j_now)
@@ -810,7 +925,8 @@ def main():
                        handoff_mm=mm_hand, handoff_leg=leg_hand, policy_frames=frames if handed is None else handed,
                        aim_closest=aim_closest, aim_close=aim_close, aim_cut=aim_cut,
                        env=[round(float(v), 4) for v in env], cut_xyz_mm=(p_cut * 1000).round(1).tolist(),
-                       n_fruit=t_info["n"])
+                       n_fruit=t_info["n"], cut_how=cc.how, held_05s=cc.held, clean_cut=cc.clean,
+                       cmd_clipped=n_clip)
             if a.cue_shift is not None or a.img_shift:
                 rec.update(cue_shift=a.cue_shift, cue_shift_what=a.cue_shift_what, img_shift=a.img_shift)
             if a.hybrid:
@@ -831,10 +947,14 @@ def main():
                     kept_ok, why_rec = False, "the teacher didn't finish in the episode"
                 if kept_ok:
                     ds.save_episode(parallel_encoding=False)   # one camera at a time (generate_truss: memory)
+                    if rec_gate is not None:
+                        rec_gate.keep(ds.root, ds.meta.total_episodes - 1)
                     rec.update(episode_index=kept)
                     kept += 1
                 else:
                     ds.clear_episode_buffer()
+                    if rec_gate is not None:
+                        rec_gate.drop()
                 rec.update(recorded=kept_ok, record_why=why_rec, record_frames=n_rec)
                 print(f"  {'💾 kept as episode ' + str(kept - 1) if kept_ok else '🗑 not kept: ' + why_rec}"
                       f" ({n_rec} frames from the hand-over; {kept} kept)", flush=True)
@@ -859,11 +979,21 @@ def main():
             policy.reset()
             start = np.asarray(robot._present_norm(), float)
             watch, t0, moved, first = gt.Watch(robot), robot.d.time, 0.0, True
+            # the start guard (post-mortem 5.9): the cue the policy would be given has no target box, so the policy
+            # is never started. ⚠️ Keyed on the cue, not on this being a nothing-ripe scene: with YOLO boxes a false
+            # "ripe" detection leaves the guard off and the policy runs, as it would on the real arm.
+            guarded = a.start_guard and not np.any(np.asarray(env, float)[:4])
+            # what "not started" means for the arm: it keeps the goals it already holds
+            home = dict(zip((f"{j}.pos" for j in expert.arm_map.JOINTS),
+                            (float(v) for v in robot.fm.rad_to_norm(robot.d.ctrl[robot.uidx]))))
             while robot.d.time - t0 < HOLD_EVAL_S:
                 # ⚠️ --start-frame recorded has no recorded frame for these seeds: holds are run with --start-claw
                 # or --codec-still only (rec0 is skipped here)
-                o_plan = obs if rec0 is not None else plan_pictures(policy, obs, seed, first)
-                robot.send_action(act_of(policy, pre, post, wants_env, o_plan, env))
+                if guarded:
+                    robot.send_action(home)
+                else:
+                    o_plan = obs if rec0 is not None else plan_pictures(policy, obs, seed, first)
+                    robot.send_action(clip_cmd(act_of(policy, pre, post, wants_env, o_plan, env), clip_lim)[0])
                 first = False
                 obs = robot.get_observation()
                 watch.step()
@@ -871,11 +1001,13 @@ def main():
             ok, why = gt.judge_hold(robot, watch)
             if ok and moved > HOLD_MOVE_NORM:
                 ok, why = False, f"the arm moved {moved:.1f} norm units"
-            rec = dict(seed=seed, hold=True, success=bool(ok), why=why, moved_norm=round(moved, 1), rig=rig)
-            holds.append(rec)
+            rec = dict(seed=seed, hold=True, success=bool(ok), why=why, moved_norm=round(moved, 1), rig=rig,
+                       guarded=guarded)
+            (guards if guarded else holds).append(rec)     # a guarded scene is the guard's result, not the policy's
             log.write(json.dumps(rec) + "\n"); log.flush()
             print(f"  {'✅' if ok else '❌'} hold scene {i + 1}/{a.holds}: seed {seed}, "
-                  f"{'stayed home' if ok else why} (moved {moved:.1f})", flush=True)
+                  f"{'stayed home' if ok else why} (moved {moved:.1f})"
+                  + (" [start guard fired: the policy was not run]" if guarded else ""), flush=True)
     finally:
         robot.disconnect()
         cv2.destroyAllWindows()
@@ -906,8 +1038,12 @@ def main():
                            finisher_n_action_steps=None if fin_path is None else getattr(fcfg, "n_action_steps", None),
                            finisher_ensemble=None if fin_path is None else fcfg.temporal_ensemble_coeff,
                            crate=[list(ts.CRATE_CENTRE), list(ts.CRATE_SIZE)],   # which world: the crate changes
+                           world=ts.world_name(), layout_rig=a.layout_rig,
                            trigger=a.trigger if a.hybrid else None, teacher_drives=a.teacher_drives,
-                           infer=infer)
+                           infer=infer, clean_cut=sum(bool(r.get("clean_cut")) for r in results),
+                           cmd_clipped=sum(r.get("cmd_clipped", 0) for r in results), clip_actions=a.clip_actions,
+                           start_guard=a.start_guard, guard_fired=len(guards),
+                           guard_fired_ok=sum(r["success"] for r in guards), pictures_through_encoder=store_same)
             if a.hybrid and a.trigger == "failing":    # DAgger-style: who did the work
                 alone_ok = [r for r in results if not r.get("rescued")]
                 resc = [r for r in results if r.get("rescued")]
@@ -925,6 +1061,13 @@ def main():
                   f"{gt.NEIGHBOUR_MOVE_M * 1000:.0f} mm (target cut in {summary['cut']}, in the crate in "
                   f"{summary['in_crate']}; closest approach median {summary['closest_mm_median']:.1f} mm{held}).  "
                   f"log {log_path}", flush=True)
+            print(f"cut with the first closing and still held 0.5 s later: {summary['clean_cut']}/{len(results)} "
+                  f"(the measure that decided success in v5)"
+                  + (f"; joint commands clipped to the data's range: {summary['cmd_clipped']}" if a.clip_actions
+                     else "")
+                  + (f"; start guard fired in {len(guards)} of {len(guards) + len(holds)} nothing-ripe scenes "
+                     f"({summary['guard_fired_ok']} stayed home; the policy was not run there)" if a.start_guard
+                     else ""), flush=True)
         log.close()
 
 

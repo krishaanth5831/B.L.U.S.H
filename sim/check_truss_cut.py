@@ -45,6 +45,7 @@ SHAKE_SCALE = 0.5
 CLOSE_S, HOLD_S = 0.6, 1.0       # jaw close time (inside truss_expert.CLOSE_S) and hold before shaking (guess)
 STEM_R = 0.004                   # stand-in stem radius, m: truss_scene.STEM_R
 FAILS = 0                        # FAIL count, set by report()
+JAW = "v5"                       # --jaw (scene.JAWS)
 
 
 def report(ok, msg):
@@ -57,7 +58,7 @@ def find_pose(kind):
     """Arm pose (rad) with the jaw open: fingers horizontal ("side") or pointing down ("down"), jaw closing
     horizontally either way. Gripper kinematics only, so a bare arm in free space does (the cut_hold model, as
     build() below)."""
-    m, d = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True)
+    m, d = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True, jaw=JAW)
     qidx, _ = scene.arm_ids(m)
     G = m.body("arm/gripper").id
     best = None
@@ -99,7 +100,7 @@ def close_viewer(v):
 
 def build(q, r, knuckle_shift=None, seed=0):
     knuckle_shift = np.zeros(3) if knuckle_shift is None else knuckle_shift
-    m0, d0 = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True)
+    m0, d0 = scene.compose("", "", "", arm=True, scenery=False, cut_hold=True, jaw=JAW)
     qidx0, _ = scene.arm_ids(m0)
     d0.qpos[qidx0] = q
     mujoco.mj_forward(m0, d0)
@@ -111,6 +112,10 @@ def build(q, r, knuckle_shift=None, seed=0):
     blade = m0.geom("arm/blade_fixed").id
     yb, zb = ((d0.geom_xpos[blade] - pg) @ Rg)[1:]
     cross = pg + Rg @ [pad_face_x + r + 0.001, yb, zb]
+    if JAW == "v6":                   # the teacher's aim point on the v6 jaw (truss_ik.V6_AIM_FROM_PAD_M off the pad)
+        import truss_ik
+        truss_ik.set_jaw("v6")
+        cross = pg + Rg @ truss_ik.cut_point_in_gripper(r)
     y = Rg[:, 1]
     cut_at = np.mean(tr.CUT_ZONE_M)
     k0 = cross - y * (STEM_R + cut_at) + knuckle_shift
@@ -124,7 +129,8 @@ def build(q, r, knuckle_shift=None, seed=0):
     body = body.replace(f'size="{info["r"]:.5f}"', f'size="{r:.5f}"').replace(
         f'size="{info["r"] * tr.RACHIS_R_FRACTION:.5f}"', f'size="{r * tr.RACHIS_R_FRACTION:.5f}"')
     info["r"] = r
-    m, d = scene.compose(stem + knuckle + body, fruit_xml, eq, arm=True, scenery=False, cut_hold=True, excludes=excl)
+    m, d = scene.compose(stem + knuckle + body, fruit_xml, eq, arm=True, scenery=False, cut_hold=True, excludes=excl,
+                         jaw=JAW)
     qidx, uidx = scene.arm_ids(m)
     d.qpos[qidx] = q
     d.ctrl[uidx] = q
@@ -212,7 +218,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--windowed", action="store_true")
     ap.add_argument("--radius", type=float, default=None, help="one stalk radius (m) instead of RADII")
+    ap.add_argument("--jaw", default="v5", choices=scene.JAWS, help="v5 (every dataset so far) or v6 (K7 2026-11-24)")
     a = ap.parse_args()
+    global JAW
+    JAW = a.jaw
     q, _ = find_pose("down")
     for r in ([a.radius] if a.radius else RADII):
         o = run(q, r, a.windowed)

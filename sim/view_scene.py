@@ -5,6 +5,9 @@
                                            they get recorded: lens model + the target truss's green box and
                                            cut-point cross (+ every YOLO detection in red with --overlay yolo)
   python view_scene.py --cams --rig base   the rig "base" cameras (base | claw) and the base camera's bracket
+  python view_scene.py --cams --rig trio --world crate23 --layout-rig base --seed 10023030
+                                           dataset v6's view: the three cameras (high | low | claw) on their upright,
+                                           an old v5 scene (decided with the old bracket, shown with the new ones)
   python view_scene.py --cams --overlay none   raw frames
   python view_scene.py --leader --cams     the real leader arm drives the sim follower (no recording)
   python view_scene.py --seed 7600000      another random truss layout
@@ -38,7 +41,7 @@ import tomato as tm
 import truss as tr
 import truss_scene as ts
 import truss_target as ttg  # also puts the repo root on sys.path for harvest/ (keep it before that import)
-from cameras import RIG_CAMERAS, SimCameras
+from cameras import RIG_CAMERAS, RIG_FIXED, SimCameras
 from generate_truss import YOLO_TRUSS
 from harvest import yolo_overlay as ov
 
@@ -84,9 +87,15 @@ def draw_cross(img, cut):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seed", type=int, default=0, help="truss layout seed (truss_scene.build)")
-    ap.add_argument("--cams", action="store_true", help="also show the policy's two camera images")
+    ap.add_argument("--cams", action="store_true", help="also show the policy's camera images")
     ap.add_argument("--rig", choices=tuple(RIG_CAMERAS), default="birdseye",
-                    help="cameras shown (SO101MujocoConfig.rig); base also builds the base camera's bracket")
+                    help="cameras shown (SO101MujocoConfig.rig); base and trio also build their camera brackets")
+    ap.add_argument("--world", choices=tuple(ts.WORLDS), default=None,
+                    help="the crate the scenes are drawn around (truss_scene.WORLDS; dataset v5 and v6: crate23). "
+                         "Default: the code's own")
+    ap.add_argument("--layout-rig", choices=tuple(RIG_FIXED), default=None,
+                    help="decide the scene with THIS rig's brackets standing in it and show --rig's "
+                         "(SO101MujocoConfig.layout_rig; dataset v6: base)")
     ap.add_argument("--leader", action="store_true", help="drive the sim arm from the real leader arm")
     ap.add_argument("--overlay", choices=("yolo", "true_box", "none"), default=None,
                     help="what --cams draws (default: yolo if a truss YOLO is trained, else true_box)")
@@ -97,7 +106,10 @@ def main():
     if overlay == "yolo" and not a.yolo_weights:
         ap.error("--overlay yolo needs --yolo-weights (no truss YOLO at runs/yolo_truss/truss_v1)")
 
-    m, d, info = ts.build(a.seed, base_mount=a.rig == "base")
+    if a.world:
+        ts.set_world(a.world)
+    m, d, info = ts.build(a.seed, mounts=RIG_FIXED[a.layout_rig or a.rig],
+                          show_mounts=RIG_FIXED[a.rig] if a.layout_rig else None)
     qidx, uidx = scene.arm_ids(m)
     det = tm.Detacher(m, d, info["fruit"])
     cutters = [tr.TrussCutter(m, d, t) for t in info["trusses"]]
@@ -122,6 +134,7 @@ def main():
     cams = cv2 = yolo = None
     names_ = RIG_CAMERAS[a.rig]        # [0] carries the target box
     box = cut = None
+    views = {}                         # rigs with fixed cameras: the target's (box, cut pixel) on each of them
     by_yolo = False
     if a.cams:
         import cv2
@@ -181,8 +194,9 @@ def main():
                                 st["reason"] = "overlay=true_box"
                             tgt, picked, by_yolo = st["target"], True, st["source"] == "yolo"
                             box, cut = st["box"], st["cut"]
-                            if a.rig != "birdseye" and tgt is not None:   # rig base: where the base camera sees it
-                                box, cut = ttg.view_target(cams, d, m, T[tgt], names_[0])
+                            if a.rig != "birdseye" and tgt is not None:   # as each fixed camera sees it (the plugin)
+                                views = {c: ttg.view_target(cams, d, m, T[tgt], c) for c in RIG_FIXED[a.rig]}
+                                box, cut = views[names_[0]]
                         print(f"target: {st['target_name']} ({st['source']} {st['reason']}), cut point from "
                               f"{st['cut_source']}")
                     if overlay != "none":
@@ -192,8 +206,10 @@ def main():
                             imgs[c0] = draw_cross(ov.draw_overlay(imgs[c0], dets[c0], names, target=box,
                                                                   label_target=by_yolo), cut)
                             imgs["claw"] = ov.draw_overlay(imgs["claw"], dets["claw"], names)
-                        elif box is not None:
-                            imgs[c0] = draw_cross(ov.draw_overlay(imgs[c0], [], {}, target=box), cut)
+                        else:
+                            for c, (b, u) in (views or {c0: (box, cut)}).items():
+                                if b is not None:
+                                    imgs[c] = draw_cross(ov.draw_overlay(imgs[c], [], {}, target=b), u)
                     legend = {"yolo": " (red = YOLO, green = target)", "true_box": " (green = target)", "none": ""}
                     title = " | ".join(names_) + legend[overlay]
                     cv2.imshow(title, np.hstack([imgs[c] for c in names_])[..., ::-1])

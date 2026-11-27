@@ -3,6 +3,7 @@
     m, d, info = build(seed)            the greenhouse, 4-5 stems with 2-3 trusses each, the cut-and-hold arm
     build(seed, hold=True)              nothing ready ("stay home" episodes)
     build(seed, base_mount=True)        + the base camera's bracket (rig "base")
+    build(seed, mounts=("high", "low")) + the cart cameras' brackets (rig "trio", cameras.RIG_FIXED)
     info["trusses"]                     truss.truss_xml infos, each with "ready", "cut_ik" (a cut pose exists)
     info["ready"]                       indices of the ready trusses the arm can cut (1-2 per scene)
     in_crate(info, d, m, k)             every fruit of truss k inside the (bigger) truss crate
@@ -52,7 +53,7 @@ STAGE_P = {"almost": 0.5, "unripe": 0.5}   # the other trusses (design choice: h
 # (x < 0.50, y < 0.18), where the first spot (0.56, 0.17) put half the crate.
 # IK scan: reachable over x 0.56-0.62, y 0.06-0.26. ⚠️ Toward the aisle: at y 0.17 the arm reaching over the crate
 # passed through trusses hanging out from the row (seed 200000, 2026-11-03). x max 0.73 < the end frame at 0.74.
-CRATE_CENTRE = (0.6175, 0.17)
+CRATE_CENTRE = (0.5825, 0.17)   # 30 x 28 since 2026-11-24 (see CRATE_SIZE): the +x edge stays at 0.7325
 # 22 x 18 cm: held by its stalk a truss sticks out 10-17 cm from the jaw, and at 18 x 16 the release search
 # found no pose fitting every fruit inside the walls in 3 of 14 dry runs (2026-11-03).
 # x as big as the spot allows: 0.50-0.735 (end frame tie at 0.74). ⚠️ A 6-8 fruit truss lying flat is up to ~20 cm
@@ -65,7 +66,10 @@ CRATE_CENTRE = (0.6175, 0.17)
 # sits 9 cm from the row, under trusses hanging out of it, past the reach scan's y 0.26 above: _over_crate keeps
 # trusses out of the bigger crate, so every seed draws a different scene than before, and the held-out sets
 # heldout_v3*.jsonl (and every *_teacher_v3* dataset) belong to the old crate.
-CRATE_SIZE = (0.23, 0.28, 0.05)
+# 30 x 28 cm since 2026-11-24 (K7 chose a 30 x 40 cm crate for v6; the greenhouse has 0.74 m between end frames and a
+# 0.40 m aisle, so the most that fits is 30 x 28: x grown 7 cm toward the arm base, to 0.4325-0.7325; y unchanged).
+# The 23 x 28 crate's datasets and held-out sets (v5, heldout_v5*.jsonl) belong to the old world.
+CRATE_SIZE = (0.30, 0.28, 0.05)
 
 
 IN_CRATE_TOP_M = 0.03            # a fruit may sit this far over the rim: the truss leans on a wall, still inside
@@ -105,8 +109,37 @@ def cut_target(t, rng=None):
 CRATE_KEEP_OUT_M = 0.04
 
 
+KEEP_OUT_CRATE = None            # what-if only (base_grid.py --crate, 2026-11-26): the (centre, size) the plants are
+                                 # kept out of, pinned to the standard crate, so a bigger what-if crate leaves every
+                                 # seed's plants as they are and only the crate differs
+
+
+# The worlds, named after their crate. A seed draws its plants around the crate (_over_crate), so the crate decides
+# the scene of every seed: a dataset, its held-out sets and every test of a policy trained on it belong to ONE world.
+# ⚠️ The names are NOT dataset versions. Dataset v5 lives in "crate23". K7 2026-11-26: v6's 600 new episodes go into
+# the same dataset as v5's 800, so they are recorded in "crate23" too, and so is every test of a policy trained on
+# it. "crate30" is the code default (CRATE_CENTRE / CRATE_SIZE above) and belongs to no dataset yet.
+WORLDS = {"crate23": ((0.6175, 0.17), (0.23, 0.28, 0.05)),   # dataset v5, heldout_v5*.jsonl (commit 2efd61b, 18 Nov)
+          "crate30": ((0.5825, 0.17), (0.30, 0.28, 0.05))}   # the code default since 2026-11-24
+
+
+def set_world(name):
+    """Switch to a dataset's world (WORLDS) before any scene is built: the crate, and with it every seed's plants.
+    Every module reads ts.CRATE_CENTRE / ts.CRATE_SIZE when it needs them, so this one call switches them all.
+    Checked for "crate23" on 2026-11-26 (whatif/rebuild_v5_check.py): 14 of 14 logged scenes of the v5 recording rebuild
+    to the logged model, target and cue (then still named "v5")."""
+    global CRATE_CENTRE, CRATE_SIZE, KEEP_OUT_CRATE
+    CRATE_CENTRE, CRATE_SIZE = WORLDS[name]
+    KEEP_OUT_CRATE = None
+
+
+def world_name():
+    """The name of the world in force, or "custom" (a what-if crate)."""
+    return next((k for k, v in WORLDS.items() if v == (CRATE_CENTRE, CRATE_SIZE) and KEEP_OUT_CRATE is None), "custom")
+
+
 def _over_crate(t):
-    (cx, cy), (sx, sy, _) = CRATE_CENTRE, CRATE_SIZE
+    (cx, cy), (sx, sy, _) = KEEP_OUT_CRATE or (CRATE_CENTRE, CRATE_SIZE)
     pts = [f["pos"] for f in t["fruit"]] + [t["peduncle_end"], t["rachis_end"]]
     return any(abs(p[0] - cx) < sx / 2 + CRATE_KEEP_OUT_M and abs(p[1] - cy) < sy / 2 + CRATE_KEEP_OUT_M for p in pts)
 
@@ -169,10 +202,13 @@ START_CLEAR_M = 0.01             # no truss within this of the arm at the start 
                                  # and the vines settle around it; fruit hanging into it fell off, 2026-11-03)
 
 
+JAW = "v5"                       # build(jaw=...) sets it for _compose (scene.JAWS)
+
+
 def _compose(static, parts, arm):
     xml = "\n".join(static + [p[0] for p in parts] + [p[1] for p in parts])
     return scene.compose(xml, "\n".join(p[2] for p in parts), "\n".join(p[3] for p in parts), arm, cut_hold=True,
-                         excludes="\n".join(p[4] for p in parts), crate=(CRATE_CENTRE, CRATE_SIZE))
+                         excludes="\n".join(p[4] for p in parts), crate=(CRATE_CENTRE, CRATE_SIZE), jaw=JAW)
 
 
 def _start_pose(m, d):
@@ -207,24 +243,35 @@ LAYOUT_TRIES = 4                 # layouts drawn per seed until one has a reacha
                                  # of single draws had none (12 of 30 dry-run seeds "no target", 2026-11-03)
 
 
-def build(seed=0, arm=True, hold=False, base_mount=False):
+def build(seed=0, arm=True, hold=False, base_mount=False, jaw="v5", mounts=None, show_mounts=None):
     """Full truss scene. Ripeness is set after the layout: 1-2 of the trusses with a cut pose are ready,
     the others are almost-ready decoys or unripe (STAGE_P). Colours go on the model, not in the XML.
     The layout is drawn again (sub-seeds [seed, 1], [seed, 2], ...) while none of its trusses is reachable.
     hold: nothing is ready (every truss a decoy or unripe), for "nothing to pick, stay home" episodes (K7
     2026-11-06, SockBot's lesson: the policy has to see what not reaching looks like).
-    base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml)."""
+    base_mount: the base camera's bracket stands in the scene (rig "base"; scene.base_mount_xml).
+    mounts: the fixed cameras whose brackets stand in the scene (cameras.RIG_FIXED of the rig; base_mount=True is
+        mounts=("base",)). ⚠️ A bracket is solid, so it decides with everything else which trusses the arm can
+        reach and with that which one is ripe: the same seed can give another target with other brackets.
+    show_mounts: brackets to SHOW instead, after the scene was decided with `mounts` (re-making an old dataset's
+        pictures with other cameras: the plants and the ripe truss must stay the recorded ones). Same joints, same
+        state; only the scenery's brackets differ.
+    jaw: the arm's cut-and-hold jaw, "v5" or "v6" (scene.JAWS; K7 2026-11-24)."""
+    global JAW
+    JAW = jaw
+    mounts = (("base",) if base_mount else ()) if mounts is None else tuple(mounts)
     for j in range(LAYOUT_TRIES if arm and not hold else 1):
-        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, base_mount)
+        out = _build_once(seed, arm, np.random.default_rng(seed if j == 0 else [seed, j]), hold, mounts,
+                          None if show_mounts is None else tuple(show_mounts))
         if out[2]["ready"]:
             break
     return out
 
 
-def _build_once(seed, arm, rng, hold=False, base_mount=False):
+def _build_once(seed, arm, rng, hold=False, mounts=(), show_mounts=None):
     static, parts, trusses = vines_xml(rng)
-    if base_mount:
-        static = static + [scene.base_mount_xml()]
+    plain = static
+    static = static + [scene.cam_mount_xml(n) for n in mounts]
     m, d = _compose(static, parts, arm)
     if arm:
         _start_pose(m, d)
@@ -270,6 +317,14 @@ def _build_once(seed, arm, rng, hold=False, base_mount=False):
         for f, r in zip(t["fruit"], rip):
             f["ripeness"] = r
             m.geom_rgba[m.geom(f["geom"]).id] = tm.RIPENESS_RGBA[r]
+    if show_mounts is not None and show_mounts != mounts:
+        # the same plants and arm with other brackets: joints, constraints and state carry over one to one
+        m2, d2 = _compose(plain + [scene.cam_mount_xml(n) for n in show_mounts], parts, arm)
+        assert (m2.nq, m2.nv, m2.neq) == (m.nq, m.nv, m.neq)
+        d2.qpos[:], d2.qvel[:], d2.eq_active[:] = d.qpos, d.qvel, d.eq_active
+        for f in (f for t in trusses for f in t["fruit"]):
+            m2.geom_rgba[m2.geom(f["geom"]).id] = m.geom_rgba[m.geom(f["geom"]).id]
+        m, d = m2, d2
     if arm:
         _start_pose(m, d)
     mujoco.mj_forward(m, d)

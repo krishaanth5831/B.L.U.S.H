@@ -12,6 +12,7 @@ its mast behind row R0, "base" low off the arm's base (always in the model; its 
 ⚠️ The arm model needs the SO-ARM100 files: run ./fetch_so101.sh once (sim/assets/so101 is gitignored).
 """
 import json
+import os
 import pathlib
 
 import mujoco
@@ -191,6 +192,41 @@ LENS_R, LENS_LEN = 0.008, 0.012
 BASE_CAM_OFFSET = (-0.28, 0.06, 0.10)
 BASE_CAM_AIM = (0.34, 0.37, 0.22)   # middle of the truss band's cut points (truss_scene STEM_X, KNUCKLE_Z)
 BASE_POST_R = 0.008                  # bracket post from the table to the camera housing (printed, guess)
+# Cart cameras (rig "trio": two fixed cameras + the claw, K7 2026-11-26 "3 cameras instead of 2 but also placed in a
+# more calculated location and position"). name: (offset from ARM_BASE, aim in world coordinates), as the base camera.
+# The pick (2026-11-26, own_sim_measurements.md section 24): both on ONE upright at the cart's far left on the row
+# side, 35 cm to the left of the arm base and 10 cm toward the row. From whatif/camera_score.py on dataset v5's own
+# 734 cut scenes (world crate23, old start) and whatif/camera_sweep_logs.py on its 800 recorded episodes:
+#   - every spot nearer the arm was in the way in the recorded episodes: the best-scoring one (on the deck by the
+#     crate) had the arm within 4 cm in 561 of 800 episodes and through it. At this upright, over every frame of all
+#     800 episodes, the arm never came under 4 cm of the line under the lens (nearest 4.4 cm). A carried truss came
+#     as near as 1.7 cm to that line (under 4 cm in 10 of the 735 cut episodes, every 3rd frame); the post itself
+#     stands about 1.8 cm behind the lens, further from both. With the real post and housings in the model nothing
+#     touches them in any of the 32 episodes that came within 6 cm (section 26; today's base bracket: a carried
+#     truss under 4 cm in 85 episodes, the arm in 314).
+#   - "high" (lens 42 cm above the deck top; first in the rig, so the cue numbers are its): sees the cut point at
+#     the start in 98 % of the scenes (the base camera: 79 %), the stalk and a blade just before the cut in 98 %
+#     (57 %), and has the cut point inside the picture in all 734.
+#   - "low" (5 cm): 85 % and 56 %, inside the picture in all 734. Together: one of the two sees stalk and blade just
+#     before the cut in 99 % and at the cut in 95 %; their lines of sight cross at 61 deg (median).
+# Aims: per camera the best of the scorer's aim grid (on the stems' line y 0.37).
+# ⚠️ At x 0.02 the post and the housings' backs reach 3-6 mm into the simulated house's end frame (ply at x <= 0:
+#   the base tie below 3 cm). Static on static and behind both lenses, so nothing collides or shows. 0.02 is the
+#   position that was scored and swept; 1 cm further in would leave the arm under 4 cm.
+# ⚠️ With both on one upright, "high"'s post runs through "low"'s housing, 1-2 cm behind its lens: one post in real
+#   life too. Neither bracket shows in the other's picture (checked on the re-make's first pictures, section 26).
+# ⚠️ Real cart: an upright on an outrigger batten that reaches 21 cm past the deck's left end (the deck ends 14 cm
+#   from the arm base). On the plank rig as designed (hardware/greenhouse/pipe_rail_rig/README.md: end frames about
+#   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame, and arm B needs the mirror image at the other end.
+#   Nothing built, nothing checked on hardware.
+# ⚠️ Height of "high": 0.42 (K7 2026-11-26, shown 0.34 beside it: "stick with 42"). It stands above the truss band
+#   (cut points 0.13-0.31 m), where a real crop has leaves (the plank rig has none). At 0.34 on the same post the
+#   pair still sees stalk and blade before the cut in 95 % (99 % here) and at the cut in 91 % (95 %). Moving the
+#   lens down the post later is a re-render from the state logs (remake_pictures.py), not a re-recording.
+CART_CAMS = {
+    "high": ((-0.35, 0.10, 0.42), (0.30, 0.37, 0.22)),
+    "low": ((-0.35, 0.10, 0.05), (0.34, 0.37, 0.26)),
+}
 BIRDSEYE_FOVY = LENSES["birdseye"].fovy
 CLAW_FOVY = LENSES["claw"].fovy
 OFF_W, OFF_H = pinhole_size()    # offscreen buffer must fit the pinhole renders, not just 640x480
@@ -267,28 +303,45 @@ def _look_xyaxes(pos, aim):
     return x, y, f
 
 
-def base_cam_xml():
-    p = base_cam_pos()
-    x, y, _ = _look_xyaxes(p, BASE_CAM_AIM)
+def fixed_cam(name):
+    """(lens position, aim) of a fixed camera that travels with the arm: "base", or one of CART_CAMS."""
+    if name == "base":
+        return base_cam_pos(), np.asarray(BASE_CAM_AIM, float)
+    off, aim = CART_CAMS[name]
+    return np.asarray(ARM_BASE, float) + np.asarray(off, float), np.asarray(aim, float)
+
+
+def fixed_cam_xml(name):
+    p, aim = fixed_cam(name)
+    x, y, _ = _look_xyaxes(p, aim)
     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
-    return f'<camera name="base" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
+    return f'<camera name="{name}" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" xyaxes="{ax}" fovy="{BIRDSEYE_FOVY}"/>'
 
 
-def base_mount_xml():
-    """The base camera's bracket: a post from the table and the camera housing behind the lens. Solid (the planner
-    avoids it like the rest of the scenery). Only in rig "base" scenes (truss_scene.build base_mount), so scenes of the
-    birdseye rig are unchanged."""
-    p = base_cam_pos()
-    x, y, f = _look_xyaxes(p, BASE_CAM_AIM)
+def cam_mount_xml(name):
+    """A fixed camera's bracket: a post from the table and the camera housing behind the lens. Solid (the planner
+    avoids it like the rest of the scenery). Only in the scenes of a rig that has this camera (truss_scene.build
+    mounts), so scenes of the other rigs are unchanged."""
+    p, aim = fixed_cam(name)
+    x, y, f = _look_xyaxes(p, aim)
     c = p - f * (MAST_LENS_GAP + CAM_BOARD[2] / 2)
     ax = " ".join(f"{v:.5f}" for v in np.r_[x, y])
     grey = "0.25 0.25 0.27 1"
     return "\n".join([
-        f'<geom name="base_cam_housing" type="box" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}" xyaxes="{ax}" '
+        f'<geom name="{name}_cam_housing" type="box" pos="{c[0]:.4f} {c[1]:.4f} {c[2]:.4f}" xyaxes="{ax}" '
         f'size="{CAM_BOARD[0] / 2} {CAM_BOARD[1] / 2} {CAM_BOARD[2] / 2}" rgba="{grey}"/>',
-        f'<geom name="base_cam_post" type="cylinder" fromto="{c[0]:.4f} {c[1]:.4f} 0 {c[0]:.4f} {c[1]:.4f} '
+        f'<geom name="{name}_cam_post" type="cylinder" fromto="{c[0]:.4f} {c[1]:.4f} 0 {c[0]:.4f} {c[1]:.4f} '
         f'{c[2] - CAM_BOARD[1] / 2:.4f}" size="{BASE_POST_R}" rgba="{grey}"/>',
     ])
+
+
+def base_cam_xml():
+    return fixed_cam_xml("base")
+
+
+def base_mount_xml():
+    """The base camera's bracket (rig "base"): see cam_mount_xml."""
+    return cam_mount_xml("base")
 
 
 def _birdseye_xyaxes():
@@ -350,6 +403,7 @@ def world_xml(static, tomatoes, eqs, scenery=True, excludes="", crate=None):
     <camera name="birdseye" pos="{BIRDSEYE_POS[0]} {BIRDSEYE_POS[1]} {BIRDSEYE_POS[2]}"
             xyaxes="{_birdseye_xyaxes()}" fovy="{BIRDSEYE_FOVY}"/>
     {base_cam_xml()}
+    {" ".join(fixed_cam_xml(n) for n in CART_CAMS)}
     {greenhouse_xml() if scenery else ''}
     {crate_xml(*crate) if scenery and crate else ''}
     {static}
@@ -503,6 +557,67 @@ def add_cut_hold(s, chain):
             lg.friction = PAD_FRICTION
 
 
+CUT_HOLD_V6 = HERE / "assets" / "cut_hold"   # jaw v6: hardware/end_effector/cut_hold/cut_hold_gripper.py build
+# A/B of a jaw variant without touching the committed build: BLUSH_CUT_HOLD_DIR = a copy of assets/cut_hold with its own
+# jaw.json (e.g. stiffer pad springs, 2026-11-25), for one process (fruit_off_trace, base_grid, check_truss_cut)
+if os.environ.get("BLUSH_CUT_HOLD_DIR"):
+    CUT_HOLD_V6 = pathlib.Path(os.environ["BLUSH_CUT_HOLD_DIR"])
+JAWS = ("v5", "v6")   # v5 = fin-ray-ladder fingers with blade + pads on the 16 mm tips (every dataset so far);
+                      # v6 (K7 2026-11-24) = rigid PLA jaws, blade + clamp pads along a 36 mm zone, flared tips
+
+
+def jaw_of(m):
+    """Which jaw a compiled scene model carries ("v5" or "v6", JAWS), from its geoms."""
+    try:
+        m.geom("arm/finger_fixed_main")
+        return "v6"
+    except KeyError:
+        return "v5"
+
+
+def add_jaw_v6(s):
+    """The v6 cut-and-hold jaw on the stock jaw bodies, all geometry from cut_hold_gripper.py (jaw.json + STLs): the
+    stock servo ends (visual), the rigid fingers as two convex pieces each, and per finger a blade and a spring pad
+    along the zone. Same geom names, contact bits and materials as add_cut_hold, so truss.TrussCutter, rescue.py and
+    the checks see the same parts; only where they sit and how far the pads stand proud and travel differ."""
+    spec = json.loads((CUT_HOLD_V6 / "jaw.json").read_text())
+    for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
+        b = s.body(body)
+        s.add_mesh(name=f"cuthold_stub_{part}", file=str(CUT_HOLD_V6 / f"stub_{part}.stl"))
+        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"cuthold_stub_{part}",
+                       rgba=PLA_RGBA)
+        g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only, as the fin-ray stubs
+        bits = FIXED_FINGER_BITS if part == "fixed" else MOVING_FINGER_BITS
+        for piece in ("main", "flare"):
+            s.add_mesh(name=f"cuthold_{part}_{piece}", file=str(CUT_HOLD_V6 / f"finger_{part}_{piece}.stl"))
+            g = b.add_geom(name=f"finger_{part}_{piece}", type=mujoco.mjtGeom.mjGEOM_MESH,
+                           meshname=f"cuthold_{part}_{piece}", rgba=PLA_RGBA)
+            g.contype, g.conaffinity, g.group = bits[0], bits[1], 2
+            _finger_contact(g)
+        sp = spec[part]
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, np.asarray(sp["R"], float).reshape(-1))
+        s_in, bl, pd = sp["s_in"], sp["blade"], sp["pad"]
+        g = b.add_geom(name=f"blade_{part}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=bl["centre"], quat=quat,
+                       size=bl["half"], rgba=STEEL_RGBA)
+        g.contype, g.conaffinity, g.group = BLADE_BITS[0], BLADE_BITS[1], 2
+        _finger_contact(g)
+        g.friction = (0.3, 0.005, 0.0001)              # steel, as add_cut_hold (guess, unverified)
+        g.solimp = BLADE_SOLIMP
+        pad = b.add_body(name=f"pad_{part}_slide", pos=pd["centre"], quat=quat)
+        j = pad.add_joint(name=f"pad_{part}", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[s_in, 0, 0])
+        k = pd["k_n_per_m"]
+        j.stiffness, j.springref = [k, 0, 0], pd["preload_n"] / k    # preload: the spring rests past the stop
+        j.damping = [2 * 0.7 * np.sqrt(k * PAD_ARMATURE), 0, 0]
+        j.armature, j.limited, j.range = PAD_ARMATURE, True, (-pd["travel_m"], 0.0)
+        half = pd["half"]
+        pg = pad.add_geom(name=f"pad_{part}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                          pos=[s_in * (pd["rest_m"] - half[0]), 0, 0], size=half, mass=0.001, rgba=PAD_RGBA)
+        pg.contype, pg.conaffinity, pg.group = PAD_BITS[0], PAD_BITS[1], 2
+        _finger_contact(pg)
+        pg.friction = PAD_FRICTION
+
+
 def _connect(s, body1, body2, anchor):
     e = s.add_equality(name=f"{body1}_pin", type=mujoco.mjtEq.mjEQ_CONNECT, name1=body1, name2=body2,
                        objtype=mujoco.mjtObj.mjOBJ_BODY)
@@ -559,9 +674,12 @@ def _push_test(part, ch, k_flank, F_test, seconds=1.0):
     return F_test / max((p_now - p_mid) @ inward, 1e-9)
 
 
-def arm_spec(cut_hold=False):
+def arm_spec(cut_hold=False, jaw="v5"):
     """cut_hold: the truss harvest's rigid fingers with blade + pads at the tips (every truss scene); False = the soft
-    2 N/mm fin-ray fingers (only expert.ArmIK's kinematics model uses it: the joints and gripper frame are the same)."""
+    2 N/mm fin-ray fingers (only expert.ArmIK's kinematics model uses it: the joints and gripper frame are the same).
+    jaw (with cut_hold): "v5" the fin-ray-ladder jaw every dataset so far used, "v6" add_jaw_v6 (JAWS)."""
+    if jaw not in JAWS:
+        raise ValueError(f"jaw={jaw!r}: one of {JAWS}")
     if not SO101_XML.exists():
         raise FileNotFoundError(f"{SO101_XML} missing: run ./fetch_so101.sh in sim/ first")
     s = mujoco.MjSpec.from_file(str(SO101_XML))
@@ -569,17 +687,20 @@ def arm_spec(cut_hold=False):
     for body, stock in (("gripper", "wrist_roll_follower_so101_v1"), ("moving_jaw_so101_v1", "moving_jaw_so101_v1")):
         for g in [g for g in s.body(body).geoms if g.meshname == stock]:
             s.delete(g)
-    chain = json.loads((FINRAY / "chain.json").read_text())
-    for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
-        b = s.body(body)
-        s.add_mesh(name=f"finray_stub_{part}", file=str(FINRAY / f"stub_{part}.stl"))
-        g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}",
-                       rgba=PLA_RGBA)
-        g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only: its convex hull would swallow the jaw opening
-        _finray_ladder(s, b, part, chain[part],
-                       finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
-    if cut_hold:
-        add_cut_hold(s, chain)
+    if cut_hold and jaw == "v6":
+        add_jaw_v6(s)
+    else:
+        chain = json.loads((FINRAY / "chain.json").read_text())
+        for body, part in (("gripper", "fixed"), ("moving_jaw_so101_v1", "moving")):
+            b = s.body(body)
+            s.add_mesh(name=f"finray_stub_{part}", file=str(FINRAY / f"stub_{part}.stl"))
+            g = b.add_geom(name=f"stub_{part}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"finray_stub_{part}",
+                           rgba=PLA_RGBA)
+            g.contype, g.conaffinity, g.group = 0, 0, 2   # visual only: its convex hull would swallow the jaw opening
+            _finray_ladder(s, b, part, chain[part],
+                           finray_stiffness(part, chain[part], RIGID_FINGER_K_N_PER_MM if cut_hold else None))
+        if cut_hold:
+            add_cut_hold(s, chain)
     lo, hi = (np.array(v) / 1000 for v in PALM_BOX_MM)
     palm = s.body("gripper").add_geom(name="palm", type=mujoco.mjtGeom.mjGEOM_BOX, pos=(lo + hi) / 2,
                                       size=(hi - lo) / 2, rgba=(1, 0, 0, 0.3))
@@ -604,12 +725,25 @@ def arm_spec(cut_hold=False):
     return s
 
 
-def compose(static, tomatoes, eqs, arm=True, scenery=True, cut_hold=False, excludes="", crate=None):
+# WHAT-IF ONLY (base_grid --whatif-weld, 2026-11-25): every truss also gets an inactive weld to the gripper, which
+# base_grid switches on once the target is cut and off when the jaw opens at the crate = a truss that cannot turn,
+# slide or swing in the grip. It bounds what ANY pad design could buy; never on in data or tests. Off by default.
+HOLD_WELD = False
+HOLD_WELD_SOLREF = (0.004, 1.0)                  # as truss.CUT_WELD_SOLREF (stiff, at the 2 ms step's floor)
+HOLD_WELD_SOLIMP = (0.99, 0.999, 0.0001, 0.5, 2)
+
+
+def compose(static, tomatoes, eqs, arm=True, scenery=True, cut_hold=False, excludes="", crate=None, jaw="v5"):
     world = mujoco.MjSpec.from_string(world_xml(static, tomatoes, eqs, scenery, excludes, crate))
     if arm:
         yaw = np.radians(ARM_YAW_DEG)
         fr = world.worldbody.add_frame(pos=ARM_BASE, quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
-        world.attach(arm_spec(cut_hold), frame=fr, prefix="arm/")
+        world.attach(arm_spec(cut_hold, jaw), frame=fr, prefix="arm/")
+        if HOLD_WELD:
+            for b in [b.name for b in world.bodies if b.name.endswith("_truss")]:
+                world.add_equality(name=f"{b}_hold", type=mujoco.mjtEq.mjEQ_WELD, name1=b, name2="arm/gripper",
+                                   objtype=mujoco.mjtObj.mjOBJ_BODY, active=False,
+                                   solref=HOLD_WELD_SOLREF, solimp=HOLD_WELD_SOLIMP)
     m = world.compile()
     return m, mujoco.MjData(m)
 

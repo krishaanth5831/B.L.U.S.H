@@ -1,0 +1,513 @@
+{
+ "episodes": 600,
+ "cut": 540,
+ "hold": 60,
+ "old": {
+  "x0z0": 87,
+  "x1z0": 56,
+  "x3z2": 64,
+  "x2z0": 67,
+  "x1z1": 48,
+  "x0z1": 61,
+  "x0z2": 82,
+  "x1z2": 70,
+  "x2z1": 51,
+  "x2z2": 35,
+  "x3z0": 45,
+  "x3z1": 68
+ },
+ "want": {
+  "x0z0": 20,
+  "x1z0": 50,
+  "x2z0": 39,
+  "x3z0": 61,
+  "x0z1": 46,
+  "x1z1": 58,
+  "x2z1": 55,
+  "x3z1": 38,
+  "x0z2": 24,
+  "x1z2": 36,
+  "x2z2": 71,
+  "x3z2": 42,
+  "hold": 60
+ },
+ "pool": {
+  "x0z2": 706,
+  "x2z2": 221,
+  "x0z0": 694,
+  "x3z1": 367,
+  "x1z2": 360,
+  "x3z2": 262,
+  "x1z0": 296,
+  "x2z0": 265,
+  "x3z0": 227,
+  "x0z1": 523,
+  "x1z1": 236,
+  "x2z1": 237
+ },
+ "oversupply": 3.0,
+ "min_supply": 1.8,
+ "held_back": [],
+ "census": [
+  "../outputs/v6/census_v6/cen_10100000.jsonl",
+  "../outputs/v6/census_v6/cen_10100300.jsonl",
+  "../outputs/v6/census_v6/cen_10100600.jsonl",
+  "../outputs/v6/census_v6/cen_10100900.jsonl",
+  "../outputs/v6/census_v6/cen_10101200.jsonl",
+  "../outputs/v6/census_v6/cen_10101500.jsonl",
+  "../outputs/v6/census_v6/cen_10101800.jsonl",
+  "../outputs/v6/census_v6/cen_10102100.jsonl",
+  "../outputs/v6/census_v6/cen_10102400.jsonl",
+  "../outputs/v6/census_v6/cen_10102700.jsonl",
+  "../outputs/v6/census_v6/cen_10103000.jsonl",
+  "../outputs/v6/census_v6/cen_10103300.jsonl",
+  "../outputs/v6/census_v6/cen_10103600.jsonl",
+  "../outputs/v6/census_v6/cen_10103900.jsonl",
+  "../outputs/v6/census_v6/cen_10104200.jsonl"
+ ],
+ "parts": [
+  {
+   "part": 0,
+   "file": "p00.jsonl",
+   "episodes": 25,
+   "seeds": 69,
+   "quota": {
+    "x2z2": 5,
+    "x3z0": 4,
+    "x1z1": 3,
+    "x3z2": 2,
+    "hold": 4,
+    "x3z1": 2,
+    "x0z1": 2,
+    "x2z1": 1,
+    "x0z2": 1,
+    "x1z2": 1
+   }
+  },
+  {
+   "part": 1,
+   "file": "p01.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x3z0": 4,
+    "hold": 3,
+    "x2z1": 2,
+    "x0z1": 3,
+    "x2z2": 2,
+    "x2z0": 4,
+    "x0z2": 1,
+    "x3z1": 3,
+    "x1z1": 1,
+    "x0z0": 1,
+    "x1z2": 1
+   }
+  },
+  {
+   "part": 2,
+   "file": "p02.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "hold": 3,
+    "x1z2": 2,
+    "x3z2": 4,
+    "x1z1": 3,
+    "x3z0": 3,
+    "x2z1": 4,
+    "x2z2": 3,
+    "x0z0": 1,
+    "x0z2": 1,
+    "x2z0": 1
+   }
+  },
+  {
+   "part": 3,
+   "file": "p03.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x1z1": 3,
+    "x2z0": 4,
+    "x0z0": 2,
+    "x0z1": 1,
+    "x2z2": 4,
+    "x3z0": 1,
+    "hold": 2,
+    "x3z2": 3,
+    "x2z1": 2,
+    "x1z2": 1,
+    "x3z1": 1,
+    "x0z2": 1
+   }
+  },
+  {
+   "part": 4,
+   "file": "p04.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x2z1": 3,
+    "x1z0": 4,
+    "x1z2": 3,
+    "hold": 2,
+    "x0z1": 5,
+    "x2z2": 1,
+    "x0z0": 1,
+    "x3z1": 2,
+    "x1z1": 3,
+    "x3z0": 1
+   }
+  },
+  {
+   "part": 5,
+   "file": "p05.jsonl",
+   "episodes": 25,
+   "seeds": 75,
+   "quota": {
+    "x1z0": 8,
+    "x2z2": 3,
+    "x3z0": 2,
+    "x1z1": 2,
+    "x3z1": 2,
+    "x1z2": 1,
+    "hold": 1,
+    "x2z0": 1,
+    "x3z2": 1,
+    "x2z1": 1,
+    "x0z2": 3
+   }
+  },
+  {
+   "part": 6,
+   "file": "p06.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x0z1": 3,
+    "x1z0": 9,
+    "x2z2": 3,
+    "x3z0": 2,
+    "x2z1": 3,
+    "x1z1": 1,
+    "hold": 2,
+    "x2z0": 1,
+    "x1z2": 1
+   }
+  },
+  {
+   "part": 7,
+   "file": "p07.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x3z2": 3,
+    "x0z1": 2,
+    "hold": 2,
+    "x2z1": 4,
+    "x1z0": 4,
+    "x3z1": 2,
+    "x1z2": 2,
+    "x2z2": 1,
+    "x3z0": 2,
+    "x1z1": 3
+   }
+  },
+  {
+   "part": 8,
+   "file": "p08.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x2z0": 4,
+    "x3z0": 5,
+    "x3z1": 1,
+    "x2z2": 4,
+    "hold": 3,
+    "x1z1": 3,
+    "x3z2": 2,
+    "x0z1": 1,
+    "x0z2": 2
+   }
+  },
+  {
+   "part": 9,
+   "file": "p09.jsonl",
+   "episodes": 25,
+   "seeds": 69,
+   "quota": {
+    "x3z1": 2,
+    "hold": 4,
+    "x1z1": 3,
+    "x2z1": 2,
+    "x0z0": 3,
+    "x2z0": 2,
+    "x3z0": 2,
+    "x3z2": 3,
+    "x2z2": 3,
+    "x0z1": 1
+   }
+  },
+  {
+   "part": 10,
+   "file": "p10.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x1z2": 3,
+    "x3z2": 2,
+    "x3z0": 3,
+    "x2z2": 4,
+    "hold": 3,
+    "x2z1": 2,
+    "x0z0": 2,
+    "x2z0": 1,
+    "x0z1": 1,
+    "x3z1": 2,
+    "x1z1": 1,
+    "x0z2": 1
+   }
+  },
+  {
+   "part": 11,
+   "file": "p11.jsonl",
+   "episodes": 25,
+   "seeds": 75,
+   "quota": {
+    "x0z2": 2,
+    "x1z1": 3,
+    "x0z1": 4,
+    "x2z0": 2,
+    "x3z2": 1,
+    "x3z0": 1,
+    "x2z2": 2,
+    "x2z1": 4,
+    "x1z2": 3,
+    "x3z1": 2,
+    "hold": 1
+   }
+  },
+  {
+   "part": 12,
+   "file": "p12.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x2z2": 3,
+    "x0z2": 2,
+    "x2z1": 3,
+    "x0z1": 4,
+    "x1z2": 1,
+    "x3z1": 2,
+    "x1z1": 3,
+    "hold": 3,
+    "x2z0": 2,
+    "x3z0": 1,
+    "x3z2": 1
+   }
+  },
+  {
+   "part": 13,
+   "file": "p13.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x3z0": 4,
+    "x2z2": 4,
+    "x0z2": 1,
+    "hold": 3,
+    "x1z1": 1,
+    "x1z2": 4,
+    "x3z1": 2,
+    "x0z1": 1,
+    "x2z1": 2,
+    "x0z0": 1,
+    "x3z2": 2
+   }
+  },
+  {
+   "part": 14,
+   "file": "p14.jsonl",
+   "episodes": 25,
+   "seeds": 67,
+   "quota": {
+    "hold": 5,
+    "x2z1": 2,
+    "x2z2": 3,
+    "x3z1": 2,
+    "x0z1": 1,
+    "x0z0": 1,
+    "x1z1": 3,
+    "x3z2": 3,
+    "x3z0": 2,
+    "x1z2": 1,
+    "x2z0": 2
+   }
+  },
+  {
+   "part": 15,
+   "file": "p15.jsonl",
+   "episodes": 25,
+   "seeds": 75,
+   "quota": {
+    "x0z0": 3,
+    "x2z0": 4,
+    "x3z0": 5,
+    "x0z2": 2,
+    "x3z2": 1,
+    "x2z2": 4,
+    "x1z1": 3,
+    "x0z1": 2,
+    "x3z1": 1
+   }
+  },
+  {
+   "part": 16,
+   "file": "p16.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x1z1": 3,
+    "x3z1": 1,
+    "x3z2": 3,
+    "x3z0": 2,
+    "x2z1": 4,
+    "x1z0": 5,
+    "hold": 3,
+    "x1z2": 1,
+    "x0z1": 2,
+    "x2z2": 1
+   }
+  },
+  {
+   "part": 17,
+   "file": "p17.jsonl",
+   "episodes": 25,
+   "seeds": 75,
+   "quota": {
+    "x2z1": 3,
+    "x1z2": 2,
+    "hold": 1,
+    "x2z2": 3,
+    "x1z0": 9,
+    "x0z1": 3,
+    "x3z0": 2,
+    "x2z0": 1,
+    "x1z1": 1
+   }
+  },
+  {
+   "part": 18,
+   "file": "p18.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x1z0": 7,
+    "x2z2": 3,
+    "x0z2": 3,
+    "x3z0": 2,
+    "x2z1": 1,
+    "x3z2": 1,
+    "x2z0": 1,
+    "hold": 2,
+    "x1z1": 2,
+    "x3z1": 3
+   }
+  },
+  {
+   "part": 19,
+   "file": "p19.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x0z1": 4,
+    "x3z0": 1,
+    "x1z1": 3,
+    "x1z2": 3,
+    "x2z1": 3,
+    "x1z0": 4,
+    "hold": 3,
+    "x3z1": 2,
+    "x2z2": 1,
+    "x3z2": 1
+   }
+  },
+  {
+   "part": 20,
+   "file": "p20.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x2z2": 4,
+    "hold": 2,
+    "x2z0": 4,
+    "x2z1": 2,
+    "x3z2": 3,
+    "x0z2": 1,
+    "x3z1": 1,
+    "x1z2": 1,
+    "x1z1": 3,
+    "x0z0": 2,
+    "x3z0": 1,
+    "x0z1": 1
+   }
+  },
+  {
+   "part": 21,
+   "file": "p21.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x3z2": 4,
+    "x0z0": 1,
+    "x2z1": 4,
+    "x2z0": 1,
+    "x1z1": 3,
+    "x2z2": 3,
+    "x0z2": 1,
+    "x3z0": 3,
+    "hold": 3,
+    "x1z2": 2
+   }
+  },
+  {
+   "part": 22,
+   "file": "p22.jsonl",
+   "episodes": 25,
+   "seeds": 73,
+   "quota": {
+    "x2z0": 4,
+    "x0z1": 3,
+    "x3z1": 3,
+    "x3z0": 4,
+    "x1z2": 2,
+    "hold": 2,
+    "x1z1": 1,
+    "x0z2": 1,
+    "x0z0": 1,
+    "x2z2": 2,
+    "x2z1": 2
+   }
+  },
+  {
+   "part": 23,
+   "file": "p23.jsonl",
+   "episodes": 25,
+   "seeds": 71,
+   "quota": {
+    "x3z1": 2,
+    "x2z2": 5,
+    "x0z1": 2,
+    "hold": 3,
+    "x1z1": 3,
+    "x3z0": 4,
+    "x0z0": 1,
+    "x1z2": 1,
+    "x0z2": 1,
+    "x2z1": 1,
+    "x3z2": 2
+   }
+  }
+ ],
+ "expected_cut_kept": 535.9
+}

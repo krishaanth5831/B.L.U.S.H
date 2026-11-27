@@ -48,7 +48,19 @@ class SO101MujocoConfig(RobotConfig):
     #               picked on the birdseye's first frame (the truss YOLO was trained on birdseye views); its box + cut
     #               point go onto the base camera from the sim's truth. The claw camera stays clean (SockBot: a box on
     #               the wrist camera is noise).
+    #   "trio"      high + low + claw (K7 2026-11-26): two fixed cameras on the cart (scene.CART_CAMS), each with
+    #               the target's box + cut point as it sees them; the cue numbers come from the first ("high").
     rig: str = "birdseye"
+    # Re-making an old dataset's pictures with another rig's cameras: the rig whose camera brackets stood in the scene
+    # when the seed's plants and ripe truss were decided ("base" for dataset v5). The scene is decided with those
+    # brackets and shown with this rig's (truss_scene.build show_mounts). None = this rig's own, as always.
+    layout_rig: str | None = None
+    # The cut-and-hold jaw (scene.JAWS): "v5" the fin-ray-ladder jaw with blade + pads on the 16 mm tips (every dataset
+    # and policy so far), "v6" the rigid jaw with blade + clamp pads along a 36 mm zone (K7 2026-11-24).
+    jaw: str = "v5"
     # Each scene starts this many degrees (uniform, per arm joint, drawn from the seed) off the start pose, so a policy
     # learns "see the truss, then reach" rather than one fixed first move (SockBot's ghost-sock lesson). 0 = exact.
+    # A draw that leaves the arm too close to itself or to anything else is drawn again (so101_mujoco.START_CLEAR_*):
+    # the folded start has the lower arm 2-3 mm off the shoulder, so the elbow ends up moving one way more than the
+    # other.
     start_jitter_deg: float = 0.0

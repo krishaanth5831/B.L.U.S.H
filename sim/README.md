@@ -229,6 +229,75 @@ makes the arm leave in nothing-ripe scenes (2/20 with `--unstretch`). None of th
 dataset store frames so that each depends on its own picture only (`scripts/postmortem_v5/encoder_leak_test.py`
 lists the settings that do) and pass live pictures through the same step at test time.
 
+### Dataset v6: three cameras, the old 800 re-made + 600 new (trial 2026-11-27; the full run is in flight)
+
+K7 2026-11-26: the teacher, the gripper and the base stay; "more varied episodes", "3 cameras instead of 2 but also
+placed in a more calculated location", the post-mortem's fixes, "another 600 episodes on top of the previous 800".
+Measurements and choices: `research_notes/Truss grip and carry research/own_sim_measurements.md` sections 21-27.
+
+- **Rig `trio`** = cameras `high`, `low`, `claw` (`scene.CART_CAMS`): both fixed cameras on one upright 35 cm to the
+  left of the arm base and 10 cm toward the row, lenses 42 cm and 5 cm above the deck. `high` gives the cue numbers.
+- **World** `crate23` (v5's 23 x 28 crate), scenes decided with the old camera bracket standing in them and shown
+  with the new ones: every v6 command takes `--world crate23 --rig trio --layout-rig base` (the recorder, the
+  re-make, `base_grid.py`, `view_scene.py`); `eval_truss.py` takes the rig from the checkpoint and needs
+  `--world crate23 --layout-rig base`.
+- **The old 800 get the new cameras** from the logged simulator states (`remake_pictures.py`; 799 of them: v5
+  episode 353 does not rebuild on MuJoCo 4.0.1). ⚠️ The states live in `~/.cache/blush_sim/states`, a cache folder.
+  A second copy is in `~/datasets/blush_sim_states` (K7 2026-11-27; every file checked against
+  `MANIFEST.sha256` in that folder). ⚠️ It is on the same disk: it covers a wiped cache, not a dead drive.
+- **The 600 new** come from seed plans (`sim/seed_plan_v6`: one list of scenes per part of 25 episodes, made by
+  `scripts/v6_seed_plan.py` from a census of the fresh seeds 10100000-10104499): old + new together level over
+  where the truss hangs (4 row parts x 3 heights, 106-107 episodes each instead of 35-87), 60 of them nothing-ripe.
+  Three scenes are listed per wanted episode; at the teacher's keep rates of v5's recording that gives about 536
+  of the 540 cut episodes, and `v6_seed_plan.py --topup` (its header has the command) plans the missing ones as
+  part 24 from scenes not yet listed.
+  Each scene starts up to 3 deg off the start pose, drawn again until the arm is clear (`--start-jitter-deg 3`).
+- Pictures are stored so that a frame depends on its own picture only (`picture_store.py`), and every dataset
+  carries a gate file that `merge_parts.py` checks. At the chosen quality (qp 23, K7 2026-11-27) the whole dataset
+  is about 52 GB of video (measured on the trial's parts; 104 GB while the parts and the merged copy both exist).
+- **Is a part right?** `scripts/v6_check.py`: both worker scripts exit 0 whatever the part did, and a short part
+  still finalizes. It checks the cameras and the storage setting, reads the gate's frames back, compares a re-made
+  part's joint readings and commands with v5's bit for bit and a recorded part's episodes per zone with its plan,
+  and cuts the five review videos (three cameras side by side) for K7's look before a training.
+
+```bash
+python view_scene.py --cams --rig trio --world crate23 --layout-rig base --seed 10023030   # look at it (window)
+# read-only rehearsals (these HAVE run): the re-make's path on old episodes, the recorder's on the real lists
+# p00 and p01 (2026-11-27: 25 of 25 kept in both, every cell at its quota, 20-25 minutes; notes section 27)
+python remake_pictures.py dry --shots ../outputs/v6/remake_dry/shots
+python generate_truss.py --teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
+    --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds seed_plan_v6/p00.jsonl \
+    --seed-start 10100000 --episodes 25 --dry --repo-id krish5831/v6_dry
+# K7 2026-11-27: the dataset is krish5831/blush_sim_teacher_v6 (never ..._v5), a trial of one part of each first.
+V6=krish5831/blush_sim_teacher_v6
+G="--teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 --start-jitter-deg 3 --noise-share 0.5 --retries 6"
+# the trial (these HAVE run, from the repo root, 2026-11-27: 25 of 25 in both parts, 11 and 35 minutes, 3.3 and
+# 3.6 GB at the peak, the merge's gate 300 of 300; notes section 28). The two p00 parts are part 0 of the real run.
+sim/scripts/remake_parts.sh ${V6}_old 0 1 1
+GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh ${V6}_new 10100000 0 1 1
+python sim/merge_parts.py ${V6}_trial ${V6}_old ${V6}_new          # merges + runs the gate
+(cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new && python scripts/v6_check.py merged ${V6}_trial ${V6}_old ${V6}_new)
+# the rest (K7's go 2026-11-27: IN FLIGHT since 09:52, the same six workers as six jobs of scripts/sim_queue.sh,
+# three at a time; notes section 28). Three workers of one kind, then the other kind (a worker peaks at 3.3-3.6 GB;
+# both kinds at once would break the memory rule). About 2.5 h for the re-make and 4.5 h for the recording.
+for w in 0 1 2; do nohup sim/scripts/remake_parts.sh ${V6}_old $w 3 32 & done
+for w in 0 1 2; do GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 nohup sim/scripts/record_parts.sh ${V6}_new 10100000 $w 3 24 & done
+(cd sim && python scripts/v6_check.py parts ${V6}_old ${V6}_new)   # every part; a short recorded part shows here
+# parts that ended short of 25: plan the missing episodes as part 24 (v6_seed_plan.py --topup), record it
+GEN_ARGS="$G" SEEDS_DIR=sim/seed_plan_v6 sim/scripts/record_parts.sh ${V6}_new 10100000 24 1 25
+python sim/merge_parts.py $V6 ${V6}_old ${V6}_new
+(cd sim && python scripts/v6_check.py merged $V6 ${V6}_old ${V6}_new \
+    && python scripts/v6_check.py videos $V6 ${V6}_old ${V6}_new --out ../outputs/videos/review_blush_sim_teacher_v6)
+```
+
+Training: `sim/colab_train_act_v6.ipynb` (batch 64, learning rate 3e-5 constant, dropout 0; its cell 4 runs the
+gate). Tests: `EXTRA="--world crate23 --layout-rig base" sim/scripts/colab_tests.sh ...`. The two guards outside the
+policy (`--start-guard`: the policy is not started when the cue has no target box; `--clip-actions`: its commands
+stay inside the range of its training data) are the standard for policy tests since 2026-11-27 (K7): the three test
+scripts (`colab_tests.sh`, `test_all_checkpoints.sh`, `train_and_test.sh`) pass both, `GUARDS=""` switches them
+off, and `checkpoint_table.py` names the guards of every row. `eval_truss.py` by itself still runs without them, so
+an old checkpoint re-run by hand compares with the earlier tables. ⚠️ Not run yet through the scripts.
+
 ## lerobot commands against the sim (`--robot.type=so101_mujoco`)
 
 The sim is a lerobot robot plugin (`plugin/`), so the normal lerobot tools run on it. The wrappers in

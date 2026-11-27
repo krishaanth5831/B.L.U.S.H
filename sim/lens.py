@@ -124,6 +124,8 @@ def load():
     # The base camera (rig "base", K7 2026-11-06) is the same InnoMaker module the birdseye uses, moved: same lens,
     # unless cameras.json measures it on its own
     out.setdefault("base", out["birdseye"])
+    for c in ("high", "low"):                 # rig "trio" (2026-11-26): the same module again, twice
+        out.setdefault(c, out["birdseye"])
     return out
 
 

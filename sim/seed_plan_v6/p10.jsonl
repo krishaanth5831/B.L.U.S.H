@@ -1,0 +1,72 @@
+{"quota": {"x1z2": 3, "x3z2": 2, "x3z0": 3, "x2z2": 4, "hold": 3, "x2z1": 2, "x0z0": 2, "x2z0": 1, "x0z1": 1, "x3z1": 2, "x1z1": 1, "x0z2": 1}, "part": 10, "made_by": "sim/scripts/v6_seed_plan.py", "episodes": 25}
+{"seed": 10100155, "cell": "x0z0", "hold": false}
+{"seed": 10100859, "cell": "x2z0", "hold": false}
+{"seed": 10101320, "cell": "x3z0", "hold": false}
+{"seed": 10100407, "cell": "x0z1", "hold": false}
+{"seed": 10101053, "cell": "x1z1", "hold": false}
+{"seed": 10101438, "cell": "x2z1", "hold": false}
+{"seed": 10100556, "cell": "x3z1", "hold": false}
+{"seed": 10100149, "cell": "x0z2", "hold": false}
+{"seed": 10100392, "cell": "x1z2", "hold": false}
+{"seed": 10101982, "cell": "x2z2", "hold": false}
+{"seed": 10101031, "cell": "x3z2", "hold": false}
+{"seed": 10104283, "hold": true}
+{"seed": 10100167, "cell": "x0z0", "hold": false}
+{"seed": 10100872, "cell": "x2z0", "hold": false}
+{"seed": 10101350, "cell": "x3z0", "hold": false}
+{"seed": 10100409, "cell": "x0z1", "hold": false}
+{"seed": 10101081, "cell": "x1z1", "hold": false}
+{"seed": 10101459, "cell": "x2z1", "hold": false}
+{"seed": 10100579, "cell": "x3z1", "hold": false}
+{"seed": 10100150, "cell": "x0z2", "hold": false}
+{"seed": 10100401, "cell": "x1z2", "hold": false}
+{"seed": 10102063, "cell": "x2z2", "hold": false}
+{"seed": 10101044, "cell": "x3z2", "hold": false}
+{"seed": 10104281, "hold": true}
+{"seed": 10100190, "cell": "x0z0", "hold": false}
+{"seed": 10100877, "cell": "x2z0", "hold": false}
+{"seed": 10101379, "cell": "x3z0", "hold": false}
+{"seed": 10100411, "cell": "x0z1", "hold": false}
+{"seed": 10101127, "cell": "x1z1", "hold": false}
+{"seed": 10101464, "cell": "x2z1", "hold": false}
+{"seed": 10100581, "cell": "x3z1", "hold": false}
+{"seed": 10100162, "cell": "x0z2", "hold": false}
+{"seed": 10100428, "cell": "x1z2", "hold": false}
+{"seed": 10102087, "cell": "x2z2", "hold": false}
+{"seed": 10101050, "cell": "x3z2", "hold": false}
+{"seed": 10104279, "hold": true}
+{"seed": 10100192, "cell": "x0z0", "hold": false}
+{"seed": 10101386, "cell": "x3z0", "hold": false}
+{"seed": 10101476, "cell": "x2z1", "hold": false}
+{"seed": 10100589, "cell": "x3z1", "hold": false}
+{"seed": 10100450, "cell": "x1z2", "hold": false}
+{"seed": 10102178, "cell": "x2z2", "hold": false}
+{"seed": 10101068, "cell": "x3z2", "hold": false}
+{"seed": 10100221, "cell": "x0z0", "hold": false}
+{"seed": 10101387, "cell": "x3z0", "hold": false}
+{"seed": 10101478, "cell": "x2z1", "hold": false}
+{"seed": 10100591, "cell": "x3z1", "hold": false}
+{"seed": 10104271, "hold": true}
+{"seed": 10100459, "cell": "x1z2", "hold": false}
+{"seed": 10102188, "cell": "x2z2", "hold": false}
+{"seed": 10101089, "cell": "x3z2", "hold": false}
+{"seed": 10100239, "cell": "x0z0", "hold": false}
+{"seed": 10101406, "cell": "x3z0", "hold": false}
+{"seed": 10101490, "cell": "x2z1", "hold": false}
+{"seed": 10100599, "cell": "x3z1", "hold": false}
+{"seed": 10100502, "cell": "x1z2", "hold": false}
+{"seed": 10102215, "cell": "x2z2", "hold": false}
+{"seed": 10101098, "cell": "x3z2", "hold": false}
+{"seed": 10101481, "cell": "x3z0", "hold": false}
+{"seed": 10104267, "hold": true}
+{"seed": 10100539, "cell": "x1z2", "hold": false}
+{"seed": 10102217, "cell": "x2z2", "hold": false}
+{"seed": 10101487, "cell": "x3z0", "hold": false}
+{"seed": 10100569, "cell": "x1z2", "hold": false}
+{"seed": 10102261, "cell": "x2z2", "hold": false}
+{"seed": 10101515, "cell": "x3z0", "hold": false}
+{"seed": 10100571, "cell": "x1z2", "hold": false}
+{"seed": 10102266, "cell": "x2z2", "hold": false}
+{"seed": 10102268, "cell": "x2z2", "hold": false}
+{"seed": 10102270, "cell": "x2z2", "hold": false}
+{"seed": 10102281, "cell": "x2z2", "hold": false}

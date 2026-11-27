@@ -26,6 +26,9 @@ from lerobot_robot_so101_mujoco import SO101Mujoco, SO101MujocoConfig  # noqa: E
 
 MODES = ("strict", "brush")
 TILTS = (0.0, -10.0, 10.0)
+# VIA_EXTRA=1 (2026-11-26, the round after VIA_NORM_V5): a case is one that VIA_NORM_V5's poses don't reach either
+# (free_move's extra tier), and a candidate is scored alone or chained with any of VIA_NORM + VIA_NORM_V5
+EXTRA = os.environ.get("VIA_EXTRA") == "1"
 
 
 def robot():
@@ -55,7 +58,7 @@ def cases(rob, seed):
                 if isinstance(leg, str) or not leg["approaches"]:
                     continue
                 T.jaw(tx.JAW_OPEN_DEG)
-                if T._to_standoff(q0, dict(leg))[0] is not None:
+                if T._to_standoff(q0, dict(leg), extra=EXTRA)[0] is not None:
                     continue
                 out.append((mode, tilt, beta, np.asarray(leg["approaches"][-1][0][0], float)))
     return T, out
@@ -100,7 +103,7 @@ def score(seedfile, cases_path, cands_path, out_path):
             T, _ = cases(rob, seed)
             q0 = T.q_now()
             V = [T.fm.norm_to_rad(np.r_[v, 0.0])[:5] for v in cands]
-            old = T.vias()
+            old = T.vias() + (T.vias_v5() if EXTRA else [])
             for c in mine:
                 T._mode(c["mode"])
                 T.jaw(tx.JAW_OPEN_DEG)

@@ -95,11 +95,26 @@ class Checker:
         return not self.hits(q, **kw)
 
     def segment_free(self, q0, q1, **kw):
+        """self.last_hits: what blocked the last failed segment (truss_teacher.HIT_LOG, base_grid --plan-only)."""
         n = max(2, int(np.ceil(np.abs(np.asarray(q1) - q0).max() / STEP)) + 1)
-        return all(self.free(q0 + (q1 - q0) * s, **kw) for s in np.linspace(0, 1, n)[1:])
+        for s in np.linspace(0, 1, n)[1:]:
+            h = self.hits(q0 + (q1 - q0) * s, **kw)
+            if h:
+                self.last_hits = h
+                return False
+        return True
 
     def path_ok(self, path, **kw):
-        return all(self.segment_free(a, b, **kw) for a, b in zip(path[:-1], path[1:]))
+        """Same answer as ever (the path's first way-point is not checked). Diagnostics only: self.last_seg = the first
+        blocked segment (0 = from the first way-point), or -1 when that first way-point is itself blocked."""
+        for i, (a, b) in enumerate(zip(path[:-1], path[1:])):
+            if not self.segment_free(a, b, **kw):
+                hits = self.last_hits
+                self.last_seg = -1 if self.hits(path[0], **kw) else i
+                self.last_hits = hits
+                return False
+        self.last_seg = None
+        return True
 
 
 def _steer(q_from, q_to, step=EXTEND):
