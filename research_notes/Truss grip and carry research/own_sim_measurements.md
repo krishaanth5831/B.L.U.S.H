@@ -656,3 +656,50 @@ old start, no start change):
   draws each, and the teacher's own start check has no hit in any.
 - ⚠️ So the elbow's change is one-sided: about -3 to +1 deg. The other joints keep the full range.
 - r40 (the fixed change, tuning scenes 9730000-9730044) is in the table at the end of this section.
+
+## 27. The 600 new episodes: what the teacher keeps, time, disk, and the order after the go (2026-11-27 night)
+
+Nothing here was recorded: the numbers come from dataset v5's own recording logs
+(`~/.cache/blush_sim/truss/blush_sim_teacher_v5_p*.jsonl`, 32 parts) and from build-only scenes.
+
+**What the teacher keeps, by where the truss hangs.** v5's recording built 1,736 scenes: 625 were turned away
+by its row-part balance before the teacher ran, 64 were nothing-ripe episodes (all 64 kept), 3 had no target, and
+of the 1,044 cut scenes the teacher tried it kept 736 = 70 %. Per cell (4 parts along the row x 3 heights,
+`generate_truss.cell_of`; a kept scene's cell from its cut point, a refused scene's from its logged row position
+and cue pixel against the kept ones, which gets 96 % of the kept ones right):
+
+| Height \ row part | x0 (0.20-0.27 m) | x1 (0.27-0.34) | x2 (0.34-0.41) | x3 (0.41-0.48) |
+|---|---|---|---|---|
+| z0, below 0.20 m | 83 % (87 kept, 18 refused) | 75 % (56, 19) | 66 % (67, 35) | 61 % (45, 29) |
+| z1, 0.20-0.26 m | 80 % (61, 15) | 83 % (48, 10) | 65 % (51, 28) | 68 % (68, 32) |
+| z2, above 0.26 m | 68 % (82, 38) | 70 % (70, 30) | 60 % (35, 23) | 67 % (64, 31) |
+
+- So no cell is below 60 %. The seed planner's floor is 1.8 census seeds per planned episode (56 % kept;
+  `MIN_SUPPLY`, was 1.6 = 63 %, too tight for x2z2 and x3z0), and it lists more than that where the census has them.
+- ⚠️ A part's seeds are its own (the parts record side by side), so a cell with 1-3 episodes in a part can end one
+  short by bad luck even at 2.5 seeds per episode. `v6_seed_plan.py` now prints how many episodes its lists should
+  give at these keep rates, and `--topup` plans the missing ones as one more part from seeds not yet listed (it
+  writes `plan_topup_pNN.json`, never over the plan; tried on the toy plan: 7 kept of 14 planned -> 7 more planned).
+
+**Time.** v5's 800 episodes took 1,548 worker-minutes = 1.93 minutes per kept episode (parts of 25: median 45
+minutes, 17 to 81), 7.4 h on three workers. 600 episodes at that rate are about 19 worker-hours, so 6 to 7 hours on
+three workers; the third camera adds rendering and writing, the missing balance step saves scenes (v5 built 625
+scenes only to turn them away; the seed plan skips a full cell's seeds without building them). The re-make of the
+old 799: 1.4 to 4.9 hours of rendering in one process (0.013 s a frame alone, 0.046 s with three other jobs
+running: section 26), before the video writing, which has not been timed. One part of each, run first, gives the
+real figures.
+
+**Disk.** The picture rule (H.264, every frame a key frame, qp 23: `picture_store.py`) costs about 18 kB a frame
+on start pictures, more with the arm in view. About 1,400 episodes x 3 cameras x 480 frames = 2.0 M frames, so
+the merged dataset is about 36 GB (v5: 6.6 GB for two cameras), 29 GB at qp 26. The parts and the merged copy
+exist side by side until the parts are deleted: about 75 GB at the peak. Free on the laptop tonight: 136 GB.
+⚠️ The qp must be chosen before the first part is written (one dataset, one setting).
+
+**Order after the go** (the commands are in `sim/README.md`, "Dataset v6"). Neither `remake_pictures.py part`, the
+real recorder with three cameras, nor a merge of the two kinds has ever run, so:
+1. one re-made part on one worker (`remake_parts.sh ... 0 1 1`): look at its peak memory, seconds per episode with
+   the video writing, its size on disk, and at a few of its frames;
+2. one recorded part (`record_parts.sh ... 0 1 1` with the seed plan): the same, and kept against quota;
+3. merge the two into a trial dataset (`merge_parts.py`, which runs the picture gate on the result);
+4. only then the other parts on three workers each, the top-up if parts ended short, the real merge, the gate, and
+   the upload (the owner's step: nothing goes to the Hub by itself).
