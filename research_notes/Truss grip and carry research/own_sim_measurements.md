@@ -1021,3 +1021,7 @@ since v6 store H.264 through `sim/picture_store.py`.
   reaches 51 mm past the deck's edge (deck y 81-319). Not solved here: it is a layout question for the rig.
 - ⚠️ Not done: the Onshape model and the cut plan (no CAD was changed), the camera clamps, a sweep of the recorded
   episodes against the boom (it is below the deck top, where the simulator has its table).
+- ⚠️ Not run yet, waits for the dataset run to end (no fourth simulator job): the recorded motions against this
+  rig's END POSTS, which stand 145 mm nearer the arm than the simulator's end frame (nearest corner of the row
+  post at simulator x 0.145, y 0.378, up to 0.52 m): `whatif/camera_sweep_logs.py arm --cams 0.145:0.378:0.52`
+  and `plants`. If the arm or a carried truss passes through there, the longer house is needed anyway.

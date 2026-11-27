@@ -101,6 +101,11 @@ The place where the trusses hang is not hidden. Three ways to deal with it, K7's
    (`sim/remake_pictures.py`), then train on those. The rig's layout is not in the simulator yet.
 
 **Not checked:**
+- ⚠️ Whether the arm's recorded motions stay clear of this rig's end posts at all. They stand 145 mm nearer the
+  arm than the simulator's end frame: the nearest corner of the row post is 80 mm to the arm's left of where the
+  leftmost stem hangs. `sim/whatif/camera_sweep_logs.py arm --cams 0.145:0.378:0.52` (and `plants`) measures it
+  against all recorded episodes; not run yet, it waits for the dataset run to end. If the arm or a carried truss
+  passes through there, the longer house (way 2) is needed whatever the pictures show.
 - How much the cameras shake. A beam-formula estimate gives a first sway near 22 Hz for the M12 rod on this boom; an
   M16 rod barely changes it, because the boom's twist then sets the limit. Tap the post and watch the picture.
 - The lens model is the simulator's guess for this camera module, not a calibration.
