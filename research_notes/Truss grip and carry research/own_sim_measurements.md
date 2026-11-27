@@ -860,7 +860,7 @@ open; 5 is in the trial's recorded part because it is in the documented command.
 Owner, 2026-11-27 midday, shown 7 to 10 as "four smaller things": "finish the four smaller things also". What
 was done for each: section 29. 4 to 6 stay as they are in the run (old start, 3 deg start change, the cue's form).
 
-## 28. The trial: one re-made part, one recorded part, one merge (2026-11-27 morning, after the owner's go)
+## 28. The trial (one re-made part, one recorded part, one merge), then the full run (2026-11-27, after the owner's go)
 
 The go was for the trial only (section 27, decisions). Names: parts `krish5831/blush_sim_teacher_v6_old_p00` and
 `..._new_p00`, merge `krish5831/blush_sim_teacher_v6_trial`, all local (`~/.cache/huggingface/lerobot`); nothing
@@ -943,23 +943,73 @@ start change of up to 3 deg (`--start-jitter-deg 3`) are then in the dataset. Ch
 part folders and redoing them (46 minutes). The `_trial` merge is a throwaway and does not get in the way of the
 real merge (`krish5831/blush_sim_teacher_v6`).
 
-**The full run, IN FLIGHT since 2026-11-27 09:52** (owner, after the trial's report: "go" and "lets do 52gb" = the
-rest at qp 23, the start change kept, the trial's two parts as part 0). It runs as the queue unit
-`blush-queue-v6run` (`MAXJ=3 sim/scripts/sim_queue.sh v6run outputs/v6/jobs_v6run.txt`, log
-`outputs/v6/queue_v6run.log`), a unit of its own, so it does not need the session that started it. Three workers
-at a time: first the three re-make workers (units `blush-v6-v6run_r0`, `_r1`, `_r2`: parts 1-31), then, as each
-ends, a recording worker (`_n0`, `_n1`, `_n2`: parts 1-23). Worker logs:
-`outputs/remake_blush_sim_teacher_v6_old/workers.log`, `outputs/record_blush_sim_teacher_v6_new/workers.log`.
-- ⚠️ Every part runs in a scope of its own, outside its worker's unit (tested): stopping a worker unit ends the
-  script, the part in flight carries on and finalizes. That is the clean way down to two workers. A real stop is
-  the queue first, then the workers, then the part processes.
-- ⚠️ Before a worker is started again, no part process of its kind may be alive: the new worker deletes a part
-  folder without a parquet footer, and a part still being written has none.
-- ⚠️ No edits to `remake_parts.sh`, `record_parts.sh`, `sim_queue.sh` or the job file until every worker has ended.
-- After the queue: `v6_check.py parts` (a short recorded part is input for the top-up, any other failed check a
-  redo), the top-up part 24, the merge into `krish5831/blush_sim_teacher_v6` under the memory cap,
-  `v6_check.py merged` (the gate should read 8,394 frames for 1,399 episodes) and `videos`, the report.
-- Not covered by the go: any upload, any training, deleting the parts or the trial merge.
+**The full run: done 2026-11-27, 09:52-21:51** (owner, after the trial's report: "go" and "lets do 52gb" = the
+rest at qp 23, the start change kept, the trial's two parts as part 0). The dataset is
+`krish5831/blush_sim_teacher_v6`, on this laptop only (`~/.cache/huggingface/lerobot/krish5831/blush_sim_teacher_v6`):
+nothing went to the Hub.
+
+| | Re-made (v5's episodes, new cameras) | Recorded (new) | Merged |
+|---|---|---|---|
+| Episodes | 799 (64 nothing-ripe) | 600 (60 nothing-ripe) | 1,399 |
+| Frames | 383,289 | 282,025 | 665,314 |
+| Video on disk | 29.61 GB | 21.75 GB | 51.36 GB |
+| Parts | 32 | 25 (24 and the top-up) | 57 |
+| Ran | 09:52-12:15 | 12:04-21:23, top-up 21:27-21:45 | 21:47-21:50 |
+| One part by the clock | 11-15 min | 23-111 min, median 44 | 2 min 54 s |
+| Peak memory of one part (journal) | 2.8-3.4 GB | 3.3-3.9 GB | 7 GB = the cap |
+
+It ran as the queue unit `blush-queue-v6run` (`MAXJ=3 sim/scripts/sim_queue.sh v6run outputs/v6/jobs_v6run.txt`), three
+workers at a time: the three re-make workers, then, as each ended, a recording worker. At the five looks during the
+recording, 15 to 17 GB of memory were available with three workers running (the rule asks 8). The journal gives the
+merge a peak of 7 GB, which is its cap; it ended with exit 0. Probably the files it copies count as its memory until
+the cap makes the kernel drop them (a guess, not measured; the trial's merge of two parts peaked at 2.6 GB).
+
+**Checked** (`scripts/v6_check.py parts` on all 57 parts, `merged` on the merge; `outputs/v6/check_parts_final.log`,
+`check_merged.log`; every line "ok"):
+- Every part and the merge: cameras `high`, `low`, `claw`; H.264, every frame a key frame, qp 23; the gate file is
+  there and every fingerprinted frame reads back the same (8,394 of 8,394 on the merge = 1,399 episodes x 2 frames
+  x 3 cameras).
+- Re-made: the joint readings and commands of all 383,289 frames equal v5's bit for bit; no cut episode has an
+  all-zero box in its cue numbers. Part 14 has 24 episodes (v5 episode 353 does not rebuild), the other 31 have 25.
+- Recorded: 849 scenes built, 600 kept (71 %). Refused 249: no plan 144, every dry run failed 62, the noisy run of
+  the chosen plan failed 35, the scene's cell was already full 8. The two refusals only a recording pass can make
+  ("recording differs from the dry run", "recording picked another truss"): 0 in all 25 parts. Noisy: 244 of the 540
+  cut episodes. Start pose: the first draw was clear in 502 of the 849 scenes; 10 scenes fell back to the exact
+  pose. The cue numbers in the dataset equal the log's in every part.
+- Five parts ended one episode short (06, 11, 13, 14, 16: a cell's listed scenes ran out before its quota).
+  `v6_seed_plan.py --topup` planned exactly those five (cells x1z1, x2z1, x1z2, x2z2, x3z2; 30 scenes not listed
+  before: `sim/seed_plan_v6/p24.jsonl`), and part 24 kept 5 of the 9 scenes it built, in 18 minutes. With it, every
+  cell holds exactly the number of new episodes the plan asked for, and 60 are nothing-ripe. (The plan had
+  expected 536 of the 540 cut episodes from its lists; they gave 535.)
+- Where the cut point hangs, old + new together (4 parts along the row x 3 heights): 106 or 107 episodes in each
+  of the 12 cells, against 35 to 87 in v5 alone. That is by the plan's count, which has 734 of v5's cut points; the
+  re-made set has 735 cut episodes (799 less 64 nothing-ripe), so one cell holds one more than counted (which one
+  was not looked up). The new 540 cut episodes: 20, 50, 39, 61 (low), 46, 58, 55, 38 (middle), 24, 36, 71, 42
+  (high), each row from the arm's left to its right.
+- Merge: 1,399 episodes and 665,314 frames, the parts' sums; every part's joint readings, commands and cue numbers
+  stand at their place in the merge bit for bit.
+- Five review videos (`v6_check.py videos`, `outputs/videos/review_blush_sim_teacher_v6/`, one look only: a re-made
+  cut, a short and the longest new clean cut, a new noisy cut, a new nothing-ripe scene). Four frames of each
+  looked at: the box and the cross are on `high` and `low`, the claw camera shows the stalk between the jaws, the
+  cut truss ends in the crate, the nothing-ripe scene has no box and the arm stays home. In the noisy clip (seed
+  10102775) three red fruit stay in the box after the cut: they are the neighbour s3t0, an "almost ready" truss
+  (3 ripe, 2 turning, 1 green) that the harvest rule leaves; the target s2t1 (6 ripe) is the one in the crate.
+
+**Time: the estimate was too low.** 7 to 8 hours were estimated; it took 12 (09:52-21:51).
+- The re-make went as estimated (2 h 23 min). The recording took 20.0 hours of worker time against 13.2
+  estimated from the trial's one part: a part took 23 to 111 minutes, with how many of its scenes the teacher
+  refuses and how long the refused ones' dry runs last (part 19 built 33 scenes in 23 minutes, part 20 built 42 in
+  111).
+- ⚠️ The three workers each had a fixed list (every third part). One was done at 16:45, the second at 18:14, the
+  third at 21:23: the last four and a half hours ran on two workers, then one. A helper could not take over a
+  waiting part safely, because a worker deletes a part folder that has no parquet footer yet. A next recording
+  should let a free worker take the next part nobody has started (not changed in `record_parts.sh` now).
+
+**Left as it is, the owner's call:** nothing is uploaded and nothing trained. On disk: the merged dataset (51.4 GB),
+its 57 parts (51.4 GB again), the trial merge (1.8 GB) and the two review-video folders; 34 GB are free. The
+second copy of the simulator states was brought up to date after the run (3,169 files, 3.6 GB, every file's
+SHA-256 the original's). Deleting the parts, the trial merge or the review videos needs the owner's word, as does
+the upload (`sim/colab_train_act_v6.ipynb` reads the dataset from the Hub).
 
 
 ## 29. The four smaller decisions, done (owner, 2026-11-27 midday: "finish the four smaller things also")
@@ -984,8 +1034,8 @@ with `rsync -a` from `~/.cache/blush_sim/states`; every file's SHA-256 equals th
 the folder: `cd ~/datasets/blush_sim_states && sha256sum -c --quiet MANIFEST.sha256`).
 - ⚠️ Same disk: it covers a wiped cache folder, not a dead drive. Nothing was uploaded; a copy off the laptop needs
   the owner's word.
-- ⚠️ It holds the states up to the trial's recorded part. The run's 23 further recorded parts write new state
-  folders, so the copy is brought up to date after the queue has ended.
+- Brought up to date after the run (2026-11-27 21:53, the same `rsync -a`): 3,169 files, 3.6 GB, with the states
+  of all 600 new episodes; the manifest is made from the original and every file of the copy checks against it.
 
 **9. `CLAUDE.md`**: one line under the codec rule: `libsvtav1` is for the real arm's recordings; simulator datasets
 since v6 store H.264 through `sim/picture_store.py`.
@@ -1013,5 +1063,126 @@ since v6 store H.264 through `sim/picture_store.py`.
   scene and re-make the pictures from the saved states.
 - Sway of the cameras: a beam-formula estimate, not a measurement: about 22 Hz for the M12 rod on this boom, 25 Hz
   for M16 (the boom's twist sets the limit, so a thicker rod hardly helps).
+- ⚠️ Weak point: only 75 mm of the boom lies under the deck, because the cleat under the arm is in the way. Its three
+  screws sit close together and a knock on the rod levers on them. Notching the boom over the cleat gives more hold.
+- **⚠️ Noticed on the way: the crates.** No crate is drawn on the cart. The dataset's crate (world `crate23`) lies
+  133 to 363 mm to the arm's right, which on this cart is between the two arms. Placed like that, arm 1's crate is
+  at rig x 358-588, y 30-310 and arm 2's at x 312-542, y 90-370: they overlap by 185 mm along the cart, and each
+  reaches 51 mm past the deck's edge (deck y 81-319). Not solved here: it is a layout question for the rig.
 - ⚠️ Not done: the Onshape model and the cut plan (no CAD was changed), the camera clamps, a sweep of the recorded
   episodes against the boom (it is below the deck top, where the simulator has its table).
+- **⚠️ Run 2026-11-27 21:27-22:15, after the dataset run: the recorded motions do NOT stay clear of this rig's END
+  POSTS**, which stand 145 mm nearer the arm than the simulator's end frame. `whatif/camera_sweep_logs.py arm
+  --every 1` over the 800 old logged episodes (384,677 frames, 28 min) and, with the new `--sessions v6new`, over
+  the 600 new ones (282,625 frames, 20 min; that is the dataset's 282,025 plus one per episode). 16 upright lines
+  from the deck to 0.52 m: 2 for a control (the dataset's own camera post in both spellings), 9 on the row-B end
+  post's two faces that look at the arm (x 0.101-0.145, y 0.378-0.422), 5 on the row-A post (x 0.101-0.145,
+  y -0.022 to 0.022). The cart stands as drawn: centred, each arm 225 mm from its end frame.
+
+  | | old 800 | new 600 |
+  |---|---|---|
+  | control: nearest to the dataset's camera post | 4.4 cm (seed 10005040, frame 50), as in section 26 | 4.7 cm (seed 10100680, frame 416) |
+  | row B, nine lines together: a line through one of the arm's boxes | at least 50 episodes | at least 53 |
+  | row B: within 1 / 2 / 4 / 6 cm | 123 / 169 / 380 / 492 | 115 / 155 / 264 / 332 |
+  | row B, the corner line 0.145:0.378 alone: within 4 cm | 380 episodes, 8,259 frames | 264 episodes, 6,408 frames |
+  | row A: nearest | 7.9 cm (seed 10007066, frame 18) | 8.2 cm (seed 10100680, frame 530) |
+
+  - Where things are in simulator coordinates: the arm base at (0.37, 0.20), the row it faces at y 0.38-0.40, its
+    left is -x. The simulator's end frame is three 6 mm plates at x -0.006 to 0 (`ef0_post0..2`, y 0.4, 0 and -0.4
+    +/- 0.03, with collision), 370 mm left of the base; this rig's posts' inside faces are at x 0.145.
+  - Cause, from four of the nearest old episodes frame by frame (seeds 10012041, 10024034, 10019045, 10002053): the
+    start pose has the fixed finger's tip at (0.140, 0.196, 0.102): the hand points left, 230 mm from the base, and
+    is already 5 mm past the plane of the rig's end frame, in the opening between the two row posts (per
+    `pipe_rail_rig.fs` the end frame has only the posts between the floor tie and the string rails). The swing out
+    to the row and the swing home from the crate both pass the corner (0.145, 0.378): the tip goes through e.g.
+    (0.133, 0.337), (0.172, 0.398) on the way out and (0.151, 0.389), (0.154, 0.422) on the way home. The parts
+    nearest the line are the finray plates and the fixed pad, all box geoms.
+  - "At least": lines 11 mm apart, sampled every 10 mm of height, against plates a few mm thick; the -0.2 cm the
+    sweep prints is half a plate's thickness (`box_dist` is negative inside a box), not a depth into the post.
+  - So the longer house is needed for the motions, not only for the pictures: built as drawn the hand meets the row
+    post, and re-made pictures keep the same motions. Arm 2 is the half-turn image, so the same holds at the open
+    end. Written into the rig README ("Checked 2026-11-27"); the owner was told.
+  - Over all 1,400 episodes (`whatif/end_post_sketch.py`, which also draws
+    `hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png`): the fixed finger's tip at the first frame is at
+    x 0.133-0.146, y 0.183-0.209, z 0.081-0.133 (the start pose with its 3 degree change); it is past the frame's
+    inside face at some frame in every episode, the 124 nothing-ripe ones included, and reaches x 0.066 at most
+    (79 mm past the face, at y 0.248, z 0.262: through the opening). When, from six of the nearest episodes (old
+    10012041, 10024034, 10019045, 10002053; new 10102678, 10100955; one-off, the corner line, every frame): within
+    4 cm in frames 17-70 (the swing out) and 349-406 (the swing home), in 10012041 also 106-121 (at the cut: its
+    target hangs on the leftmost stem). The finray box geoms are 1.2 to 4 mm thick.
+  - **The plants and the cut truss** (`plants --n 0 --every 3`, 16 lines, old in two halves 21:27-22:25, new with
+    `--sessions v6new` 22:06-22:43; no scene skipped). Control: 1.7 cm for the old (seed 10023057, frame 207), as in
+    section 26. Row B, nine lines together: within 4 cm in 207 of 735 old and 158 of 540 new cut episodes, within
+    2 cm in 67 / 58, a ball on a line in 34 / 37, nearest -1.3 / -1.4 cm (a fruit's ball has a 10-15 mm radius).
+    Row A: within 4 cm in 8 / 11, on a line in 4 / 2.
+  - ⚠️ What that is: NOT mostly trusses hanging there. One-off lookup of the nearest part at the named frame in
+    eight episodes (row B: 10022070, 10004032, 10102048; row A: 10102852, 10021000, 10000046; the dataset's camera
+    post: 10100475, 10100422): each time a fruit of the TARGET truss, which at the first frame was 19 to 41 cm from
+    that line.
+    Frame by frame in 10100475, 10102852, 10021000: after the cut the hand does not go right. It pulls the truss to
+    the arm's left (tip to x 0.08, 29 cm left of the base, z 0.28-0.30), then lifts to z 0.45-0.49 and passes over
+    the arm's own base to the crate. The truss dangles below and outward on the way (a fruit at x 0.02-0.07).
+  - The string rails of the rig (underside 0.52 m above the arm base, along both row lines): one-off look over all
+    1,400 episodes with the arm's parts as bounding boxes: the highest top under the row-B rail is z 0.478 (seed
+    10023024, frame 447), under the row-A rail 0.451: at least 42 and 69 mm of air. The highest anywhere is 0.527,
+    over the arm's own base (seed 10100172), where the rig has nothing.
+  - **How much of that is a truss hanging there before anything moves:** `plants --n 0 --every 100000` (the first
+    frame only, the same 16 lines; old 22:27-23:05, new 23:05-23:29). Within 4 cm of a row-B line at the first
+    frame in 94 old / 65 new episodes (nearest 2.3 / 2.5 cm, no ball on a line); none at row A (nearest 12.0 /
+    13.3 cm) and none at the dataset's camera post (8.9 / 8.2 cm). So a part gets within 4 cm only during the
+    episode in 113 old / 93 new, and every ball on a line (34 / 37) comes from motion.
+  - The old `plants` runs measure 735 scenes, not 736: seed 10014003 (v5 episode 353) does not rebuild as recorded
+    and is skipped, the same episode v6 lacks (section 26). In the arm sweep it is 4.2 cm from the corner line, so
+    the arm's 50 / 123 / 169 / 380 also hold for v6's 799 re-made episodes (492 within 6 cm becomes 491).
+  - **The longer house** (way 2, inside face of the row post 375 mm from the arm): `arm --every 1
+    --cams=g_0.02_0.30_0.42,-0.005:0.378:0.52,...` with nine lines at x -0.005 to -0.049, y 0.378-0.422 (old
+    22:42-23:02, new 23:02-23:16). Nearest 10.0 cm old (seed 10005040, frame 59) and 9.4 cm new (seed 10100680,
+    frame 407); no episode within 6 cm of any line; the control gives 4.4 / 4.7 cm again. That post's inside face
+    lies 5 mm behind the front of the simulator's end-frame plate `ef0_post0` (`scene.greenhouse_xml`: x -0.006 to
+    0, y 0.37-0.43, to z 0.59, a solid in every recording), which is 60 mm wide against the post's 44.
+  - **The longer house, the rest** (queue `endpostw2p`, 2026-11-27 23:36 to 2026-11-28 00:27, job file
+    `outputs/v6/jobs_endpostw2p.txt`): `plants --n 0 --every 3` on those nine row-B lines plus five on that
+    house's row-A post (x -0.005 to -0.049, y -0.022 to 0.022), and `arm --every 1` on the five row-A lines.
+    Controls as before: plants 10 episodes / 1.7 cm old and 15 / -0.9 cm new, arm 4.4 / 4.7 cm; seed 10014003
+    skipped again. Arm to the row-A post: 16.8 cm old (seed 10003042, frame 21), 16.7 cm new (seed 10101695,
+    frame 32). Plants at the sampled frames: row B 7.6 cm old / 5.4 cm new, row A 4.8 / 7.3 cm; no episode within
+    4 cm of any line.
+  - ⚠️ `--every 3` does not see the nearest frame: a carried truss moves up to 3.9 cm in a frame (seed 10100475,
+    1.16 m/s). So the 36 episodes that came within 10 cm of a longer-house line at the sampled frames (19 old, 17
+    new) were run again at every frame (one-off driver around `plants`, log
+    `outputs/v6/endpost/w2_every_frame.log`): row B 7.3 cm old (seed 10019023, frame 281) / 4.6 cm new (seed
+    10100475, frame 311: the swing that ends on the camera post), row A 4.8 cm old (seed 10021002, frame 296) /
+    7.2 cm new (seed 10101033, frame 340). None within 4 cm. The largest change against a sampled value is
+    1.0 cm. On both posts the lines along the side face (x -0.016 to -0.049) come out farther than the corner
+    line, so no part went round behind the plate. The other 1,239 cut episodes are beyond 10 cm at the sampled
+    frames.
+  - ⚠️ For the same reason the as-drawn `plants` counts above (207 / 158 within 4 cm, 34 / 37 on a line) are
+    floors: they are from every third frame.
+- **⚠️ New, from the control line of the same runs: in the NEW episodes the cut truss comes nearer the dataset's own
+  camera post than in the old ones.** Section 26 checked the 800 old episodes only. Arm: never nearer than 4.7 cm.
+  Plants: within 4 cm of the line under the lenses in 15 of the 540 new cut episodes (old: 10 of 735), within 2 cm
+  in 4, and in one a fruit's ball lies on that line (seed 10100475, frame 315: fruit s2t1_t4 at (0.025, 0.299,
+  0.122), carried by the left).
+  - `camera_sweep_logs.py touch --sessions v6new --from new_arm_eps.json new_plants_eps_0.json
+    new_plants_eps_1.json --cams g_0.02_0.30_0.42` (23:00-23:06): the 36 new episodes within 6 cm of that line,
+    replayed in the recorder's own model. 35 touch nothing. **One does: seed 10100475**: the fruit s2t1_t4 and
+    s2t1_t5 are in contact with the high camera's post in 4 frames (313, 314, 315, 317), 6.0 mm deep at most.
+  - ⚠️ **Corrected 2026-11-27 23:47: that is a real knock, not a pass through something that was not there.** This
+    bullet (and both READMEs) first said the post was drawn in the new episodes but was not a solid when they
+    were recorded. Wrong. With `--rig trio --layout-rig base` the scene is DECIDED with the old bracket (which
+    plants, which truss is ripe); then `truss_scene._build_once` composes the model again with rig trio's
+    brackets, as ordinary solids, and without the old one. Checked on that seed's model built as the recorder
+    builds it (`ts.build(seed, mounts=RIG_FIXED["base"], show_mounts=RIG_FIXED["trio"], jaw="v5")`, the call in
+    `so101_mujoco._build`): `high_cam_post`, `low_cam_post` and both housings have contype 1 and conaffinity 1,
+    and no `base_cam_*` geom is in it. The logged motion says the same: the two fruit come at the post at
+    1.1 m/s (frames 310-311), are down to 0.1-0.3 m/s at its surface in frame 313 (6.0 mm into it in that one
+    frame, which is what a contact with solref 0.02 gives at that speed), stay against it to frame 317 and slip
+    past. The cut was at frame 181; this is the carry, 4.4 s later. (One-off script, not in the repo.)
+  - So: the 799 re-made episodes were recorded with the old bracket and have the new ones drawn afterwards
+    (nothing touches the new ones in the 32 nearest, and 3 graze the old one that is no longer drawn: section
+    26). The 600 new ones were recorded with the new ones, solid, and without the old one.
+  - That is part `v6_new_p06` episode 4 = **episode 953 of the merged dataset** (found by its joint readings, equal
+    bit for bit; 505 frames). Its pictures around frames 300-331, looked at once: the truss swings past the low
+    camera at close range and leaves its view, and the claw camera sees the post beside the truss.
+  - One rough carry in 1,399 episodes, and its pictures and physics agree. Left in the dataset; taking it out is
+    the owner's call. Written into `sim/README.md` ("Dataset v6", state) and the rig README's camera-post section.

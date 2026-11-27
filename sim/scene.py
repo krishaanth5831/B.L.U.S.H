@@ -217,8 +217,10 @@ BASE_POST_R = 0.008                  # bracket post from the table to the camera
 #   life too. Neither bracket shows in the other's picture (checked on the re-make's first pictures, section 26).
 # ⚠️ Real cart: an upright on an outrigger batten that reaches 21 cm past the deck's left end (the deck ends 14 cm
 #   from the arm base). On the plank rig as designed (hardware/greenhouse/pipe_rail_rig/README.md: end frames about
-#   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame, and arm B needs the mirror image at the other end.
-#   Nothing built, nothing checked on hardware.
+#   225 mm from the arm) that is 12.5 cm OUTSIDE the end frame. Arm B's post is this one turned HALF A TURN about
+#   the middle of the house, not a mirror image (the arms face opposite rows; a mirrored post would stand on arm
+#   B's right and flip its pictures). Worked out and drawn in hardware/greenhouse/pipe_rail_rig/
+#   cart_camera_post.py (2026-11-27). Nothing built, nothing checked on hardware.
 # ⚠️ Height of "high": 0.42 (K7 2026-11-26, shown 0.34 beside it: "stick with 42"). It stands above the truss band
 #   (cut points 0.13-0.31 m), where a real crop has leaves (the plank rig has none). At 0.34 on the same post the
 #   pair still sees stalk and blade before the cut in 95 % (99 % here) and at the cut in 91 % (95 %). Moving the

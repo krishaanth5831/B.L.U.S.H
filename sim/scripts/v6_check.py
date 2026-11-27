@@ -10,7 +10,10 @@ exit 0 whatever the part did, and a part that stopped early is still finalized a
         --out ../outputs/videos/review_<name>                                         # five videos for K7's look
 
 (from sim/, env lerobot-mj4; reads only, apart from the sheets and videos it is asked for. The prefixes are
-merge_parts.py's. First run 2026-11-27 on dataset v6's trial: both parts and the merge pass, notes section 28.)
+merge_parts.py's. First run 2026-11-27 on dataset v6's trial: both parts and the merge pass, notes section 28.
+The whole dataset the same evening: all 57 parts and the merge pass.)
+⚠️ `videos` calls ffmpeg: activate the env first. The env's python called by its path alone does not find it
+(FileNotFoundError: 'ffmpeg', 2026-11-27).
 
 parts, per part (its kind comes from its attempt log in ~/.cache/blush_sim/truss: re-made or recorded):
   storage   the three cameras of rig trio, stored with picture_store's setting (encoder_of = encoder()), the gate

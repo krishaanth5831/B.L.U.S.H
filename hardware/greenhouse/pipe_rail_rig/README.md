@@ -27,6 +27,12 @@ These are design choices, not yet checked for sim2real:
 - The stems sit 30 mm off the row line.
 - ⚠️ With the end frames 225 mm from the arm, dataset v6's camera post stands outside them and looks in through
   them (see "Camera post for dataset v6").
+- ⚠️ With the end frames 225 mm from the arm, the row post stands in the way of the arm's recorded motions: the
+  hand's swing and the cut truss pass through its place (see "Checked 2026-11-27" below). The simulator's 370 mm
+  leaves that room.
+- ⚠️ No crate is drawn on the cart. In the dataset the crate lies 13 to 36 cm to the arm's right, which here is
+  between the two arms: placed like that, the two arms' crates overlap by 185 mm along the cart, and each reaches
+  51 mm past the deck's edge (`cart_camera_post.py` prints the numbers).
 
 ## Camera post for dataset v6 (rig `trio`): a proposal, not built
 
@@ -46,8 +52,16 @@ the deck top):
 | low | 350 mm | 100 mm | 50 mm | 12.3° | 32.7° up |
 
 By ruler from the pan axis (the upright axis the whole arm turns about): 350 mm to the left, 61 mm toward the row.
-The simulator's post is a 16 mm rod standing 18 mm behind the lenses; the arm and the carried truss were checked
-against that rod in all 800 recorded episodes, so the real upright must not be thicker than it.
+The simulator's post is a 16 mm rod standing 18 mm behind the lenses. In dataset v5's 800 recorded episodes the arm
+came no nearer than 44 mm to the line under the lens and a carried truss no nearer than 17 mm; with that rod and the
+camera housings in the model, nothing touched them in the 32 episodes that came within 6 cm
+(`own_sim_measurements.md` section 26). So the real upright must not be thicker than 16 mm or stand nearer the arm.
+⚠️ In the 600 new episodes the arm stays 47 mm away, but the cut truss comes nearer than in the old ones: within
+40 mm of the line in 15 of the 540 cut episodes (old: 10 of 735), and in one (dataset episode 953) the carried
+truss is swept against the rod: two fruit meet it at about 1 m/s, are held up on it for four frames and slip past.
+In the new recordings the rod stood as a solid (in the old ones the old bracket did), so that is a real knock
+(section 29). On the real cart a carried truss can therefore knock the rod: over old and new together it passes
+within 40 mm of the line in 25 of 1,275 cuts (1 in 50), and in one of the 1,275 it hit.
 
 **On this rig** that puts the rod at x −143, y 296 for arm 1 (the lenses at x −125, y 300, z 184 and 554): 143 mm
 outside the closed end frame's inside face. Arm 2 is arm 1 turned half a turn, so its post is the same assembly
@@ -58,12 +72,15 @@ turned half a turn about the middle of the house: x 1043, y 104, outside the ope
 - **Boom**: one more 350 mm length of the 44 x 44 batten per arm, screwed under the deck's end with its top against
   the deck's underside. It lies between the wheel brackets, turned 14° from the aisle line, and reaches 267 mm past
   the deck's end. Three screws from above through deck strip D-2, heads flush, shorter than the 62 mm stack.
+  ⚠️ Only 75 mm of it lies under the deck, because the cleat under the arm is in the way: the three screws sit
+  close together, and a knock on the rod levers on them. Notching the boom over the cleat would give it more hold.
 - **Upright**: an M12 threaded rod, 500 mm (one 1 m rod cut in half does both arms), through the boom's outer end.
   One nut and washer on top of the boom, one sunk into its underside so nothing hangs below it.
 - **Cameras**: each on a clamp between two nuts, so the height is set by turning nuts. No clamp is drawn yet; a
   printed one takes a 12.6 mm hole (0.3 mm per side).
-- ⚠️ Everything except the rod and the two cameras stays at or below the deck top: the arm folds out over that
-  corner of the deck, low, on its way to a truss.
+- ⚠️ Everything except the rod and the two cameras stays at or below the deck top (the simulator's table is at
+  that height, so nothing in the dataset ever goes below it). Above it the arm swings out to that side: every
+  camera spot nearer the arm was in its way in the recorded episodes.
 - With both posts on, the cart sticks out about 14 cm past each end of the house; the booms unscrew for transport.
 - If the two birdseye masts are left out (dataset v6 does not use that camera), their poles B4-5 and B4-6 are long
   enough for the two booms. Check first whether another module still needs the birdseye camera.
@@ -91,6 +108,105 @@ The place where the trusses hang is not hidden. Three ways to deal with it, K7's
    and a new cut plan; the rig becomes 1.29 m long.
 3. **Put this rig's end frame in the simulator** and re-make the dataset's pictures from the saved states
    (`sim/remake_pictures.py`), then train on those. The rig's layout is not in the simulator yet.
+
+**⚠️ Checked 2026-11-27: as drawn, the arm's recorded motions do not clear the end frame's row post.**
+This rig's end frames stand 145 mm nearer the arm than the simulator's, so every logged episode of dataset v6 (the
+800 old ones and the 600 new ones, every frame) was run against the place of the end posts, with the cart where it
+is drawn (centred, each arm 225 mm from its end frame). Nine upright lines stand in for the row-B post, on its two
+faces that look at arm 1 (simulator x 0.101-0.145, y 0.378-0.422, deck top to 520 mm up), and five for the row-A
+post:
+
+| | old 800 | new 600 |
+|---|---|---|
+| a row-B line runs through a collision box of the gripper (a finger or the pad) | at least 50 | at least 53 |
+| arm within 10 mm of a row-B line | 123 | 115 |
+| arm within 40 mm of a row-B line | 380 | 264 |
+| nearest the arm comes to a row-A line | 79 mm | 82 mm |
+
+![the hand's paths and the end post, seen from above](renders/end_post_check.png)
+
+- **Why.** At its start pose the hand points to the arm's left: the fixed finger's tip is about 230 mm left of the
+  base, which is right at the end frame's inside face (from 1 mm short of it to 12 mm past it over the 1,400
+  episodes), in the opening between the two row posts (between the floor tie and the string rails the end frame is
+  only those two posts). From there the hand swings forward to the row, and after the crate it swings home the same
+  way round. Both swings pass the place of the row-B post: in six of the nearest episodes, looked at frame by frame,
+  the arm is within 40 mm of the post's corner line in frames 17-70 (the swing out) and 349-406 (the swing home).
+  In every one of the 1,400 episodes the tip is past the inside face at some frame, at most 79 mm past it
+  (`sim/whatif/end_post_sketch.py` draws the picture and prints these numbers).
+- **"At least".** The lines are 11 mm apart and are sampled every 10 mm of height, and the finger plates are 1 to
+  4 mm thick, so a finger can pass between the samples uncounted. The -2 mm the sweep prints as its nearest value is
+  half a plate's thickness, not how far the hand goes into the post. The 10 mm and 40 mm rows are the sturdier
+  numbers. The simulator's fingers are boxes, simpler than the printed fingers.
+- **The cut truss passes there too.** The same lines against the plants (`plants --n 0 --every 3`: stems, every
+  truss and its fruit, the cut truss while it is carried, each part as balls; every third frame, so the counts
+  are floors): a plant part comes within 40 mm of a row-B line in 207 of the 735 old cut episodes and 158 of the
+  540 new ones. In 94 and 65 of those a truss already hangs that close at the first frame, before anything moves
+  (the same sweep with `--every 100000`; 23 mm from a line at the nearest): that is where plants hang in those
+  scenes, not motion. In the other 113 and 93 a part gets that close only during the episode, and only then does
+  a fruit lie on a line (34 and 37 episodes). In the six episodes looked up (three at each post) it was each time
+  a fruit of the CUT truss, which at the first frame was 20 to 37 cm away from that line. In these episodes the
+  carry first pulls the truss to the arm's left (the hand 290 mm left of the base in the three printed frame by
+  frame), then lifts it over the arm's own base to the crate, and the truss dangles out to the left on the way.
+  Row A: within 40 mm in 8 old and 11 new episodes, none at the first frame: the truss hanging behind the arm
+  during that lift.
+- **What it means for the three ways above.** Built as drawn (1), a policy that moves as the dataset does knocks its
+  hand against the row post in a share of its picks, passes within 40 mm of it in nearly half, and swings the cut
+  truss past it as well. Re-made pictures (3) keep the same motions, so they do not change this. The longer house
+  (2) puts the row posts where the simulator has its end frame: each post's inside face is then 5 mm behind the
+  front of the simulator's end-frame plate (60 mm wide, the post 44), which was a solid in every recording.
+- **The longer house, measured.** The same sweeps on that house's two posts (inside face 375 mm from the arm; nine
+  lines on the row-B post, five on the row-A post). Nearest, in mm:
+
+  | | old | new |
+  |---|---|---|
+  | arm to the row-B post | 100 | 94 |
+  | arm to the row-A post | 168 | 167 |
+  | a plant part, the cut truss included, to the row-B post | 73 | 46 |
+  | a plant part to the row-A post | 48 | 72 |
+
+  Nothing comes within 40 mm of either post: the arm in all 1,400 episodes, the plants in the 1,275 cut episodes
+  (in the 124 nothing-ripe ones nothing is cut or carried). The lines along each post's side come out farther than
+  the line on its corner, so nothing went round behind the simulator's plate. The arm was measured at every frame.
+  The plants were measured at every third frame (76 / 54 / 48 / 73 mm, what the commands below print), and the 36
+  episodes that came within 100 mm then at every frame (the table's numbers). The others stay beyond 100 mm at the
+  sampled frames: to get within 40 mm between two samples a fruit would have to move 60 mm in a frame, and the
+  fastest seen (episode 953) is 39 mm.
+- Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
+- Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
+  leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.
+
+```bash
+# from sim/, env lerobot-mj4; these HAVE run (2026-11-27, 28 and 20 min). The first two lines are a control: the
+# dataset's own camera post, which gives the 44 mm it gave before (47 mm for the new episodes).
+L=g_0.02_0.30_0.42,0.02:0.30:0.42,0.145:0.378:0.52,0.145:0.389:0.52,0.145:0.400:0.52,0.145:0.411:0.52,0.145:0.422:0.52
+L=$L,0.134:0.378:0.52,0.123:0.378:0.52,0.112:0.378:0.52,0.101:0.378:0.52
+L=$L,0.145:0.022:0.52,0.145:0.000:0.52,0.145:-0.022:0.52,0.123:0.022:0.52,0.101:0.022:0.52
+O=../outputs/v6/endpost
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/arm_eps.json                 # old 800
+python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/new_arm_eps.json --sessions v6new
+python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png   # the picture
+# plants, and the cut truss: "--shard 0/2" and "1/2" ran side by side; "--every 100000" = the first frame only.
+# Every run also got --json and --episodes-json files in $O (the totals over several lines are tallied from them).
+python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams $L                    # + --sessions v6new
+python whatif/camera_sweep_logs.py plants --n 0 --every 100000 --cams $L               # + --sessions v6new
+# the end posts of a house 300 mm longer (ran 2026-11-27 22:42 to 2026-11-28 00:27): nine lines on its row-B post
+# (W), five on its row-A post (A), and the control line again (C)
+W=-0.005:0.378:0.52,-0.005:0.389:0.52,-0.005:0.400:0.52,-0.005:0.411:0.52,-0.005:0.422:0.52
+W=$W,-0.016:0.378:0.52,-0.027:0.378:0.52,-0.038:0.378:0.52,-0.049:0.378:0.52
+A=-0.005:0.022:0.52,-0.005:0.000:0.52,-0.005:-0.022:0.52,-0.027:0.022:0.52,-0.049:0.022:0.52
+C=g_0.02_0.30_0.42
+python whatif/camera_sweep_logs.py arm --every 1 --cams=$C,$W                          # + --sessions v6new
+python whatif/camera_sweep_logs.py arm --every 1 --cams=$C,$A                          # + --sessions v6new
+python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams=$C,$W,$A              # + --sessions v6new
+```
+
+**Looked at once, not a repo command:** the string rails (underside 520 mm above the arm base, along both row
+lines). Over all 1,400 episodes, with the arm's parts as bounding boxes, the highest top under the row-B rail is
+478 mm and under the row-A rail 451 mm: at least 42 and 69 mm of air. The cut truss hangs below the hand.
+Also one-offs: the every-frame run of the 36 nearest episodes against the longer house's posts (a small driver
+around `plants --every 1`; its output is `outputs/v6/endpost/w2_every_frame.log`), and every count above that takes
+several lines together (50 / 53, 123 / 115, 380 / 264, 207 / 158, 94 / 65): the commands print one count per line,
+the totals are tallied from their `--json` and `--episodes-json` files.
 
 **Not checked:**
 - How much the cameras shake. A beam-formula estimate gives a first sway near 22 Hz for the M12 rod on this boom; an

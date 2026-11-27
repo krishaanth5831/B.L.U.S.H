@@ -256,6 +256,10 @@ def build(seed=0, arm=True, hold=False, base_mount=False, jaw="v5", mounts=None,
     show_mounts: brackets to SHOW instead, after the scene was decided with `mounts` (re-making an old dataset's
         pictures with other cameras: the plants and the ripe truss must stay the recorded ones). Same joints, same
         state; only the scenery's brackets differ.
+        ⚠️ "Show" is not "draw only": the returned model holds THESE brackets, as solids like any other, and no
+        longer the `mounts` ones. So a recording made with it (dataset v6's 600 new episodes, every policy test
+        with --layout-rig) has the shown brackets in its physics; only a re-make of logged states has them as
+        pictures alone. Misread once, 2026-11-27: own_sim_measurements.md section 29.
     jaw: the arm's cut-and-hold jaw, "v5" or "v6" (scene.JAWS; K7 2026-11-24)."""
     global JAW
     JAW = jaw
