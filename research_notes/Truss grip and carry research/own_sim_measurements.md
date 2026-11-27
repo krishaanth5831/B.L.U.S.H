@@ -982,15 +982,18 @@ the cap makes the kernel drop them (a guess, not measured; the trial's merge of 
   cell holds exactly the number of new episodes the plan asked for, and 60 are nothing-ripe. (The plan had
   expected 536 of the 540 cut episodes from its lists; they gave 535.)
 - Where the cut point hangs, old + new together (4 parts along the row x 3 heights): 106 or 107 episodes in each
-  of the 12 cells, against 35 to 87 in v5 alone (by the plan's count of v5's cut points, 734 of the 735 re-made cut
-  episodes). The new 540 cut episodes: 20, 50, 39, 61 (low), 46, 58, 55, 38 (middle), 24, 36, 71, 42 (high), each
-  row from the arm's left to its right.
+  of the 12 cells, against 35 to 87 in v5 alone. That is by the plan's count, which has 734 of v5's cut points; the
+  re-made set has 735 cut episodes (799 less 64 nothing-ripe), so one cell holds one more than counted (which one
+  was not looked up). The new 540 cut episodes: 20, 50, 39, 61 (low), 46, 58, 55, 38 (middle), 24, 36, 71, 42
+  (high), each row from the arm's left to its right.
 - Merge: 1,399 episodes and 665,314 frames, the parts' sums; every part's joint readings, commands and cue numbers
   stand at their place in the merge bit for bit.
 - Five review videos (`v6_check.py videos`, `outputs/videos/review_blush_sim_teacher_v6/`, one look only: a re-made
   cut, a short and the longest new clean cut, a new noisy cut, a new nothing-ripe scene). Four frames of each
   looked at: the box and the cross are on `high` and `low`, the claw camera shows the stalk between the jaws, the
-  cut truss ends in the crate, the nothing-ripe scene has no box and the arm stays home.
+  cut truss ends in the crate, the nothing-ripe scene has no box and the arm stays home. In the noisy clip (seed
+  10102775) three red fruit stay in the box after the cut: they are the neighbour s3t0, an "almost ready" truss
+  (3 ripe, 2 turning, 1 green) that the harvest rule leaves; the target s2t1 (6 ripe) is the one in the crate.
 
 **Time: the estimate was too low.** 7 to 8 hours were estimated; it took 12 (09:52-21:51).
 - The re-make went as estimated (2 h 23 min). The recording took 20.0 hours of worker time against 13.2
