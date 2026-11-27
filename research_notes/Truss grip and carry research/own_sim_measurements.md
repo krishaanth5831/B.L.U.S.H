@@ -509,7 +509,8 @@ aimed at (0.34, 0.37, 0.26). High is first in the rig, so the six cue numbers ar
   logging on.
 - ⚠️ Real cart: an upright on an outrigger batten reaching 21 cm past the deck's left end. On the plank rig as
   designed the end frames stand about 225 mm from the arm, so this upright is 12.5 cm outside the end frame, and
-  arm B needs the mirror image at the other end. Nothing is built.
+  arm B needs the same post turned half a turn at the other end (first written here as "the mirror image", which
+  is wrong: section 29). Nothing is built.
 - ⚠️ In the simulated house the post and the housings' backs reach 3-6 mm into the end frame's ply (x <= 0), behind
   both lenses; and high's post runs through low's housing (one post).
 - Files: `outputs/v6/cams/v5_*.npz` (the scores), `rank_v5_sweep.txt` / `rank_v5_sweep_z50.txt` (lens up to 0.34 /
@@ -853,8 +854,11 @@ open; 5 is in the trial's recorded part because it is in the documented command.
    form); an upload anywhere needs the owner's word.
 9. `CLAUDE.md` says "video codec libsvtav1": true for the real rig's recordings, while the simulator's datasets now
    store H.264 by the picture rule. One line there would say so.
-10. The real cart: the camera upright stands 12.5 cm outside the plank rig's end frame, and arm B needs the mirror
-    image (section 24). Nothing is built or drawn.
+10. The real cart: the camera upright stands 12.5 cm outside the plank rig's end frame, and arm B needs the same
+    post turned half a turn, not a mirror image (section 24). Nothing is built or drawn.
+
+Owner, 2026-11-27 midday, shown 7 to 10 as "four smaller things": "finish the four smaller things also". What
+was done for each: section 29. 4 to 6 stay as they are in the run (old start, 3 deg start change, the cue's form).
 
 ## 28. The trial: one re-made part, one recorded part, one merge (2026-11-27 morning, after the owner's go)
 
@@ -957,3 +961,57 @@ ends, a recording worker (`_n0`, `_n1`, `_n2`: parts 1-23). Worker logs:
   `v6_check.py merged` (the gate should read 8,394 frames for 1,399 episodes) and `videos`, the report.
 - Not covered by the go: any upload, any training, deleting the parts or the trial merge.
 
+
+## 29. The four smaller decisions, done (owner, 2026-11-27 midday: "finish the four smaller things also")
+
+Decisions 7 to 10 of section 27. Done while the full run was going, so nothing the run's workers load was touched
+(`scene.py`, `cameras.py`, `lens.py`, `picture_store.py`, the `truss_*` modules, the worker scripts), and no fourth
+simulator job was started.
+
+**7. The two guards are the standard for policy tests.** `colab_tests.sh`, `test_all_checkpoints.sh` and
+`train_and_test.sh` pass `--start-guard --clip-actions` unless `GUARDS=""` is set. `eval_truss.py`'s own defaults
+stay off, so an old checkpoint re-run by hand still compares with the earlier tables. `checkpoint_table.py` has a
+"Guards" column, and a step tested with and without them gets a row for each.
+- Checked: the three scripts against a stand-in launcher that only prints (the flags appear, and vanish with
+  `GUARDS=""`); the table script on `act_teacher_v5b64`'s existing logs (53 lines, the same apart from the new
+  column, which reads "none") and on made-up logs with and without guards.
+- ⚠️ Not run: a real checkpoint through the scripts with the guards. The one real run of the guards is section 23's
+  by hand. With the start guard on, the "holds left alone" column is the guard's result in the scenes it fired in,
+  not the policy's: the column says how many.
+
+**8. A second copy of the saved states**: `~/datasets/blush_sim_states`, 3.0 GB, 2,570 files, made 2026-11-27 11:41
+with `rsync -a` from `~/.cache/blush_sim/states`; every file's SHA-256 equals the original's (`MANIFEST.sha256` in
+the folder: `cd ~/datasets/blush_sim_states && sha256sum -c --quiet MANIFEST.sha256`).
+- ⚠️ Same disk: it covers a wiped cache folder, not a dead drive. Nothing was uploaded; a copy off the laptop needs
+  the owner's word.
+- ⚠️ It holds the states up to the trial's recorded part. The run's 23 further recorded parts write new state
+  folders, so the copy is brought up to date after the queue has ended.
+
+**9. `CLAUDE.md`**: one line under the codec rule: `libsvtav1` is for the real arm's recordings; simulator datasets
+since v6 store H.264 through `sim/picture_store.py`.
+
+**10. The camera post on the real cart**: worked out and drawn for the plank rig, not built
+(`hardware/greenhouse/pipe_rail_rig/cart_camera_post.py`, its README section, `renders/cart_camera_post.png`).
+- The lens points are the dataset's: 350 mm to the arm's left, 100 mm toward the row, 420 and 50 mm above the deck
+  top (by ruler from the pan axis: 350 mm left, 61 mm toward the row). The rod stands at rig x -143, y 296 for arm 1.
+- **Arm 2 is not a mirror image.** `armYaw = [90, -90]` in `pipe_rail_rig.fs`: arm 2 is arm 1 turned half a turn, so
+  its post is arm 1's turned half a turn about the middle of the house (x 1043, y 104). A mirrored post would stand
+  on arm 2's right and flip its pictures. Sections 24 and 27 said "mirror image"; corrected there. ⚠️ `scene.py`'s
+  comment above `CART_CAMS` still says it: to be corrected once the run's workers have ended.
+- Carried by a 350 mm boom of the 44 x 44 batten under the deck's end, turned 14 deg to pass between the wheel
+  brackets, and a 500 mm M12 threaded rod through its outer end. M12 is thinner than the simulator's 16 mm post, so
+  the sweeps of section 26 still hold. Everything else stays at or below the deck top. 15 clearances computed from
+  the `.fs` dimensions; the tightest are 2 mm (boom end to the cleat under the arm), 9 mm (boom over the rail tubes)
+  and 18 mm (rod past the printed fruit when the cart rolls).
+- **⚠️ New finding: the rig's end frame is in the pictures.** In the simulator the end frame is 370 mm from the arm,
+  behind the cameras. On the plank rig it is 225 mm away, so the post looks in through it: the end frame's row post
+  covers 25 % of the high camera's picture and 24 % of the low one's (the left side; rig boxes projected through the
+  simulator's lens model). The band where the trusses hang is clear of it (columns 260-369 and 241-354 of 640,
+  against 0-235 and 0-221 for the frame).
+- Three ways, the owner's call: build as drawn and see; a house 300 mm longer (end frames 375 mm from each arm,
+  "Inside length" 1200: at least one more batten and a new cut plan); or put the rig's end frame into the simulated
+  scene and re-make the pictures from the saved states.
+- Sway of the cameras: a beam-formula estimate, not a measurement: about 22 Hz for the M12 rod on this boom, 25 Hz
+  for M16 (the boom's twist sets the limit, so a thicker rod hardly helps).
+- ⚠️ Not done: the Onshape model and the cut plan (no CAD was changed), the camera clamps, a sweep of the recorded
+  episodes against the boom (it is below the deck top, where the simulator has its table).
