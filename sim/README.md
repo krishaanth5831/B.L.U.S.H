@@ -254,17 +254,17 @@ python view_scene.py --cams --rig trio --world crate23 --layout-rig base --seed 
 # read-only rehearsals (these HAVE run): the re-make's path on old episodes, the recorder's on a seed plan
 python remake_pictures.py dry --shots ../outputs/v6/remake_dry/shots
 python generate_truss.py --teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 \
-    --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds ../outputs/v6/seed_plan_v6/p00.jsonl \
+    --start-jitter-deg 3 --noise-share 0.5 --retries 6 --seeds seed_plan_v6/p00.jsonl \
     --seed-start 10100000 --episodes 25 --dry --repo-id krish5831/v6_dry
 # after K7's go (from the repo root; <name> = K7's choice, never blush_sim_teacher_v5). First one part of each:
 sim/scripts/remake_parts.sh krish5831/<name>_old 0 1 1
 GEN_ARGS="--teacher --no-dr --no-yolo --rig trio --layout-rig base --world crate23 --start-jitter-deg 3 \
-    --noise-share 0.5 --retries 6" SEEDS_DIR=outputs/v6/seed_plan_v6 \
+    --noise-share 0.5 --retries 6" SEEDS_DIR=sim/seed_plan_v6 \
     sim/scripts/record_parts.sh krish5831/<name>_new 10100000 0 1 1
 python sim/merge_parts.py krish5831/<name>_trial krish5831/<name>_old krish5831/<name>_new   # merges + runs the gate
 # then the rest, three workers each (remake: parts 0-31, record: parts 0-23), and the real merge
 for w in 0 1 2; do nohup sim/scripts/remake_parts.sh krish5831/<name>_old $w 3 32 & done
-for w in 0 1 2; do GEN_ARGS="..." SEEDS_DIR=outputs/v6/seed_plan_v6 \
+for w in 0 1 2; do GEN_ARGS="..." SEEDS_DIR=sim/seed_plan_v6 \
     nohup sim/scripts/record_parts.sh krish5831/<name>_new 10100000 $w 3 24 & done
 python sim/merge_parts.py krish5831/<name> krish5831/<name>_old krish5831/<name>_new
 ```
