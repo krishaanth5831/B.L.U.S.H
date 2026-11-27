@@ -666,7 +666,8 @@ Nothing here was recorded: the numbers come from dataset v5's own recording logs
 by its row-part balance before the teacher ran, 64 were nothing-ripe episodes (all 64 kept), 3 had no target, and
 of the 1,044 cut scenes the teacher tried it kept 736 = 70 %. Per cell (4 parts along the row x 3 heights,
 `generate_truss.cell_of`; a kept scene's cell from its cut point, a refused scene's from its logged row position
-and cue pixel against the kept ones, which gets 96 % of the kept ones right):
+and cue pixel against the kept ones, which gets 96 % of the kept ones right; 734 of the 736 kept scenes are in
+the table, the camera scorer's files lack two):
 
 | Height \ row part | x0 (0.20-0.27 m) | x1 (0.27-0.34) | x2 (0.34-0.41) | x3 (0.41-0.48) |
 |---|---|---|---|---|
@@ -681,10 +682,11 @@ and cue pixel against the kept ones, which gets 96 % of the kept ones right):
   give at these keep rates, and `--topup` plans the missing ones as one more part from seeds not yet listed (it
   writes `plan_topup_pNN.json`, never over the plan; tried on the toy plan: 7 kept of 14 planned -> 7 more planned).
 
-**Time.** v5's 800 episodes took 1,548 worker-minutes = 1.93 minutes per kept episode (parts of 25: median 45
-minutes, 17 to 81), 7.4 h on three workers. 600 episodes at that rate are about 19 worker-hours, so 6 to 7 hours on
-three workers; the third camera adds rendering and writing, the missing balance step saves scenes (v5 built 625
-scenes only to turn them away; the seed plan skips a full cell's seeds without building them). The re-make of the
+**Time.** v5's 800 episodes took 1,548 worker-minutes by the parts' own logs = 1.93 minutes per kept episode
+(parts of 25: median 45 minutes, 17 to 81; `record_parts.sh`'s header says 7.4 h by the clock). 600 episodes at
+that rate are about 19 worker-hours, so 6 to 7 hours on three workers; the third camera adds rendering and
+writing, the missing balance step saves scenes (v5 built 625 scenes only to turn them away; the seed plan skips a
+full cell's seeds without building them). The re-make of the
 old 799: 1.4 to 4.9 hours of rendering in one process (0.013 s a frame alone, 0.046 s with three other jobs
 running: section 26), before the video writing, which has not been timed. One part of each, run first, gives the
 real figures.
@@ -692,7 +694,7 @@ real figures.
 **Disk.** The picture rule (H.264, every frame a key frame, qp 23: `picture_store.py`) costs about 18 kB a frame
 on start pictures, more with the arm in view. About 1,400 episodes x 3 cameras x 480 frames = 2.0 M frames, so
 the merged dataset is about 36 GB (v5: 6.6 GB for two cameras), 29 GB at qp 26. The parts and the merged copy
-exist side by side until the parts are deleted: about 75 GB at the peak. Free on the laptop tonight: 136 GB.
+exist side by side until the parts are deleted: 70 to 95 GB at the peak. Free on the laptop tonight: 136 GB.
 ⚠️ The qp must be chosen before the first part is written (one dataset, one setting).
 
 **Order after the go** (the commands are in `sim/README.md`, "Dataset v6"). Neither `remake_pictures.py part`, the
