@@ -705,3 +705,23 @@ real recorder with three cameras, nor a merge of the two kinds has ever run, so:
 3. merge the two into a trial dataset (`merge_parts.py`, which runs the picture gate on the result);
 4. only then the other parts on three workers each, the top-up if parts ended short, the real merge, the gate, and
    the upload (the owner's step: nothing goes to the Hub by itself).
+
+**Decisions that are the owner's** (asked in the morning summary of 2026-11-27; nothing below is switched by me):
+1. The go: first the trial of one part of each (steps 1-3), then the rest. The re-make and the recording run one
+   after the other, not side by side (three workers each fill the memory rule).
+2. The dataset's name. "The same dataset as before" cannot be the old repo itself: the pictures of the old 800
+   are new files under other camera names (`high`, `low`, `claw` for `base`, `claw`), so pushing there would
+   replace v5. Proposed: a new private repo (`krish5831/blush_sim_teacher_v6`); v5 stays as it is.
+3. The stored pictures' quality before the first part is written: qp 23 (about 36 GB) or qp 26 (about 29 GB).
+4. The start position: dataset v6 keeps the old folded start (section 25); the code default is the owner's.
+5. The start change of up to 3 deg per joint for the new episodes (section 26): in the documented command, off by
+   default in the code. Policy tests keep starting at the exact pose.
+6. The cue's form on the pictures: the box is drawn over whatever hides the truss and is cut off at the picture's
+   edge (section 26, low camera and near trusses), as in v5.
+7. Whether the two guards (`--start-guard --clip-actions`) become the standard for policy tests.
+8. A second copy of `~/.cache/blush_sim/states` (3.0 GB, the only source of the old episodes' pictures in any new
+   form); an upload anywhere needs the owner's word.
+9. `CLAUDE.md` says "video codec libsvtav1": true for the real rig's recordings, while the simulator's datasets now
+   store H.264 by the picture rule. One line there would say so.
+10. The real cart: the camera upright stands 12.5 cm outside the plank rig's end frame, and arm B needs the mirror
+    image (section 24). Nothing is built or drawn.
