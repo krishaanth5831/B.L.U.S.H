@@ -655,7 +655,23 @@ old start, no start change):
   whose first draw was clear starts where it did. 9 scenes rebuilt with it (the three above and six more): 1-4
   draws each, and the teacher's own start check has no hit in any.
 - ⚠️ So the elbow's change is one-sided: about -3 to +1 deg. The other joints keep the full range.
-- r40 (the fixed change, tuning scenes 9730000-9730044) is in the table at the end of this section.
+- r40 (the fixed change) against r38 on the same 45 tuning scenes (9730000-9730044, world `crate23`, new post):
+
+| Run | Start of each scene | Teacher |
+|---|---|---|
+| r38 | the exact start pose | 35 of 44 scenes with a ripe truss = 80 % (5 no plan, 2 moved a neighbour, 1 never cut, 1 fruit came off) |
+| r39 (first 15 scenes, stopped) | each joint drawn within 3 deg, plain | 6 of 15, where r38 has 11: 5 refused at the start pose |
+| r40 | each joint drawn within 3 deg until the arm is clear | 35 of 44 = 80 %, the same 9 failures |
+
+- Won 0, lost 0, no refusal names the start pose, and every one of the 45 scenes ends the same way in both runs.
+  The rule set before the run (no start-pose refusal, at most about 2 of 45 lost) is met, so the documented
+  recording command keeps `--start-jitter-deg 3`.
+- One scene (9730028) gets another target with the start change (s0t0 instead of s1t1): the target is the ripe
+  truss with the most of it in view at the start frame, and the moved arm hides a little more or less of each.
+  It works in both runs.
+- Draws needed, last 15 scenes (logged since a logging-only commit made between the second and the third chunk
+  of r40; the start change's code is the same in all three): one draw in 11 scenes, 2, 5, 7 and 8 draws in one
+  each, none back at the exact pose. r40's 45 scenes took 72 minutes of job time against r38's 66.
 
 ## 27. The 600 new episodes: what the teacher keeps, time, disk, and the order after the go (2026-11-27 night)
 
