@@ -102,7 +102,7 @@ The place where the trusses hang is not hidden. Three ways to deal with it, K7's
 
 **Not checked:**
 - ⚠️ Whether the arm's recorded motions stay clear of this rig's end posts at all. They stand 145 mm nearer the
-  arm than the simulator's end frame: the nearest corner of the row post is 80 mm to the arm's left of where the
+  arm than the simulator's end frame: the nearest corner of the row post is 75 mm to the arm's left of where the
   leftmost stem hangs. `sim/whatif/camera_sweep_logs.py arm --cams 0.145:0.378:0.52` (and `plants`) measures it
   against all recorded episodes; not run yet, it waits for the dataset run to end. If the arm or a carried truss
   passes through there, the longer house (way 2) is needed whatever the pictures show.
