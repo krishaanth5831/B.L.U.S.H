@@ -4,8 +4,10 @@ the new ones TOGETHER are spread evenly over where the truss hangs (K7 2026-11-2
 600 episodes on top of the previous 800"; post-mortem step 6: "about 50 episodes per position and height").
 
     python scripts/v6_seed_plan.py --census ../outputs/v6/census_v6/cen_*.jsonl --old ../outputs/v6/cams/v5_*.npz \\
-        --out ../outputs/v6/seed_plan_v6            # from sim/, env lerobot-mj4; writes p00.jsonl ... + plan.json
-    python scripts/v6_seed_plan.py ... --dry        # only the table
+        --out seed_plan_v6      # from sim/, env lerobot-mj4; writes p00.jsonl ..., plan.json and census.jsonl
+    python scripts/v6_seed_plan.py ... --dry        # only the tables
+
+The plan is kept in the repo (sim/seed_plan_v6): it says which scenes dataset v6's new episodes come from.
 
 Reads no simulator and writes no dataset. The inputs:
   --census  base_grid.py --build-only records of fresh seeds (seed, target, cut_mm), built in the dataset's world
@@ -20,9 +22,10 @@ and the part's nothing-ripe seeds. generate_truss.py --seeds reads it (read_seed
 skipped without building a scene. No seed is listed twice, in a part or across parts.
 ⚠️ A part can still end short when the teacher fails more than the list has room for; --topup plans one more part
 for what is missing (the recorder's attempt logs say what was kept):
-    python scripts/v6_seed_plan.py --census ... --old ... --topup ~/.cache/blush_sim/truss/<name>_new_p*.jsonl \\
-        --plan ../outputs/v6/seed_plan_v6/plan.json --used "../outputs/v6/seed_plan_v6/p*.jsonl" --first-part 24 \\
-        --out ../outputs/v6/seed_plan_v6        # writes p24.jsonl (+ plan_topup_p24.json), then record part 24
+    python scripts/v6_seed_plan.py --census seed_plan_v6/census.jsonl --plan seed_plan_v6/plan.json \\
+        --used "seed_plan_v6/p*.jsonl" --topup ~/.cache/blush_sim/truss/<name>_new_p*.jsonl --first-part 24 \\
+        --oversupply 6 --out seed_plan_v6       # writes p24.jsonl (+ plan_topup_p24.json), then record part 24
+(--oversupply 6: the top-up is the last to draw on the seeds, so it may list all a cell has left.)
 """
 import argparse
 import collections
@@ -54,8 +57,9 @@ KEEP_RATE = {"x0z0": 0.83, "x1z0": 0.75, "x2z0": 0.66, "x3z0": 0.61, "x0z1": 0.8
 
 
 def census(files):
-    """{cell: [seed, ...]} in seed order, and the seeds with no ripe truss."""
-    pool, none, seen = collections.defaultdict(list), [], set()
+    """{cell: [seed, ...]} in seed order, the seeds with no ripe truss, how many seeds, and the records slimmed to what
+    a plan needs (seed, target, cut_mm): written beside the plan so a top-up does not need the census runs again."""
+    pool, none, seen, slim = collections.defaultdict(list), [], set(), []
     for f in sorted(files):
         for line in open(f):
             if not line.strip():
@@ -67,11 +71,12 @@ def census(files):
             if "seed" not in r or r["seed"] in seen:
                 continue
             seen.add(r["seed"])
+            slim.append(dict(seed=r["seed"], target=r.get("target"), cut_mm=r.get("cut_mm")))
             if r.get("cut_mm") is None:
                 none.append(r["seed"])
             else:
                 pool[gt.cell_of(np.asarray(r["cut_mm"], float) / 1000.0)].append(r["seed"])
-    return pool, none, len(seen)
+    return pool, none, len(seen), slim
 
 
 def old_cells(files):
@@ -119,7 +124,8 @@ def kept_so_far(logs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--census", nargs="+", required=True)
-    ap.add_argument("--old", nargs="+", required=True)
+    ap.add_argument("--old", nargs="+", default=[], help="camera_score.py collect files of the old dataset's scenes; "
+                                                         "not needed with --plan (its counts are in plan.json)")
     ap.add_argument("--episodes", type=int, default=600)
     ap.add_argument("--part-size", type=int, default=25, help="as dataset v5's parts (record_parts.sh)")
     ap.add_argument("--hold-share", type=float, default=gt.HOLD_SHARE, help="nothing-ripe episodes (v5: 64 of 800)")
@@ -135,14 +141,19 @@ def main():
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     files = [f for pat in a.census for f in glob.glob(pat)]
-    pool, none, n_seeds = census(files)
+    pool, none, n_seeds, slim = census(files)
     used = set()
     for pat in a.used:
         for f in glob.glob(pat):
             used |= {json.loads(x)["seed"] for x in open(f) if x.strip() and '"seed"' in x}
     pool = {c: [s for s in v if s not in used] for c, v in pool.items()}
     none = [s for s in none if s not in used]
-    old = old_cells([f for pat in a.old for f in glob.glob(pat)])
+    if a.old:
+        old = old_cells([f for pat in a.old for f in glob.glob(pat)])
+    elif a.plan:
+        old = collections.Counter(json.load(open(a.plan))["old"])
+    else:
+        sys.exit("--old (the old dataset's scenes) or --plan (a plan.json that holds their counts) is needed")
     n_hold = round(a.hold_share * a.episodes)
     n_cut = a.episodes - n_hold
     # per cell: level old + new, as far as the census seeds reach (level)
@@ -268,7 +279,12 @@ def main():
                    min_supply=a.min_supply, held_back=capped, census=sorted(files), parts=summary,
                    expected_cut_kept=round(sum(expect.values()), 1)),
               open(a.out / plan_name, "w"), indent=1)
-    print(f"wrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and {plan_name}")
+    if not a.topup:                # the census this plan was made from, slimmed: all a top-up needs (--census)
+        with open(a.out / "census.jsonl", "w") as out:
+            for r in sorted(slim, key=lambda r: r["seed"]):
+                out.write(json.dumps(r) + "\n")
+    print(f"wrote {len(parts)} seed plans to {a.out} (p{a.first_part:02d}.jsonl ...) and {plan_name}"
+          + ("" if a.topup else f", and the {len(slim)} census records it was made from (census.jsonl)"))
 
 
 def zip_longest_lists(groups):
