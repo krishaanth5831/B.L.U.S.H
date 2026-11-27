@@ -938,3 +938,22 @@ recording ran three without slowing down), the top-up, the 52 GB merge.
 start change of up to 3 deg (`--start-jitter-deg 3`) are then in the dataset. Changing either means deleting both
 part folders and redoing them (46 minutes). The `_trial` merge is a throwaway and does not get in the way of the
 real merge (`krish5831/blush_sim_teacher_v6`).
+
+**The full run, IN FLIGHT since 2026-11-27 09:52** (owner, after the trial's report: "go" and "lets do 52gb" = the
+rest at qp 23, the start change kept, the trial's two parts as part 0). It runs as the queue unit
+`blush-queue-v6run` (`MAXJ=3 sim/scripts/sim_queue.sh v6run outputs/v6/jobs_v6run.txt`, log
+`outputs/v6/queue_v6run.log`), a unit of its own, so it does not need the session that started it. Three workers
+at a time: first the three re-make workers (units `blush-v6-v6run_r0`, `_r1`, `_r2`: parts 1-31), then, as each
+ends, a recording worker (`_n0`, `_n1`, `_n2`: parts 1-23). Worker logs:
+`outputs/remake_blush_sim_teacher_v6_old/workers.log`, `outputs/record_blush_sim_teacher_v6_new/workers.log`.
+- ⚠️ Every part runs in a scope of its own, outside its worker's unit (tested): stopping a worker unit ends the
+  script, the part in flight carries on and finalizes. That is the clean way down to two workers. A real stop is
+  the queue first, then the workers, then the part processes.
+- ⚠️ Before a worker is started again, no part process of its kind may be alive: the new worker deletes a part
+  folder without a parquet footer, and a part still being written has none.
+- ⚠️ No edits to `remake_parts.sh`, `record_parts.sh`, `sim_queue.sh` or the job file until every worker has ended.
+- After the queue: `v6_check.py parts` (a short recorded part is input for the top-up, any other failed check a
+  redo), the top-up part 24, the merge into `krish5831/blush_sim_teacher_v6` under the memory cap,
+  `v6_check.py merged` (the gate should read 8,394 frames for 1,399 episodes) and `videos`, the report.
+- Not covered by the go: any upload, any training, deleting the parts or the trial merge.
+
