@@ -12,7 +12,8 @@
 # ⚠️ RAM: not measured for a re-make part; the cap is the recorder's (7 GB a part). Start one worker, look at
 # `systemctl --user status` for its peak, then the others; keep 8 GB free (`free -g`).
 # ⚠️ v5 episode 353 (seed 10014003) does not rebuild as recorded and is left out (remake_pictures.py logs it), so
-# its part has 24 episodes and the whole re-make 799.
+# its part has 24 episodes and the whole re-make 799. Check the count when all parts are done:
+#   grep -h "re-made" outputs/remake_<name>_old/workers.log     # 31 parts of 25 and part 14 with 24
 set -uo pipefail
 REPO_ID=${1:?repo id of the re-made parts, e.g. krish5831/<name>_old}
 P=${2:?first part}; STRIDE=${3:?workers}; END=${4:?parts (32 for all of v5)}
@@ -31,6 +32,13 @@ while [ "$P" -lt "$END" ]; do
   fi
   cd "$SIM"
   $RUN python -u remake_pictures.py part --part "$P" --repo-id "$REPO_ID" --rig "$RIG" > "$LOGS/p$N.log" 2>&1
-  echo "part $N exit $? at $(date +%H:%M): $(grep -c '✅ episode' "$LOGS/p$N.log") re-made" >> "$LOGS/workers.log"
+  RC=$?
+  echo "part $N exit $RC at $(date +%H:%M): $(grep -c '✅ episode' "$LOGS/p$N.log") re-made" >> "$LOGS/workers.log"
+  # ⚠️ a part that stopped on an episode whose scene did not come back (exit != 0) is still finalized, with the
+  # episodes before the stop, so a restart takes it for finished: say so here and in workers.log. Once the cause is
+  # fixed, delete that part's folder ($D) and run the worker again.
+  if [ "$RC" -ne 0 ]; then
+    echo "⚠️ part $N STOPPED EARLY (exit $RC), its folder $D is short: $(grep -v '^$' "$LOGS/p$N.log" | tail -1 | cut -c1-200)" | tee -a "$LOGS/workers.log"
+  fi
   P=$((P + STRIDE))
 done
