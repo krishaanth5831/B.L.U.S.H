@@ -46,6 +46,7 @@ sys.path.insert(0, str(HERE / "whatif"))
 
 CAMS = ("high", "low", "claw")      # cameras.RIG_CAMERAS["trio"]
 LOG_DIR = pathlib.Path.home() / ".cache" / "blush_sim" / "truss"     # generate_truss.LOG_DIR
+FPS = 30                            # the dataset's frame rate (expert.FPS, config/hardware.env)
 WHOLE = 799 + 600                   # episodes of the whole dataset v6: v5's 800 less episode 353, + 600 new
 #                                     (K7 2026-11-26)
 ONLY_RECORDING = ("recording differs from the dry run", "recording picked another truss")   # generate_truss.py's
@@ -334,12 +335,15 @@ def videos(a):
         for c in CAMS:
             k = f"videos/observation.images.{c}"
             f = root / k / f"chunk-{int(m[k + '/chunk_index']):03d}" / f"file-{int(m[k + '/file_index']):03d}.mp4"
-            src += ["-ss", f"{m[k + '/from_timestamp']:.3f}", "-to", f"{m[k + '/to_timestamp']:.3f}", "-i", str(f)]
+            # ⚠️ start half a frame early and stop by frame count: cutting from/to the rounded timestamps took the
+            # next episode's start frame along as a last frame (the trial's first five videos, 2026-11-27)
+            src += ["-ss", f"{max(0.0, m[k + '/from_timestamp'] - 0.5 / FPS):.4f}", "-i", str(f)]
         mp4 = out / f"v6_check_ep{x['e']:04d}_{kind}.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *src, "-filter_complex", "[0:v][1:v][2:v]hstack=inputs=3",
-                        "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+                        "-frames:v", str(x["length"]), "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
+                        str(mp4)], check=True)
         print(f"{mp4}: {kind}, episode {x['e']} of the merge ({x['what']}, seed {x['seed']}), "
-              f"{x['length'] / 30:.1f} s")       # 30 = the dataset's fps (expert.FPS)
+              f"{x['length']} frames = {x['length'] / FPS:.1f} s")
 
 
 if __name__ == "__main__":

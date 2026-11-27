@@ -893,6 +893,9 @@ exit 0 whatever the part did, and a short part still finalizes):
   cameras): the cue box and cross are on `high` and `low`, none on a nothing-ripe scene, the claw camera shows the
   stalk between the jaws mid-episode. Five review videos (`v6_check.py videos`,
   `outputs/videos/review_blush_sim_teacher_v6_trial/`, one look only); two videos and one sheet went to the owner.
+  ⚠️ The two videos sent had one frame too many: the next episode's start frame as their last frame (cut by
+  rounded timestamps). A slip of the cutting, not of the dataset; `videos` now stops by frame count, and the five
+  were cut again.
 
 **Size: the estimate of section 27 was low by a factor 1.43.** It came from six start pictures (18.1 kB a
 picture at qp 23). Real frames, with the row in view of the two post cameras and the arm moving, take 25.8 kB:
@@ -924,10 +927,12 @@ qp 23: the parts and the merged copy side by side, 104 GB, against 134 GB free. 
 **Time for the rest, from these two parts.** Re-make: 31 parts x 11.3 min = 5.8 hours of one worker, about 2 hours
 on three. Recording: 23 parts x 34.5 min = 13.2 hours of one worker, about 4.5 hours on three (a part's time
 varies with its scenes: the rehearsal's dry passes took 25 and 20 minutes), then the top-up part and the merge.
-Together about 7 to 8 hours, against the 10 to 12 guessed in section 27. Three workers of one kind peak at 10 to
-11 GB together against 21 GB available, so 10 GB stay free (the rule asks 8): three workers, one kind after the
-other, as planned. ⚠️ Not measured: three workers side by side (the trial ran one at a time; v5's recording ran
-three without slowing down), the top-up, the 52 GB merge.
+Together about 7 to 8 hours, against the 10 to 12 guessed in section 27. Memory: the peaks above are one part of
+each kind. v5's recorded parts peaked at about 4.4 GB (`record_parts.sh`), and a part's peak depends on its
+scenes. Three workers at 3.6 GB leave 10 GB of the 21 GB available free, three at 4.4 GB leave just under 8 (the
+rule asks 8). So: three workers, one kind after the other as planned, and a look at `free -g` once the first
+three parts are well under way. ⚠️ Not measured: three workers side by side (the trial ran one at a time; v5's
+recording ran three without slowing down), the top-up, the 52 GB merge.
 
 **What is now in the parts.** If nothing changes, the two `p00` parts are part 0 of the real run: qp 23 and the
 start change of up to 3 deg (`--start-jitter-deg 3`) are then in the dataset. Changing either means deleting both
