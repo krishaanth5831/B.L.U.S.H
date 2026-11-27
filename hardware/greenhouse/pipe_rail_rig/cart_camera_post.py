@@ -238,6 +238,20 @@ def main(out):
             + (" ⚠️ and one is behind the frame" if hit else ", clear of it"))
     say("⚠️ In the simulator the end frame stands 370 mm from the arm, behind this post, and is in neither picture.")
 
+    # ---------------- noticed on the way: the crate ----------------
+    import truss_scene as ts                                    # read only: the dataset's crate (world "crate23")
+    (cx, cy), (sx, sy, _) = ts.WORLDS["crate23"]
+    lo = np.array([cx - sx / 2, cy - sy / 2]) - np.asarray(scene.ARM_BASE[:2])
+    hi = np.array([cx + sx / 2, cy + sy / 2]) - np.asarray(scene.ARM_BASE[:2])
+    c1 = np.sort([sim_to_rig((*lo, 0), 0)[:2], sim_to_rig((*hi, 0), 0)[:2]], axis=0)
+    c2 = np.sort([sim_to_rig((*lo, 0), 1)[:2], sim_to_rig((*hi, 0), 1)[:2]], axis=0)
+    over = np.minimum(c1[1], c2[1]) - np.maximum(c1[0], c2[0])
+    box = lambda c: f"x {c[0][0]:.0f}-{c[1][0]:.0f}, y {c[0][1]:.0f}-{c[1][1]:.0f}"      # noqa: E731
+    say(f"the dataset's crate lies {lo[0] * 1000:.0f} to {hi[0] * 1000:.0f} mm to the arm's right. On this cart: "
+        f"arm 1's at {box(c1)}; arm 2's at {box(c2)}: they overlap by {over[0]:.0f} mm along the cart and "
+        f"{over[1]:.0f} mm across; the deck is y {DECK_Y[0]:.0f}-{DECK_Y[1]:.0f}, so each reaches "
+        f"{DECK_Y[0] - c1[0][1]:.0f} mm past its edge. ⚠️ No crate is drawn on the rig.")
+
     # ---------------- the sketch ----------------
     ink, ink2, muted, surf = "#0b0b0b", "#52514e", "#8a8983", "#fcfcfb"
     orange, blue, aqua, wood = "#eb6834", "#2a78d6", "#1baf7a", "#d9c7a3"
@@ -289,7 +303,7 @@ def main(out):
         top.plot([lens_xy[0], lens_xy[0] + 560 * d[0]], [lens_xy[1], lens_xy[1] + 560 * d[1]], color=orange, lw=0.9,
                  ls=(0, (5, 4)))
     top.plot([lens_xy[0], lens_xy[0] + 330 * fdir[0]], [lens_xy[1], lens_xy[1] + 330 * fdir[1]], color=orange, lw=1.6)
-    top.annotate("camera post: a threaded rod,\nboth cameras on it", r, xytext=(-545, 400), color=ink, fontsize=10,
+    top.annotate("camera post: a threaded rod,\nboth cameras on it", r, xytext=(-545, 366), color=ink, fontsize=10,
                  fontweight="bold", va="bottom", arrowprops=dict(arrowstyle="-", color=ink, lw=1))
     top.annotate("boom: a 44 mm batten screwed under\nthe deck's end, between the wheels", (-90, yc(-90) - 20),
                  xytext=(-545, 30), color=ink, fontsize=10, fontweight="bold", va="bottom",
@@ -301,7 +315,7 @@ def main(out):
     top.text(r[0] - 62, (AISLE + r[1]) / 2, f"{r[1] - AISLE:.0f} mm\ntoward\nthe row", color=ink2, fontsize=9,
              ha="right", va="center")
     top.plot([r[0] - 55, ARM_X[0] - 50], [AISLE, AISLE], color=muted, lw=0.8, ls=":")
-    top.text(-545, 150, "orange lines: what the cameras take in\n(the end frame's row post is inside it)",
+    top.text(-545, 478, "orange lines: what the cameras take in\n(the end frame's row post is inside it)",
              color=orange, fontsize=9.5, ha="left", va="center")
 
     # from the side

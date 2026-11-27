@@ -27,6 +27,9 @@ These are design choices, not yet checked for sim2real:
 - The stems sit 30 mm off the row line.
 - ⚠️ With the end frames 225 mm from the arm, dataset v6's camera post stands outside them and looks in through
   them (see "Camera post for dataset v6").
+- ⚠️ No crate is drawn on the cart. In the dataset the crate lies 13 to 36 cm to the arm's right, which here is
+  between the two arms: placed like that, the two arms' crates overlap by 185 mm along the cart, and each reaches
+  51 mm past the deck's edge (`cart_camera_post.py` prints the numbers).
 
 ## Camera post for dataset v6 (rig `trio`): a proposal, not built
 
@@ -46,8 +49,10 @@ the deck top):
 | low | 350 mm | 100 mm | 50 mm | 12.3° | 32.7° up |
 
 By ruler from the pan axis (the upright axis the whole arm turns about): 350 mm to the left, 61 mm toward the row.
-The simulator's post is a 16 mm rod standing 18 mm behind the lenses; the arm and the carried truss were checked
-against that rod in all 800 recorded episodes, so the real upright must not be thicker than it.
+The simulator's post is a 16 mm rod standing 18 mm behind the lenses. In dataset v5's 800 recorded episodes the arm
+came no nearer than 44 mm to the line under the lens and a carried truss no nearer than 17 mm; with that rod and the
+camera housings in the model, nothing touched them in the 32 episodes that came within 6 cm
+(`own_sim_measurements.md` section 26). So the real upright must not be thicker than 16 mm or stand nearer the arm.
 
 **On this rig** that puts the rod at x −143, y 296 for arm 1 (the lenses at x −125, y 300, z 184 and 554): 143 mm
 outside the closed end frame's inside face. Arm 2 is arm 1 turned half a turn, so its post is the same assembly
@@ -58,12 +63,15 @@ turned half a turn about the middle of the house: x 1043, y 104, outside the ope
 - **Boom**: one more 350 mm length of the 44 x 44 batten per arm, screwed under the deck's end with its top against
   the deck's underside. It lies between the wheel brackets, turned 14° from the aisle line, and reaches 267 mm past
   the deck's end. Three screws from above through deck strip D-2, heads flush, shorter than the 62 mm stack.
+  ⚠️ Only 75 mm of it lies under the deck, because the cleat under the arm is in the way: the three screws sit
+  close together, and a knock on the rod levers on them. Notching the boom over the cleat would give it more hold.
 - **Upright**: an M12 threaded rod, 500 mm (one 1 m rod cut in half does both arms), through the boom's outer end.
   One nut and washer on top of the boom, one sunk into its underside so nothing hangs below it.
 - **Cameras**: each on a clamp between two nuts, so the height is set by turning nuts. No clamp is drawn yet; a
   printed one takes a 12.6 mm hole (0.3 mm per side).
-- ⚠️ Everything except the rod and the two cameras stays at or below the deck top: the arm folds out over that
-  corner of the deck, low, on its way to a truss.
+- ⚠️ Everything except the rod and the two cameras stays at or below the deck top (the simulator's table is at
+  that height, so nothing in the dataset ever goes below it). Above it the arm swings out to that side: every
+  camera spot nearer the arm was in its way in the recorded episodes.
 - With both posts on, the cart sticks out about 14 cm past each end of the house; the booms unscrew for transport.
 - If the two birdseye masts are left out (dataset v6 does not use that camera), their poles B4-5 and B4-6 are long
   enough for the two booms. Check first whether another module still needs the birdseye camera.
