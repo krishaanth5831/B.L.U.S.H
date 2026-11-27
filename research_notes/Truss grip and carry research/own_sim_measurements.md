@@ -782,7 +782,9 @@ side with a third teacher job: `python generate_truss.py --teacher --no-dr --no-
   counted where it really hangs.
 - Start change: the first draw was clear in 39 of the 63 scenes, the others took up to 12; one scene started at
   the exact pose (10100005 again, refused: "start pose not clear", as without the change).
-- Half of the kept cut episodes are noisy ones (12 of 21 and 12 of 22; `--noise-share 0.5`).
+- About half of the kept cut episodes are noisy ones (10 of 21 and 10 of 22; `--noise-share 0.5`). ⚠️ The log
+  record of a nothing-ripe episode can carry the `noise` key too (it is drawn per seed before the scene is built);
+  such an episode is never played with noise, so count noisy episodes among the cut ones only.
 - ⚠️ What this does not show: a dry part plans and plays only (0.8-1.0 minutes per kept episode here). The
   recording pass (the kept plan played once more with the three cameras rendered, the pictures stored and the
   gate's fingerprints taken) comes on top and has still never run; the trial part is its first run. Peak memory
@@ -811,6 +813,11 @@ real recorder with three cameras, nor a merge of the two kinds has ever run, so:
 3. merge the two into a trial dataset (`merge_parts.py`, which runs the picture gate on the result);
 4. only then the other parts on three workers each, the top-up if parts ended short, the real merge, the gate, and
    the upload (the owner's step: nothing goes to the Hub by itself).
+
+⚠️ Owed before the owner's five-video review of the new dataset: `scripts/review_videos.py` is built for v5 (two
+cameras side by side, merged index = 25 x part + local index). Dataset v6 has three cameras, the re-made part 14
+has 24 episodes and a new part can end short, so its episode numbers must come from the merged dataset, not from
+25 x part. Not changed tonight.
 
 **Decisions that are the owner's** (asked in the morning summary of 2026-11-27; nothing below is switched by me):
 1. The go: first the trial of one part of each (steps 1-3), then the rest. The re-make and the recording run one
