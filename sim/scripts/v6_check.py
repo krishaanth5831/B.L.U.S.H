@@ -18,9 +18,11 @@ parts, per part (its kind comes from its attempt log in ~/.cache/blush_sim/truss
             cameras per episode)
   re-made   25 episodes (24 in the part of v5 episode 353); joint readings and commands equal v5's bit for bit;
             no cut episode with an all-zero box in the cue numbers
-  recorded  the plan's count; kept episodes per zone = the plan's quota; the cue numbers in the dataset = the log's;
-            refusals by kind, with the two only a recording pass has ("recording differs from the dry run",
-            "recording picked another truss") named
+  recorded  kept episodes per zone against the plan's quota (a part whose scenes ran out is "short": input for
+            v6_seed_plan.py --topup, not a redo); the cue numbers in the dataset = the log's; refusals by kind,
+            with the two only a recording pass has ("recording differs from the dry run", "recording picked
+            another truss") named
+A part that is not finalized (still being written, or killed before its finalize) is skipped with a line.
   size      MB of video per episode, and what that makes for the whole dataset (799 + 600 episodes)
 merged: the storage checks on the merge, its episode and frame counts against the parts', and every part's numbers
   (joint readings, commands, cue numbers) found again at its place in the merge, bit for bit.
@@ -145,11 +147,16 @@ def check_recorded(root, rows, plan, say):
     quota = json.loads(open(plan).readline())
     df = numbers(root)
     cells = collections.Counter("hold" if r.get("hold") else r["cell"] for r in kept)
-    say(len(kept) == quota["episodes"] and df["episode_index"].nunique() == len(kept),
-        f"kept {len(kept)} of {quota['episodes']} ({cells['hold']} nothing-ripe), {len(rows)} scenes built")
-    short = {c: n - cells[c] for c, n in quota["quota"].items() if cells[c] != n}
-    say(not short and set(cells) <= set(quota["quota"]), "episodes per zone = the plan's quota"
-        + (f": NOT, missing {short}" if short else ""))
+    say(df["episode_index"].nunique() == len(kept),
+        f"kept {len(kept)} of {quota['episodes']} ({cells['hold']} nothing-ripe), {len(rows)} scenes built; the "
+        f"dataset has {df['episode_index'].nunique()} episodes")
+    short = {c: n - cells[c] for c, n in quota["quota"].items() if cells[c] < n}
+    over = {c: n - quota["quota"].get(c, 0) for c, n in cells.items() if n > quota["quota"].get(c, 0)}
+    say(not over, "no zone above the plan's quota" + (f": NOT, {over} too many" if over else ""))
+    if short:       # the plan's scenes ran out: not a redo, v6_seed_plan.py --topup plans these as an extra part
+        print(f"   short  {sum(short.values())} episodes missing: {short} (input for the top-up, not a redo)")
+    else:
+        print("   ok  every zone at the plan's quota")
     bad = []
     for r in kept:
         env = col(df[df["episode_index"] == r["episode_index"]], "observation.environment_state")
@@ -166,7 +173,7 @@ def check_recorded(root, rows, plan, say):
     print(f"      noisy {sum('noise' in r for r in cut)} of {len(cut)} cut episodes; start pose: first draw clear in "
           f"{sum(r.get('start_draws') == 1 for r in rows)} of {len(rows)} scenes, "
           f"{sum(not any(r.get('start_drawn_deg', [1])) for r in rows)} at the exact pose")
-    return dict(kept=len(kept), hold=cells["hold"], cells=cells, only=only,
+    return dict(kept=len(kept), hold=cells["hold"], cells=cells, only=only, short=sum(short.values()),
                 seconds=sum(r.get("wall_s", 0) for r in rows))
 
 
@@ -201,8 +208,12 @@ def parts(a):
     P = parts_of(a.prefixes)
     if not P:
         sys.exit("no parts found")
+    from merge_parts import finalized
     J = rp.joint_data()
-    R = [one_part(p, a.plan_dir, J) for p in P]
+    skipped = [p for p in P if not finalized(home() / p)]
+    for p in skipped:       # a part still being written (or killed before its finalize) has no parquet footer
+        print(f"{p}: not finalized (still being written, or killed before its finalize): skipped")
+    R = [one_part(p, a.plan_dir, J) for p in P if p not in skipped]
     print()
     for kind, n_all in (("re-made", 799), ("recorded", 600)):       # WHOLE's two halves
         K = [r for r in R if r["kind"] == kind]
@@ -218,8 +229,12 @@ def parts(a):
     cells = sum((r["cells"] for r in R if "cells" in r), collections.Counter())
     if cells:
         print("recorded per zone:", dict(sorted(cells.items())))
+    short = {r["pid"][-3:]: r["short"] for r in R if r.get("short")}
+    if short:
+        print(f"recorded parts that ended short (top-up, not a redo): {short} = {sum(short.values())} episodes")
     wrong = [r["pid"] for r in R if r["bad"]]
-    print("⚠️ parts with a failed check: " + ", ".join(wrong) if wrong else f"all {len(R)} parts pass")
+    print(("⚠️ parts with a failed check (redo): " + ", ".join(wrong) if wrong else f"all {len(R)} checked parts pass")
+          + (f"; {len(skipped)} not finalized and skipped" if skipped else ""))
     return 1 if wrong else 0
 
 
