@@ -63,7 +63,10 @@ MAX_CATCH_UP_S = 0.1             # after a stall (a slow policy call), skip ahea
 # clear", self: shoulder / lower_arm).
 START_CLEAR_SELF_M = 0.003
 START_CLEAR_M = 0.005
-START_JITTER_TRIES = 20          # draws per scene before it starts at the exact pose (guess; 1-4 needed in 9 scenes)
+START_JITTER_TRIES = 20          # draws per scene before it starts at the exact pose. 300 recording scenes built
+#                                  with 3 deg, 2026-11-27 (outputs/v6/census_v6_jit): the first draw is clear in
+#                                  56 %, three draws in 92 %, eight in 99 %; 2 of 300 are never clear (something
+#                                  hangs within START_CLEAR_M of the folded arm) and start at the exact pose
 # arm parts that touch each other by design, never counted as the arm touching itself (truss_teacher.HAND_PARTS)
 HAND_PARTS = ("gripper", "moving_jaw", "finray", "pad_", "wrist_camera", "blade")
 

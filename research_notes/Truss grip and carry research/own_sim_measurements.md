@@ -698,6 +698,17 @@ the table, the camera scorer's files lack two):
   give at these keep rates, and `--topup` plans the missing ones as one more part from seeds not yet listed (it
   writes `plan_topup_pNN.json`, never over the plan; tried on the toy plan: 7 kept of 14 planned -> 7 more planned).
 
+**Is the census's scene the scene the recorder builds?** The census (below) builds each fresh seed with rig
+`base` and no start change; the recorder uses rig `trio` on the old layout and the start change. The first 300
+recording seeds built the recorder's way (`base_grid.py --build-only --rig trio --layout-rig base
+--start-jitter-deg 3`, `outputs/v6/census_v6_jit`): the same trusses at the same places in 300 of 300, the same
+target and the same cell in 299. In the one that differs (10100228) two trusses are ripe and the moved arm
+changes which of them shows more at the start frame; the recorder counts an episode in the cell it really has, so
+this costs nothing but one seed's place in the plan.
+- Draws the start change needs: the first is clear in 56 % of the scenes, three in 92 %, eight in 99 %; 2 of 300
+  (10100005, 10100237) are never clear in 20 draws and start at the exact pose. The elbow's change runs from -3.0
+  to +0.8 deg (mean -1.0), the other four joints use the full 3 deg both ways.
+
 **Time.** v5's 800 episodes took 1,548 worker-minutes by the parts' own logs = 1.93 minutes per kept episode
 (parts of 25: median 45 minutes, 17 to 81; `record_parts.sh`'s header says 7.4 h by the clock). 600 episodes at
 that rate are about 19 worker-hours, so 6 to 7 hours on three workers; the third camera adds rendering and
