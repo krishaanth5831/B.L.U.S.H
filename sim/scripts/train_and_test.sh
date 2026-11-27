@@ -15,10 +15,16 @@
 # ⚠️ A test of 20 scenes + 5 holds took ~40 min on the CPU (step 3, 2026-11-14), the same as the gap between two
 # checkpoints (~0.47 s per step), so TEST_SCENES stays small; the best checkpoints get all of heldout_v5.jsonl after.
 # ⚠️ RAM (K7 2026-11-18): training ~8.4 GB + two tests ~3-4 GB each; check `free -g` first, keep 8 GB free.
+# The two guards outside the policy (post-mortem 5.9) are the standard for every policy test since 2026-11-27 (K7,
+# asked whether they become the standard: "finish the four smaller things also"): --start-guard (the policy is not
+# started in a nothing-ripe scene whose cue has no target box) and --clip-actions (its commands are kept inside the
+# range of its own training data). GUARDS="" runs a test without them, e.g. to compare with a table from before;
+# checkpoint_table.py says per row which guards a test ran with. eval_truss.py's own defaults stay off.
 set -euo pipefail
 RUN=${1:?run name, e.g. act_teacher_v5}; DS=${2:?dataset, e.g. krish5831/blush_sim_teacher_v5}
 STEPS=${3:-100000}; FROM=${4:-20000}
 SEEDS=${SEEDS:-heldout_v5.jsonl}; N=${TEST_SCENES:-25}
+GUARDS=${GUARDS-"--start-guard --clip-actions"}   # unset = both guards; GUARDS="" = none (see the header)
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 U=blush-$(echo "$RUN" | tr '_' '-')
 ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4"   # MuJoCo 4.0.1 since 2026-11-21 (K7); act_teacher_v5 ran on 3.8.1 (env lerobot)
@@ -29,7 +35,7 @@ if [[ -z ${ONLY:-} ]]; then
     bash -c "$ENV && cd $REPO && env RUN=$RUN STEPS=$STEPS SAVE=5000 sim/scripts/train_sim.sh act-teacher $DS \
       > outputs/train_$RUN.log 2>&1"
 fi
-COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from $SEEDS --scenes $N"
+COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from $SEEDS --scenes $N $GUARDS"
 for KIND in ${ONLY:-alone hybrid}; do
   if [[ $KIND == alone ]]; then ARGS="$COMMON --holds 5"; else ARGS="$COMMON --hybrid --rejoin --trigger failing"; fi
   systemd-run --user --unit="$U-$KIND" --collect -q -p MemoryMax=7G -p MemorySwapMax=0 \

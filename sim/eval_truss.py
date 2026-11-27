@@ -377,7 +377,9 @@ def main():
                          "--holds scene whose cue has no target box (what the policy itself is given) the policy is "
                          "not run and the arm keeps its start pose; those scenes are counted as 'guard fired', not "
                          "as the policy's holds. Off by default so that a re-run of an old checkpoint still "
-                         "compares with the earlier tables.")
+                         "compares with the earlier tables; the test scripts (scripts/colab_tests.sh, "
+                         "test_all_checkpoints.sh, train_and_test.sh) pass it and --clip-actions since 2026-11-27 "
+                         "(K7: the standard for policy tests; GUARDS=\"\" there switches both off).")
     ap.add_argument("--clip-actions", action="store_true",
                     help="post-mortem 5.9: clip every command of the policy, per joint, to the range of the commands "
                          "in its own training dataset (see clip_cmd). Off by default, for the same reason.")

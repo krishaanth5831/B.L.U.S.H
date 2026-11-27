@@ -9,14 +9,23 @@
 #   1. policy alone: SCENES held-out scenes (heldout_v5.jsonl) + HOLDS nothing-ripe scenes
 #   2. hybrid: the same scenes, the teacher steps in only when the policy is failing
 # Logs: outputs/full_<run>_w<i>_{alone,hybrid}.log. Tables: python3 sim/scripts/checkpoint_table.py <run> --scenes 100
+# EXTRA: more eval_truss.py flags. ⚠️ A policy trained on dataset v6 needs EXTRA="--world crate23 --layout-rig base"
+# (as colab_tests.sh says); without it the scenes are the code default's, not the dataset's.
+# The two guards outside the policy (post-mortem 5.9) are the standard for every policy test since 2026-11-27 (K7,
+# asked whether they become the standard: "finish the four smaller things also"): --start-guard (the policy is not
+# started in a nothing-ripe scene whose cue has no target box) and --clip-actions (its commands are kept inside the
+# range of its own training data). GUARDS="" runs a test without them, e.g. to compare with a table from before;
+# checkpoint_table.py says per row which guards a test ran with. eval_truss.py's own defaults stay off.
 set -euo pipefail
 RUN=${1:?run name, e.g. act_teacher_v5b64}; shift
 CKS=("$@"); [[ ${#CKS[@]} -gt 0 ]] || { echo "give the checkpoints, e.g. 070000 065000"; exit 1; }
 WORKERS=${WORKERS:-3}; SCENES=${SCENES:-100}; HOLDS=${HOLDS:-20}; KINDS=${KINDS:-alone hybrid}   # KINDS=hybrid: that pass only
+EXTRA=${EXTRA:-}
+GUARDS=${GUARDS-"--start-guard --clip-actions"}   # unset = both guards; GUARDS="" = none (see the header)
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 U=blush-$(echo "$RUN" | tr '_' '-')-full${TAG:+-$TAG}   # TAG: a second batch of units next to a first
 ENV="source ~/miniforge3/etc/profile.d/conda.sh && conda activate lerobot-mj4"   # MuJoCo 4.0.1 (K7 2026-11-21)
-COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from heldout_v5.jsonl --scenes $SCENES"
+COMMON="--headless --no-dr --no-yolo --n-action-steps 100 --seeds-from heldout_v5.jsonl --scenes $SCENES $EXTRA $GUARDS"
 for ((w = 0; w < WORKERS; w++)); do
   mine=()
   for ((i = w; i < ${#CKS[@]}; i += WORKERS)); do mine+=("${CKS[i]}"); done
