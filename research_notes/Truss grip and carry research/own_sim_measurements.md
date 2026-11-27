@@ -694,11 +694,65 @@ the table, the camera scorer's files lack two):
 - So no cell is below 60 %. The seed planner's floor is 1.8 census seeds per planned episode (56 % kept;
   `MIN_SUPPLY`, was 1.6 = 63 %, too tight for x2z2 and x3z0), and it lists more than that where the census has them.
 - ⚠️ A part's seeds are its own (the parts record side by side), so a cell with 1-3 episodes in a part can end one
-  short by bad luck even at 2.5 seeds per episode. `v6_seed_plan.py` now prints how many episodes its lists should
+  short by bad luck even at 3 seeds per episode. `v6_seed_plan.py` now prints how many episodes its lists should
   give at these keep rates, and `--topup` plans the missing ones as one more part from seeds not yet listed (it
   writes `plan_topup_pNN.json`, never over the plan; tried on the toy plan: 7 kept of 14 planned -> 7 more planned).
 
-**Is the census's scene the scene the recorder builds?** The census (below) builds each fresh seed with rig
+**The census.** Where a fresh scene's target hangs is known only once the scene is built, so 4,500 fresh seeds
+(10100000-10104499, used by nothing else) were built without running the teacher, as 15 queue jobs of 300
+(`sim/scripts/sim_queue.sh`, seven side by side, about 8 s a scene):
+
+    python -u base_grid.py --base 0.37,0.20 --jaw v5 --old-start --world crate23 --rig base --build-only \
+        --seed-start <S> --scenes 300 --out ../outputs/v6/census_v6/cen_<S>.jsonl
+
+Every seed is there once (counted by the records, not by the jobs' done markers). 4,487 scenes have a ripe truss,
+13 have none. Where the target's cut point hangs when nothing steers it:
+
+| Height \ row part | x0 (0.20-0.27 m) | x1 (0.27-0.34) | x2 (0.34-0.41) | x3 (0.41-0.48) |
+|---|---|---|---|---|
+| z0, below 0.20 m | 718 = 16.0 % | 296 = 6.6 % | 265 = 5.9 % | 227 = 5.1 % |
+| z1, 0.20-0.26 m | 523 = 11.7 % | 236 = 5.3 % | 237 = 5.3 % | 367 = 8.2 % |
+| z2, above 0.26 m | 775 = 17.3 % | 360 = 8.0 % | 221 = 4.9 % | 262 = 5.8 % |
+
+- 45 % of the fresh scenes have their target in row part x0 and 16 to 20 % in each of the other three; the three
+  heights are even (34 / 30 / 36 %). Likely reason, not measured: the target is the ripe truss that shows most at
+  the start picture of the old base camera, and x0 is the row part nearest that camera.
+- v5's balance step evened the row parts only partly (31 / 24 / 21 / 24 % of its 734 cut episodes) and did
+  nothing about height within a row part: its cells hold from 35 (x2z2) to 87 (x0z0) episodes.
+
+**The plan** (`sim/seed_plan_v6`, in the repo together with the census records it was made from; from `sim/`:
+`python scripts/v6_seed_plan.py --census "../outputs/v6/census_v6/cen_*.jsonl" --old "../outputs/v6/cams/v5_*.npz"
+--out seed_plan_v6`). 600 new episodes = 540 cut + 60 nothing-ripe (v5's share), in 24 parts of 25. The cut
+episodes go to the cells with the fewest old ones, so that old and new together are level:
+
+| Cell | Old 800 | New | Together | Fresh scenes in the census | Listed | Left for a top-up | Expected short |
+|---|---|---|---|---|---|---|---|
+| x0z0 | 87 | 20 | 107 | 718 | 60 | 634 | 0.0 |
+| x1z0 | 56 | 50 | 106 | 296 | 150 | 146 | 0.0 |
+| x2z0 | 67 | 39 | 106 | 265 | 117 | 148 | 0.4 |
+| x3z0 | 45 | 61 | 106 | 227 | 183 | 44 | 0.8 |
+| x0z1 | 61 | 46 | 107 | 523 | 138 | 385 | 0.1 |
+| x1z1 | 48 | 58 | 106 | 236 | 174 | 62 | 0.0 |
+| x2z1 | 51 | 55 | 106 | 237 | 165 | 72 | 0.5 |
+| x3z1 | 68 | 38 | 106 | 367 | 114 | 253 | 0.4 |
+| x0z2 | 82 | 24 | 106 | 775 | 72 | 634 | 0.4 |
+| x1z2 | 70 | 36 | 106 | 360 | 108 | 252 | 0.3 |
+| x2z2 | 35 | 71 | 106 | 221 | 213 | 8 | 0.8 |
+| x3z2 | 64 | 42 | 106 | 262 | 126 | 136 | 0.4 |
+| all | 734 | 540 | 1,274 | 4,487 | 1,620 | | 4.1 |
+
+- Three scenes are listed per wanted episode (`OVERSUPPLY`), a part's list being tried in order until each of its
+  cells is full. At the keep rates above the lists should give about 536 of the 540 cut episodes. Why 3: at 2.5
+  they give 529 and at 4 they give 538, but 4 lists every fresh scene of x3z0 and x2z2, so a part that ends short
+  there could not be topped up; at 3 every cell keeps more scenes than twice its expected shortfall needs (the
+  tightest is x2z2 with 8 left for 0.8 expected short).
+- The 60 nothing-ripe episodes: each part lists two scenes more than it needs (106 in all): the census's 13
+  scenes without a ripe truss first, then 93 from the two fullest cells (x0z2 69, x0z0 24), which the recorder
+  builds with nothing ripe (`hold`), as v5 did (it kept 64 of 64 of them). The parts hold 0 to 5 of them (part 15
+  none, part 0 four).
+- A part's list has 67 to 75 scenes for its 25 episodes; no scene is in two lists (1,726 listed in all).
+
+**Is the census's scene the scene the recorder builds?** The census (above) builds each fresh seed with rig
 `base` and no start change; the recorder uses rig `trio` on the old layout and the start change. The first 300
 recording seeds built the recorder's way (`base_grid.py --build-only --rig trio --layout-rig base
 --start-jitter-deg 3`, `outputs/v6/census_v6_jit`): the same trusses at the same places in 300 of 300, the same
