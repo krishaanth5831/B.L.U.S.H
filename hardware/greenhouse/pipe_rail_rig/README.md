@@ -164,11 +164,13 @@ post:
   | a plant part, the cut truss included, to the row-B post | 73 | 46 |
   | a plant part to the row-A post | 48 | 72 |
 
-  Nothing comes within 40 mm of either post in any episode. The lines along each post's side come out farther than
+  Nothing comes within 40 mm of either post: the arm in all 1,400 episodes, the plants in the 1,275 cut episodes
+  (in the 124 nothing-ripe ones nothing is cut or carried). The lines along each post's side come out farther than
   the line on its corner, so nothing went round behind the simulator's plate. The arm was measured at every frame.
-  The plants were measured at every third frame, and the 36 episodes that came within 100 mm then at every frame
-  (the table's numbers). The others stay beyond 100 mm at the sampled frames: to get within 40 mm between two
-  samples a fruit would have to move 60 mm in a frame, and the fastest seen (episode 953) is 39 mm.
+  The plants were measured at every third frame (76 / 54 / 48 / 73 mm, what the commands below print), and the 36
+  episodes that came within 100 mm then at every frame (the table's numbers). The others stay beyond 100 mm at the
+  sampled frames: to get within 40 mm between two samples a fruit would have to move 60 mm in a frame, and the
+  fastest seen (episode 953) is 39 mm.
 - Arm 2 is arm 1 turned half a turn, so the same holds for it at the open end's row-A post.
 - Not looked at: other layouts. Rolling the cart 145 mm toward the open end gives arm 1 the simulator's 370 mm and
   leaves arm 2 80 mm. A start pose that does not point left would mean another dataset.
@@ -183,7 +185,8 @@ O=../outputs/v6/endpost
 python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/arm_eps.json                 # old 800
 python whatif/camera_sweep_logs.py arm --every 1 --cams $L --episodes-json $O/new_arm_eps.json --sessions v6new
 python whatif/end_post_sketch.py ../hardware/greenhouse/pipe_rail_rig/renders/end_post_check.png   # the picture
-# plants, and the cut truss: "--shard 0/2" and "1/2" ran side by side; "--every 100000" = the first frame only
+# plants, and the cut truss: "--shard 0/2" and "1/2" ran side by side; "--every 100000" = the first frame only.
+# Every run also got --json and --episodes-json files in $O (the totals over several lines are tallied from them).
 python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams $L                    # + --sessions v6new
 python whatif/camera_sweep_logs.py plants --n 0 --every 100000 --cams $L               # + --sessions v6new
 # the end posts of a house 300 mm longer (ran 2026-11-27 22:42 to 2026-11-28 00:27): nine lines on its row-B post
@@ -200,6 +203,10 @@ python whatif/camera_sweep_logs.py plants --n 0 --every 3 --cams=$C,$W,$A       
 **Looked at once, not a repo command:** the string rails (underside 520 mm above the arm base, along both row
 lines). Over all 1,400 episodes, with the arm's parts as bounding boxes, the highest top under the row-B rail is
 478 mm and under the row-A rail 451 mm: at least 42 and 69 mm of air. The cut truss hangs below the hand.
+Also one-offs: the every-frame run of the 36 nearest episodes against the longer house's posts (a small driver
+around `plants --every 1`; its output is `outputs/v6/endpost/w2_every_frame.log`), and every count above that takes
+several lines together (50 / 53, 123 / 115, 380 / 264, 207 / 158, 94 / 65): the commands print one count per line,
+the totals are tallied from their `--json` and `--episodes-json` files.
 
 **Not checked:**
 - How much the cameras shake. A beam-formula estimate gives a first sway near 22 Hz for the M12 rod on this boom; an
